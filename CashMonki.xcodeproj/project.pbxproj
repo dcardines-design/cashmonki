@@ -1,0 +1,738 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		CB8D47312EBB475A00760A39 /* Lottie in Frameworks */ = {isa = PBXBuildFile; productRef = CB8D47302EBB475A00760A39 /* Lottie */; };
+		CBCAC3B52EB21602002CB3B1 /* FirebaseAuth in Frameworks */ = {isa = PBXBuildFile; productRef = CBCAC3B42EB21602002CB3B1 /* FirebaseAuth */; };
+		CBCAC3B72EB21602002CB3B1 /* FirebaseCore in Frameworks */ = {isa = PBXBuildFile; productRef = CBCAC3B62EB21602002CB3B1 /* FirebaseCore */; };
+		CBCAC3B92EB21602002CB3B1 /* FirebaseFirestore in Frameworks */ = {isa = PBXBuildFile; productRef = CBCAC3B82EB21602002CB3B1 /* FirebaseFirestore */; };
+		CBCAC3BC2EB21667002CB3B1 /* GoogleSignIn in Frameworks */ = {isa = PBXBuildFile; productRef = CBCAC3BB2EB21667002CB3B1 /* GoogleSignIn */; };
+		CBCAC3BE2EB21667002CB3B1 /* GoogleSignInSwift in Frameworks */ = {isa = PBXBuildFile; productRef = CBCAC3BD2EB21667002CB3B1 /* GoogleSignInSwift */; };
+		CBCAC3C12EB216BC002CB3B1 /* RevenueCat in Frameworks */ = {isa = PBXBuildFile; productRef = CBCAC3C02EB216BC002CB3B1 /* RevenueCat */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		CB02A6442E69FAE300B15F44 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = CB02A6282E69FAE000B15F44 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = CB02A62F2E69FAE000B15F44;
+			remoteInfo = "Cashooya Playground";
+		};
+		CB02A64E2E69FAE300B15F44 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = CB02A6282E69FAE000B15F44 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = CB02A62F2E69FAE000B15F44;
+			remoteInfo = "Cashooya Playground";
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		CB02A6302E69FAE000B15F44 /* CashMonki.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = CashMonki.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		CB02A6432E69FAE300B15F44 /* CashMonkiTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = CashMonkiTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		CB02A64D2E69FAE300B15F44 /* CashMonkiUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = CashMonkiUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		CBB5CC662E6F0DF4001B5E7B /* Exceptions for "CashMonki" folder in "CashMonkiTests" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				"DesignSystem/OverusedGrotesk-Bold.ttf",
+				"DesignSystem/OverusedGrotesk-Medium.ttf",
+				"DesignSystem/OverusedGrotesk-Roman.ttf",
+				"DesignSystem/OverusedGrotesk-SemiBold.ttf",
+			);
+			target = CB02A6422E69FAE300B15F44 /* CashMonkiTests */;
+		};
+		CBB5CC672E6F0DF4001B5E7B /* Exceptions for "CashMonki" folder in "CashMonkiUITests" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				"DesignSystem/OverusedGrotesk-Bold.ttf",
+				"DesignSystem/OverusedGrotesk-Medium.ttf",
+				"DesignSystem/OverusedGrotesk-Roman.ttf",
+				"DesignSystem/OverusedGrotesk-SemiBold.ttf",
+			);
+			target = CB02A64C2E69FAE300B15F44 /* CashMonkiUITests */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
+/* Begin PBXFileSystemSynchronizedRootGroup section */
+		CB02A6322E69FAE000B15F44 /* CashMonki */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				CBB5CC662E6F0DF4001B5E7B /* Exceptions for "CashMonki" folder in "CashMonkiTests" target */,
+				CBB5CC672E6F0DF4001B5E7B /* Exceptions for "CashMonki" folder in "CashMonkiUITests" target */,
+			);
+			path = CashMonki;
+			sourceTree = "<group>";
+		};
+		CB02A6462E69FAE300B15F44 /* Cashooya PlaygroundTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = "Cashooya PlaygroundTests";
+			sourceTree = "<group>";
+		};
+		CB02A6502E69FAE300B15F44 /* Cashooya PlaygroundUITests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = "Cashooya PlaygroundUITests";
+			sourceTree = "<group>";
+		};
+/* End PBXFileSystemSynchronizedRootGroup section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		CB02A62D2E69FAE000B15F44 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				CBCAC3BE2EB21667002CB3B1 /* GoogleSignInSwift in Frameworks */,
+				CB8D47312EBB475A00760A39 /* Lottie in Frameworks */,
+				CBCAC3B72EB21602002CB3B1 /* FirebaseCore in Frameworks */,
+				CBCAC3C12EB216BC002CB3B1 /* RevenueCat in Frameworks */,
+				CBCAC3BC2EB21667002CB3B1 /* GoogleSignIn in Frameworks */,
+				CBCAC3B52EB21602002CB3B1 /* FirebaseAuth in Frameworks */,
+				CBCAC3B92EB21602002CB3B1 /* FirebaseFirestore in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		CB02A6402E69FAE300B15F44 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		CB02A64A2E69FAE300B15F44 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		CB02A6272E69FAE000B15F44 = {
+			isa = PBXGroup;
+			children = (
+				CB02A6322E69FAE000B15F44 /* CashMonki */,
+				CB02A6462E69FAE300B15F44 /* Cashooya PlaygroundTests */,
+				CB02A6502E69FAE300B15F44 /* Cashooya PlaygroundUITests */,
+				CB02A6312E69FAE000B15F44 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		CB02A6312E69FAE000B15F44 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				CB02A6302E69FAE000B15F44 /* CashMonki.app */,
+				CB02A6432E69FAE300B15F44 /* CashMonkiTests.xctest */,
+				CB02A64D2E69FAE300B15F44 /* CashMonkiUITests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		CB02A62F2E69FAE000B15F44 /* CashMonki */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = CB02A6572E69FAE300B15F44 /* Build configuration list for PBXNativeTarget "CashMonki" */;
+			buildPhases = (
+				CB02A62C2E69FAE000B15F44 /* Sources */,
+				CB02A62D2E69FAE000B15F44 /* Frameworks */,
+				CB02A62E2E69FAE000B15F44 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				CB02A6322E69FAE000B15F44 /* CashMonki */,
+			);
+			name = CashMonki;
+			packageProductDependencies = (
+				CBCAC3B42EB21602002CB3B1 /* FirebaseAuth */,
+				CBCAC3B62EB21602002CB3B1 /* FirebaseCore */,
+				CBCAC3B82EB21602002CB3B1 /* FirebaseFirestore */,
+				CBCAC3BB2EB21667002CB3B1 /* GoogleSignIn */,
+				CBCAC3BD2EB21667002CB3B1 /* GoogleSignInSwift */,
+				CBCAC3C02EB216BC002CB3B1 /* RevenueCat */,
+				CB8D47302EBB475A00760A39 /* Lottie */,
+			);
+			productName = "Cashooya Playground";
+			productReference = CB02A6302E69FAE000B15F44 /* CashMonki.app */;
+			productType = "com.apple.product-type.application";
+		};
+		CB02A6422E69FAE300B15F44 /* CashMonkiTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = CB02A65A2E69FAE300B15F44 /* Build configuration list for PBXNativeTarget "CashMonkiTests" */;
+			buildPhases = (
+				CB02A63F2E69FAE300B15F44 /* Sources */,
+				CB02A6402E69FAE300B15F44 /* Frameworks */,
+				CB02A6412E69FAE300B15F44 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				CB02A6452E69FAE300B15F44 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				CB02A6462E69FAE300B15F44 /* Cashooya PlaygroundTests */,
+			);
+			name = CashMonkiTests;
+			packageProductDependencies = (
+			);
+			productName = "Cashooya PlaygroundTests";
+			productReference = CB02A6432E69FAE300B15F44 /* CashMonkiTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		CB02A64C2E69FAE300B15F44 /* CashMonkiUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = CB02A65D2E69FAE300B15F44 /* Build configuration list for PBXNativeTarget "CashMonkiUITests" */;
+			buildPhases = (
+				CB02A6492E69FAE300B15F44 /* Sources */,
+				CB02A64A2E69FAE300B15F44 /* Frameworks */,
+				CB02A64B2E69FAE300B15F44 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				CB02A64F2E69FAE300B15F44 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				CB02A6502E69FAE300B15F44 /* Cashooya PlaygroundUITests */,
+			);
+			name = CashMonkiUITests;
+			packageProductDependencies = (
+			);
+			productName = "Cashooya PlaygroundUITests";
+			productReference = CB02A64D2E69FAE300B15F44 /* CashMonkiUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		CB02A6282E69FAE000B15F44 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 1600;
+				LastUpgradeCheck = 1600;
+				TargetAttributes = {
+					CB02A62F2E69FAE000B15F44 = {
+						CreatedOnToolsVersion = 16.0;
+					};
+					CB02A6422E69FAE300B15F44 = {
+						CreatedOnToolsVersion = 16.0;
+						TestTargetID = CB02A62F2E69FAE000B15F44;
+					};
+					CB02A64C2E69FAE300B15F44 = {
+						CreatedOnToolsVersion = 16.0;
+						TestTargetID = CB02A62F2E69FAE000B15F44;
+					};
+				};
+			};
+			buildConfigurationList = CB02A62B2E69FAE000B15F44 /* Build configuration list for PBXProject "CashMonki" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = CB02A6272E69FAE000B15F44;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				CBCAC3B32EB21602002CB3B1 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */,
+				CBCAC3BA2EB21667002CB3B1 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */,
+				CBCAC3BF2EB216BC002CB3B1 /* XCRemoteSwiftPackageReference "purchases-ios" */,
+				CB8D472F2EBB475A00760A39 /* XCRemoteSwiftPackageReference "lottie-ios" */,
+			);
+			preferredProjectObjectVersion = 77;
+			productRefGroup = CB02A6312E69FAE000B15F44 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				CB02A62F2E69FAE000B15F44 /* CashMonki */,
+				CB02A6422E69FAE300B15F44 /* CashMonkiTests */,
+				CB02A64C2E69FAE300B15F44 /* CashMonkiUITests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		CB02A62E2E69FAE000B15F44 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		CB02A6412E69FAE300B15F44 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		CB02A64B2E69FAE300B15F44 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		CB02A62C2E69FAE000B15F44 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		CB02A63F2E69FAE300B15F44 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		CB02A6492E69FAE300B15F44 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		CB02A6452E69FAE300B15F44 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = CB02A62F2E69FAE000B15F44 /* CashMonki */;
+			targetProxy = CB02A6442E69FAE300B15F44 /* PBXContainerItemProxy */;
+		};
+		CB02A64F2E69FAE300B15F44 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = CB02A62F2E69FAE000B15F44 /* CashMonki */;
+			targetProxy = CB02A64E2E69FAE300B15F44 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		CB02A6552E69FAE300B15F44 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEAD_CODE_STRIPPING = YES;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		CB02A6562E69FAE300B15F44 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEAD_CODE_STRIPPING = YES;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				SWIFT_COMPILATION_MODE = wholemodule;
+			};
+			name = Release;
+		};
+		CB02A6582E69FAE300B15F44 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = CashMonki/CashMonki.entitlements;
+				CODE_SIGN_INJECT_BASE_ENTITLEMENTS = NO;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEAD_CODE_STRIPPING = YES;
+				DEVELOPMENT_ASSET_PATHS = "\"CashMonki/Preview Content\"";
+				DEVELOPMENT_TEAM = 8Q3Z8WY5D9;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = "Cashooya-Playground-Info.plist";
+				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
+				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
+				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
+				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphonesimulator*]" = YES;
+				"INFOPLIST_KEY_UILaunchScreen_Generation[sdk=iphoneos*]" = YES;
+				"INFOPLIST_KEY_UILaunchScreen_Generation[sdk=iphonesimulator*]" = YES;
+				"INFOPLIST_KEY_UIStatusBarStyle[sdk=iphoneos*]" = UIStatusBarStyleDefault;
+				"INFOPLIST_KEY_UIStatusBarStyle[sdk=iphonesimulator*]" = UIStatusBarStyleDefault;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
+				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.dante.cashmonki;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = auto;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx xros xrsimulator";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2,7";
+				XROS_DEPLOYMENT_TARGET = 2.0;
+			};
+			name = Debug;
+		};
+		CB02A6592E69FAE300B15F44 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = CashMonki/CashMonki.entitlements;
+				CODE_SIGN_INJECT_BASE_ENTITLEMENTS = NO;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEAD_CODE_STRIPPING = YES;
+				DEVELOPMENT_ASSET_PATHS = "\"CashMonki/Preview Content\"";
+				DEVELOPMENT_TEAM = 8Q3Z8WY5D9;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = "Cashooya-Playground-Info.plist";
+				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
+				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
+				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
+				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphonesimulator*]" = YES;
+				"INFOPLIST_KEY_UILaunchScreen_Generation[sdk=iphoneos*]" = YES;
+				"INFOPLIST_KEY_UILaunchScreen_Generation[sdk=iphonesimulator*]" = YES;
+				"INFOPLIST_KEY_UIStatusBarStyle[sdk=iphoneos*]" = UIStatusBarStyleDefault;
+				"INFOPLIST_KEY_UIStatusBarStyle[sdk=iphonesimulator*]" = UIStatusBarStyleDefault;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
+				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.dante.cashmonki;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = auto;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx xros xrsimulator";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2,7";
+				XROS_DEPLOYMENT_TARGET = 2.0;
+			};
+			name = Release;
+		};
+		CB02A65B2E69FAE300B15F44 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEAD_CODE_STRIPPING = YES;
+				DEVELOPMENT_TEAM = 8Q3Z8WY5D9;
+				GENERATE_INFOPLIST_FILE = NO;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "Rosebud.Cashooya-PlaygroundTests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = auto;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx xros xrsimulator";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2,7";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Cashooya Playground.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Cashooya Playground";
+				XROS_DEPLOYMENT_TARGET = 2.0;
+			};
+			name = Debug;
+		};
+		CB02A65C2E69FAE300B15F44 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEAD_CODE_STRIPPING = YES;
+				DEVELOPMENT_TEAM = 8Q3Z8WY5D9;
+				GENERATE_INFOPLIST_FILE = NO;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "Rosebud.Cashooya-PlaygroundTests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = auto;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx xros xrsimulator";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2,7";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Cashooya Playground.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Cashooya Playground";
+				XROS_DEPLOYMENT_TARGET = 2.0;
+			};
+			name = Release;
+		};
+		CB02A65E2E69FAE300B15F44 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEAD_CODE_STRIPPING = YES;
+				DEVELOPMENT_TEAM = 8Q3Z8WY5D9;
+				GENERATE_INFOPLIST_FILE = NO;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "Rosebud.Cashooya-PlaygroundUITests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = auto;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx xros xrsimulator";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2,7";
+				TEST_TARGET_NAME = "Cashooya Playground";
+				XROS_DEPLOYMENT_TARGET = 2.0;
+			};
+			name = Debug;
+		};
+		CB02A65F2E69FAE300B15F44 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEAD_CODE_STRIPPING = YES;
+				DEVELOPMENT_TEAM = 8Q3Z8WY5D9;
+				GENERATE_INFOPLIST_FILE = NO;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "Rosebud.Cashooya-PlaygroundUITests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = auto;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx xros xrsimulator";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2,7";
+				TEST_TARGET_NAME = "Cashooya Playground";
+				XROS_DEPLOYMENT_TARGET = 2.0;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		CB02A62B2E69FAE000B15F44 /* Build configuration list for PBXProject "CashMonki" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				CB02A6552E69FAE300B15F44 /* Debug */,
+				CB02A6562E69FAE300B15F44 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		CB02A6572E69FAE300B15F44 /* Build configuration list for PBXNativeTarget "CashMonki" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				CB02A6582E69FAE300B15F44 /* Debug */,
+				CB02A6592E69FAE300B15F44 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		CB02A65A2E69FAE300B15F44 /* Build configuration list for PBXNativeTarget "CashMonkiTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				CB02A65B2E69FAE300B15F44 /* Debug */,
+				CB02A65C2E69FAE300B15F44 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		CB02A65D2E69FAE300B15F44 /* Build configuration list for PBXNativeTarget "CashMonkiUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				CB02A65E2E69FAE300B15F44 /* Debug */,
+				CB02A65F2E69FAE300B15F44 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		CB8D472F2EBB475A00760A39 /* XCRemoteSwiftPackageReference "lottie-ios" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/airbnb/lottie-ios";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 4.5.2;
+			};
+		};
+		CBCAC3B32EB21602002CB3B1 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/firebase/firebase-ios-sdk.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 11.0.0;
+			};
+		};
+		CBCAC3BA2EB21667002CB3B1 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/google/GoogleSignIn-iOS";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 8.0.0;
+			};
+		};
+		CBCAC3BF2EB216BC002CB3B1 /* XCRemoteSwiftPackageReference "purchases-ios" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/RevenueCat/purchases-ios.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 5.0.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		CB8D47302EBB475A00760A39 /* Lottie */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = CB8D472F2EBB475A00760A39 /* XCRemoteSwiftPackageReference "lottie-ios" */;
+			productName = Lottie;
+		};
+		CBCAC3B42EB21602002CB3B1 /* FirebaseAuth */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = CBCAC3B32EB21602002CB3B1 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseAuth;
+		};
+		CBCAC3B62EB21602002CB3B1 /* FirebaseCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = CBCAC3B32EB21602002CB3B1 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseCore;
+		};
+		CBCAC3B82EB21602002CB3B1 /* FirebaseFirestore */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = CBCAC3B32EB21602002CB3B1 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseFirestore;
+		};
+		CBCAC3BB2EB21667002CB3B1 /* GoogleSignIn */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = CBCAC3BA2EB21667002CB3B1 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */;
+			productName = GoogleSignIn;
+		};
+		CBCAC3BD2EB21667002CB3B1 /* GoogleSignInSwift */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = CBCAC3BA2EB21667002CB3B1 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */;
+			productName = GoogleSignInSwift;
+		};
+		CBCAC3C02EB216BC002CB3B1 /* RevenueCat */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = CBCAC3BF2EB216BC002CB3B1 /* XCRemoteSwiftPackageReference "purchases-ios" */;
+			productName = RevenueCat;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = CB02A6282E69FAE000B15F44 /* Project object */;
+}
