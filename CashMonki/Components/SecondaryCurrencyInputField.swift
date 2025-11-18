@@ -69,7 +69,7 @@ struct SecondaryCurrencyInputField: View {
                 isPresented: $showingPicker
             )
             .presentationDetents([.fraction(0.98)])
-            .presentationDragIndicator(.visible)
+            .presentationDragIndicator(.hidden)
         }
     }
     

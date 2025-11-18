@@ -159,7 +159,7 @@ struct EditTransactionSheet: View {
                 isPresented: $showingCurrencyPicker
             )
             .presentationDetents([.fraction(0.98)])
-            .presentationDragIndicator(.visible)
+            .presentationDragIndicator(.hidden)
         }
         .appAlert(
             title: "Delete Transaction",
