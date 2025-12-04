@@ -1,0 +1,1102 @@
+//
+//  HomePageCharts.swift
+//  Cashooya Playground
+//
+//  Created by Dante Cardines III on 9/5/25.
+//
+
+import SwiftUI
+
+// MARK: - Chart Helper Functions
+
+fileprivate func formatLineChartValue(_ value: Double) -> String {
+    let rounded = roundToNearestFiveOrTen(abs(value))
+    if rounded >= 1000 {
+        let roundedThousand = roundToNearestFiveOrTen(rounded / 1000)
+        return "\(Int(roundedThousand))k"
+    } else {
+        return "\(Int(rounded))"
+    }
+}
+
+// Format exact amounts for data point display (no abbreviation)
+fileprivate func formatExactAmount(_ value: Double) -> String {
+    let primaryCurrency = CurrencyPreferences.shared.primaryCurrency
+    let formatter = NumberFormatter()
+    formatter.numberStyle = .decimal
+    formatter.minimumFractionDigits = 0
+    formatter.maximumFractionDigits = 2
+    formatter.groupingSeparator = ","
+    
+    let formattedAmount = formatter.string(from: NSNumber(value: abs(value))) ?? String(format: "%.2f", abs(value))
+    return "\(primaryCurrency.symbol)\(formattedAmount)"
+}
+
+// Format date for legend (like "Nov 11" or "3PM" for day view)
+fileprivate func formatLegendDate(_ date: Date, rangeSelection: HomePage.RangeSelection) -> String {
+    let formatter = DateFormatter()
+    switch rangeSelection {
+    case .day:
+        formatter.dateFormat = "ha" // Shows "3PM", "11AM", etc.
+    case .week, .month, .quarter:
+        formatter.dateFormat = "MMM d" // Shows "Nov 11", etc.
+    }
+    return formatter.string(from: date)
+}
+
+fileprivate func roundToNearestFiveOrTen(_ value: Double) -> Double {
+    if value >= 100 {
+        return round(value / 10) * 10
+    } else if value >= 10 {
+        return round(value / 5) * 5
+    } else {
+        return round(value)
+    }
+}
+
+// Normalize dates for chart plotting based on range selection
+fileprivate func normalizeDateForChart(_ date: Date, rangeSelection: HomePage.RangeSelection) -> Date {
+    let calendar = Calendar.current
+    
+    switch rangeSelection {
+    case .day:
+        // For day view, strip time components and use only date
+        return calendar.startOfDay(for: date)
+    case .week, .month, .quarter:
+        // For other views, keep the full timestamp for granular plotting
+        return date
+    }
+}
+
+// Enhanced data processing for smooth dragging
+fileprivate func createStepwiseRunningTotals(
+    transactions: [Txn],
+    startDate: Date,
+    endDate: Date,
+    chartFilter: HomePage.ChartFilter,
+    rangeSelection: HomePage.RangeSelection
+) -> [(date: Date, amount: Double)] {
+    var dataPoints: [(date: Date, amount: Double)] = []
+    var runningTotal: Double = 0
+    
+    // Add starting point with zero
+    dataPoints.append((date: startDate, amount: 0))
+    
+    // Process each transaction and create diagonal transitions
+    for (_, transaction) in transactions.enumerated() {
+        let transactionImpact = getTransactionImpact(transaction, chartFilter: chartFilter)
+        let previousTotal = runningTotal
+        runningTotal += transactionImpact
+        
+        // Normalize the transaction date for chart plotting
+        let normalizedDate = normalizeDateForChart(transaction.date, rangeSelection: rangeSelection)
+        
+        // Add a point just before the transaction (at previous amount) - only for non-day views
+        if rangeSelection != .day {
+            let preTransactionTime = normalizedDate.addingTimeInterval(-60) // 1 minute before
+            dataPoints.append((date: preTransactionTime, amount: previousTotal))
+        }
+        
+        // Add the transaction point (creates diagonal line to new amount)
+        dataPoints.append((date: normalizedDate, amount: runningTotal))
+        
+        // Create additional "hold" points for smooth dragging - skip for day view to avoid time-based wonky lines
+        if rangeSelection != .day {
+            // This ensures the previous value is maintained until the next transaction
+            let nextTransactionDate = getNextTransactionDate(after: transaction.date, in: transactions)
+            if let nextDate = nextTransactionDate, nextDate <= endDate {
+                let timeInterval = nextDate.timeIntervalSince(transaction.date)
+                let steps = min(20, max(2, Int(timeInterval / 3600))) // More points for longer gaps
+                
+                for i in 1..<steps {
+                    let interpolatedDate = transaction.date.addingTimeInterval(timeInterval * Double(i) / Double(steps))
+                    if interpolatedDate <= endDate {
+                        dataPoints.append((date: interpolatedDate, amount: runningTotal)) // Previous value maintained
+                    }
+                }
+            }
+        }
+    }
+    
+    // Add final point at current time with last known value
+    if let lastAmount = dataPoints.last?.amount {
+        dataPoints.append((date: endDate, amount: lastAmount))
+    }
+    
+    return dataPoints
+}
+
+fileprivate func getTransactionImpact(_ transaction: Txn, chartFilter: HomePage.ChartFilter) -> Double {
+    // Convert to primary currency
+    let primaryCurrency = CurrencyPreferences.shared.primaryCurrency
+    let convertedAmount: Double
+    
+    if transaction.primaryCurrency == primaryCurrency {
+        convertedAmount = transaction.amount
+    } else {
+        let rateManager = CurrencyRateManager.shared
+        convertedAmount = rateManager.convertAmount(
+            transaction.amount,
+            from: transaction.primaryCurrency,
+            to: primaryCurrency
+        )
+    }
+    
+    // Apply chart filter logic
+    switch chartFilter {
+    case .balance:
+        return convertedAmount
+    case .income:
+        return convertedAmount > 0 ? convertedAmount : 0
+    case .expense:
+        return convertedAmount < 0 ? abs(convertedAmount) : 0
+    }
+}
+
+fileprivate func getNextTransactionDate(after date: Date, in transactions: [Txn]) -> Date? {
+    return transactions.first { $0.date > date }?.date
+}
+
+// Calculate running total at any specific time (previous value logic)
+fileprivate func calculateRunningTotalAtTime(
+    targetTime: Date,
+    transactions: [Txn],
+    startDate: Date,
+    chartFilter: HomePage.ChartFilter,
+    rangeSelection: HomePage.RangeSelection
+) -> Double {
+    var runningTotal: Double = 0
+    
+    // Process all transactions up to and including the target time
+    let normalizedTargetTime = normalizeDateForChart(targetTime, rangeSelection: rangeSelection)
+    
+    for transaction in transactions {
+        let normalizedTransactionDate = normalizeDateForChart(transaction.date, rangeSelection: rangeSelection)
+        
+        if normalizedTransactionDate <= normalizedTargetTime {
+            let impact = getTransactionImpact(transaction, chartFilter: chartFilter)
+            runningTotal += impact
+        } else {
+            break // Transactions are sorted, so we can stop here
+        }
+    }
+    
+    return runningTotal
+}
+
+// Simple struct for mapped transaction data (since Txn.date is immutable)
+fileprivate struct MappedTransactionData {
+    let originalTransaction: Txn
+    let mappedDate: Date
+    let amount: Double
+}
+
+// Map previous period transactions to current period timeline for comparison
+fileprivate func mapPreviousPeriodToCurrentTimeline(
+    previousTransactions: [Txn],
+    previousPeriodStart: Date,
+    previousPeriodEnd: Date,
+    currentPeriodStart: Date,
+    currentPeriodEnd: Date,
+    chartFilter: HomePage.ChartFilter
+) -> [MappedTransactionData] {
+    let previousDuration = previousPeriodEnd.timeIntervalSince(previousPeriodStart)
+    let currentDuration = currentPeriodEnd.timeIntervalSince(currentPeriodStart)
+    
+    return previousTransactions.map { transaction in
+        // Calculate relative position in previous period (0.0 to 1.0)
+        let relativePosition = transaction.date.timeIntervalSince(previousPeriodStart) / previousDuration
+        
+        // Map to equivalent position in current period
+        let mappedDate = currentPeriodStart.addingTimeInterval(currentDuration * relativePosition)
+        
+        // Get transaction impact for the chart filter
+        let impact = getTransactionImpact(transaction, chartFilter: chartFilter)
+        
+        return MappedTransactionData(
+            originalTransaction: transaction,
+            mappedDate: mappedDate,
+            amount: impact
+        )
+    }
+}
+
+// Helper function to find previous period value at a specific time
+fileprivate func findPreviousPeriodValue(
+    at targetTime: Date,
+    in previousPeriodData: [(date: Date, amount: Double)]
+) -> Double {
+    var previousValue: Double = 0
+    
+    for (i, dataPoint) in previousPeriodData.enumerated() {
+        if dataPoint.date >= targetTime {
+            if i > 0 {
+                // Use previous data point value (step-wise behavior)
+                previousValue = previousPeriodData[i - 1].amount
+            } else {
+                previousValue = dataPoint.amount
+            }
+            break
+        } else if i == previousPeriodData.count - 1 {
+            // Use last data point if target time is beyond all data
+            previousValue = dataPoint.amount
+        }
+    }
+    
+    return previousValue
+}
+
+// Create step-wise running totals from mapped transaction data
+fileprivate func createStepwiseRunningTotalsFromMapped(
+    mappedData: [MappedTransactionData],
+    startDate: Date,
+    endDate: Date
+) -> [(date: Date, amount: Double)] {
+    var dataPoints: [(date: Date, amount: Double)] = []
+    var runningTotal: Double = 0
+    
+    // Add starting point with zero
+    dataPoints.append((date: startDate, amount: 0))
+    
+    // Sort mapped data by mapped date
+    let sortedData = mappedData.sorted { $0.mappedDate < $1.mappedDate }
+    
+    // Process each mapped transaction and create diagonal transitions
+    for (index, mappedTransaction) in sortedData.enumerated() {
+        let previousTotal = runningTotal
+        runningTotal += mappedTransaction.amount
+        
+        // Add a point just before the transaction (at previous amount)
+        let preTransactionTime = mappedTransaction.mappedDate.addingTimeInterval(-60) // 1 minute before
+        dataPoints.append((date: preTransactionTime, amount: previousTotal))
+        
+        // Add the transaction point (creates diagonal line to new amount)
+        dataPoints.append((date: mappedTransaction.mappedDate, amount: runningTotal))
+        
+        // Create additional "hold" points for smooth dragging
+        let nextTransactionDate = index < sortedData.count - 1 ? sortedData[index + 1].mappedDate : endDate
+        if nextTransactionDate <= endDate {
+            let timeInterval = nextTransactionDate.timeIntervalSince(mappedTransaction.mappedDate)
+            let steps = min(20, max(2, Int(timeInterval / 3600))) // More points for longer gaps
+            
+            for i in 1..<steps {
+                let interpolatedDate = mappedTransaction.mappedDate.addingTimeInterval(timeInterval * Double(i) / Double(steps))
+                if interpolatedDate <= endDate {
+                    dataPoints.append((date: interpolatedDate, amount: runningTotal)) // Previous value maintained
+                }
+            }
+        }
+    }
+    
+    // Add final point at current time with last known value
+    if let lastAmount = dataPoints.last?.amount {
+        dataPoints.append((date: endDate, amount: lastAmount))
+    }
+    
+    return dataPoints
+}
+
+// Straight lines with smooth state transitions
+
+// MARK: - HomePage Chart Extensions
+
+extension HomePage {
+    
+    var comparisonChart: some View {
+        GeometryReader { geometry in
+            let _ = refreshTrigger // Force re-evaluation when refreshTrigger changes
+            let availableHeight = geometry.size.height
+            let labelHeight: CGFloat = 18 // Height for labels
+            let labelSpacing: CGFloat = 6 // Spacing below bars
+            let topMargin: CGFloat = 0 // Small margin from top of content area
+            let bottomMargin: CGFloat = 4 // Small margin above labels
+            
+            // Calculate usable height: total - top margin - label area - bottom margin
+            let maxBarHeight = availableHeight - topMargin - labelHeight - labelSpacing - bottomMargin
+            
+            HStack(alignment: .bottom, spacing: 12) {
+                // Last period bar
+                VStack(alignment: .center, spacing: 0) {
+                    Spacer()
+                    
+                    // Bar aligned to bottom
+                    ZStack {
+                        let maxTotalValue = max(abs(cachedCurrentPeriodTotal), abs(cachedPreviousPeriodTotal), 1)
+                        let heightRatio = abs(cachedPreviousPeriodTotal) / maxTotalValue
+                        let calculatedHeight = heightRatio * maxBarHeight
+                        let finalHeight = max(40, calculatedHeight)
+                        
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(AppColors.chartPreviousPeriod)
+                            .frame(height: finalHeight)
+                            .animation(.spring(response: 0.4, dampingFraction: 0.9, blendDuration: 0.1), value: cachedPreviousPeriodTotal)
+                        
+                        // Amount text on the bar
+                        Text(currencyPrefs.formatPrimaryAmount(cachedPreviousPeriodTotal))
+                            .font(AppFonts.overusedGroteskMedium(size: 14))
+                            .foregroundStyle(.white)
+                            .animation(.easeInOut(duration: 0.3).delay(0.05), value: cachedPreviousPeriodTotal)
+                    }
+                    
+                    // Label at the bottom
+                    Text(previousPeriodLabel)
+                        .font(AppFonts.overusedGroteskMedium(size: 12))
+                        .foregroundStyle(.secondary)
+                        .padding(.top, 6)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+                
+                // Current period bar  
+                VStack(alignment: .center, spacing: 0) {
+                    Spacer()
+                    
+                    // Bar aligned to bottom
+                    ZStack {
+                        let maxTotalValue = max(abs(cachedCurrentPeriodTotal), abs(cachedPreviousPeriodTotal), 1)
+                        let heightRatio = abs(cachedCurrentPeriodTotal) / maxTotalValue
+                        let calculatedHeight = heightRatio * maxBarHeight
+                        let finalHeight = max(40, calculatedHeight)
+                        
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(AppColors.primary)
+                            .frame(height: finalHeight)
+                            .animation(.spring(response: 0.4, dampingFraction: 0.9, blendDuration: 0.1).delay(0.05), value: cachedCurrentPeriodTotal)
+                        
+                        // Amount text on the bar
+                        Text(currencyPrefs.formatPrimaryAmount(cachedCurrentPeriodTotal))
+                            .font(AppFonts.overusedGroteskMedium(size: 14))
+                            .foregroundStyle(.white)
+                            .animation(.easeInOut(duration: 0.3).delay(0.1), value: cachedCurrentPeriodTotal)
+                    }
+                    
+                    // Label at the bottom
+                    Text(currentPeriodLabel)
+                        .font(AppFonts.overusedGroteskMedium(size: 12))
+                        .foregroundStyle(.secondary)
+                        .padding(.top, 6)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+            }
+            .padding(.top, topMargin)
+            .padding(.bottom, bottomMargin)
+            .padding(.horizontal, 8) // Add side margins to match top margin
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    
+    var lineChart: some View {
+        VStack(spacing: 16) {
+            let _ = refreshTrigger // Force re-evaluation when refreshTrigger changes
+            
+            // Calculate enhanced data for smooth dragging with previous value logic
+            let transactions = accountManager.filteredTransactions
+            let cal = Calendar.current
+            let now = Date()
+            
+            // Get the actual start and end dates for the period
+            let (periodStartDate, periodEndDate) = {
+                    switch rangeSelection {
+                    case .day:
+                        let start = cal.startOfDay(for: now)
+                        let end = cal.dateInterval(of: .day, for: now)?.end ?? now
+                        return (start, end)
+                    case .week:
+                        let start = cal.dateInterval(of: .weekOfYear, for: now)?.start ?? now
+                        let end = cal.dateInterval(of: .weekOfYear, for: now)?.end ?? now
+                        return (start, end)
+                    case .month:
+                        let start = cal.dateInterval(of: .month, for: now)?.start ?? now
+                        let end = cal.dateInterval(of: .month, for: now)?.end ?? now
+                        return (start, end)
+                    case .quarter:
+                        let currentMonth = cal.component(.month, from: now)
+                        let quarterStartMonth = ((currentMonth - 1) / 3) * 3 + 1
+                        let start = cal.date(from: DateComponents(year: cal.component(.year, from: now), month: quarterStartMonth, day: 1)) ?? now
+                        let quarterEndMonth = quarterStartMonth + 2
+                        let end = cal.date(from: DateComponents(year: cal.component(.year, from: now), month: quarterEndMonth + 1, day: 1))?.addingTimeInterval(-24*3600) ?? now
+                        return (start, end)
+                    }
+                }()
+            
+            // Enhanced data processing for smooth dragging with previous value logic
+            let currentPeriodTransactions = transactions.filter { txn in
+                txn.date >= periodStartDate && txn.date <= min(now, periodEndDate)
+            }.sorted { $0.date < $1.date }
+            
+            // Create step-wise running total data points for smooth dragging
+            let enhancedDataPoints = createStepwiseRunningTotals(
+                transactions: currentPeriodTransactions,
+                startDate: periodStartDate,
+                endDate: min(now, periodEndDate),
+                chartFilter: chartFilter,
+                rangeSelection: rangeSelection
+            )
+            
+            let currentPeriodData = enhancedDataPoints
+            
+            // Calculate previous period data for comparison
+            let (_, mappedPreviousData) = {
+                switch rangeSelection {
+                case .day:
+                    let prevStart = cal.date(byAdding: .day, value: -1, to: periodStartDate) ?? periodStartDate
+                    let prevEnd = cal.date(byAdding: .day, value: -1, to: periodEndDate) ?? periodEndDate
+                    let prevTransactions = transactions.filter { txn in
+                        txn.date >= prevStart && txn.date <= prevEnd
+                    }.sorted { $0.date < $1.date }
+                    let mapped = mapPreviousPeriodToCurrentTimeline(
+                        previousTransactions: prevTransactions,
+                        previousPeriodStart: prevStart,
+                        previousPeriodEnd: prevEnd,
+                        currentPeriodStart: periodStartDate,
+                        currentPeriodEnd: periodEndDate,
+                        chartFilter: chartFilter
+                    )
+                    return (prevTransactions, mapped)
+                case .week:
+                    let prevStart = cal.date(byAdding: .weekOfYear, value: -1, to: periodStartDate) ?? periodStartDate
+                    let prevEnd = cal.date(byAdding: .weekOfYear, value: -1, to: periodEndDate) ?? periodEndDate
+                    let prevTransactions = transactions.filter { txn in
+                        txn.date >= prevStart && txn.date <= prevEnd
+                    }.sorted { $0.date < $1.date }
+                    let mapped = mapPreviousPeriodToCurrentTimeline(
+                        previousTransactions: prevTransactions,
+                        previousPeriodStart: prevStart,
+                        previousPeriodEnd: prevEnd,
+                        currentPeriodStart: periodStartDate,
+                        currentPeriodEnd: periodEndDate,
+                        chartFilter: chartFilter
+                    )
+                    return (prevTransactions, mapped)
+                case .month:
+                    let prevStart = cal.date(byAdding: .month, value: -1, to: periodStartDate) ?? periodStartDate
+                    let prevEnd = cal.date(byAdding: .month, value: -1, to: periodEndDate) ?? periodEndDate
+                    let prevTransactions = transactions.filter { txn in
+                        txn.date >= prevStart && txn.date <= prevEnd
+                    }.sorted { $0.date < $1.date }
+                    let mapped = mapPreviousPeriodToCurrentTimeline(
+                        previousTransactions: prevTransactions,
+                        previousPeriodStart: prevStart,
+                        previousPeriodEnd: prevEnd,
+                        currentPeriodStart: periodStartDate,
+                        currentPeriodEnd: periodEndDate,
+                        chartFilter: chartFilter
+                    )
+                    return (prevTransactions, mapped)
+                case .quarter:
+                    let prevStart = cal.date(byAdding: .month, value: -3, to: periodStartDate) ?? periodStartDate
+                    let prevEnd = cal.date(byAdding: .month, value: -3, to: periodEndDate) ?? periodEndDate
+                    let prevTransactions = transactions.filter { txn in
+                        txn.date >= prevStart && txn.date <= prevEnd
+                    }.sorted { $0.date < $1.date }
+                    let mapped = mapPreviousPeriodToCurrentTimeline(
+                        previousTransactions: prevTransactions,
+                        previousPeriodStart: prevStart,
+                        previousPeriodEnd: prevEnd,
+                        currentPeriodStart: periodStartDate,
+                        currentPeriodEnd: periodEndDate,
+                        chartFilter: chartFilter
+                    )
+                    return (prevTransactions, mapped)
+                }
+            }()
+            
+            // Create step-wise running total data points for previous period
+            let previousPeriodData = createStepwiseRunningTotalsFromMapped(
+                mappedData: mappedPreviousData,
+                startDate: periodStartDate,
+                endDate: periodEndDate
+            )
+            
+            // Legend - Dynamic based on hover or current filter
+            HStack(spacing: 16) {
+                // Current period legend
+                HStack(spacing: 8) {
+                    Rectangle()
+                        .foregroundColor(.clear)
+                        .frame(width: 20, height: 6)
+                        .background(chartFilter == .income ? (AppColors.chartIncome2) : (AppColors.chartExpense1))
+                        .cornerRadius(200)
+                        .animation(.easeInOut(duration: 0.6), value: chartFilter)
+                    
+                    if let dragValue = selectedDragValue, let dragDate = selectedDragDate {
+                        // Show hovered data point with specific date
+                        HStack(alignment: .top, spacing: 4) {
+                            Text(formatExactAmount(dragValue))
+                                .font(Font.custom("Overused Grotesk", size: 12).weight(.medium))
+                                .multilineTextAlignment(.center)
+                                .foregroundColor(AppColors.foregroundPrimary)
+                            Text(formatLegendDate(dragDate, rangeSelection: rangeSelection))
+                                .font(Font.custom("Overused Grotesk", size: 12).weight(.medium))
+                                .multilineTextAlignment(.center)
+                                .foregroundColor(AppColors.foregroundSecondary)
+                        }
+                        .padding(0)
+                    } else if let selectedIndex = selectedDataPointIndex,
+                       selectedIndex < currentPeriodData.count {
+                        // Fallback to discrete data point selection
+                        let selectedData = currentPeriodData[selectedIndex]
+                        HStack(alignment: .top, spacing: 4) {
+                            Text(formatExactAmount(selectedData.amount))
+                                .font(Font.custom("Overused Grotesk", size: 12).weight(.medium))
+                                .multilineTextAlignment(.center)
+                                .foregroundColor(AppColors.foregroundPrimary)
+                            Text(formatLegendDate(selectedData.date, rangeSelection: rangeSelection))
+                                .font(Font.custom("Overused Grotesk", size: 12).weight(.medium))
+                                .multilineTextAlignment(.center)
+                                .foregroundColor(AppColors.foregroundSecondary)
+                        }
+                        .padding(0)
+                    } else {
+                        // Show current period label (Today, This Week, etc.)
+                        HStack(alignment: .top, spacing: 4) {
+                            Text(getCurrentFilteredTotal())
+                                .font(Font.custom("Overused Grotesk", size: 12).weight(.medium))
+                                .multilineTextAlignment(.center)
+                                .foregroundColor(AppColors.foregroundPrimary)
+                                .animation(.easeInOut(duration: 0.6), value: chartFilter)
+                                .animation(.easeInOut(duration: 0.6), value: rangeSelection)
+                            Text(rangeSelection == .day ? "Today" : currentPeriodLabel)
+                                .font(Font.custom("Overused Grotesk", size: 12).weight(.medium))
+                                .multilineTextAlignment(.center)
+                                .foregroundColor(AppColors.foregroundSecondary)
+                        }
+                        .padding(0)
+                    }
+                }
+                
+                // Previous period legend (positioned to the right with 16px spacing)
+                HStack(spacing: 8) {
+                    Rectangle()
+                        .foregroundColor(.clear)
+                        .frame(width: 20, height: 6)
+                        .background(Color(red: 0.86, green: 0.89, blue: 0.96))
+                        .cornerRadius(200)
+                    
+                    // Previous period legend data (dynamic based on hover)
+                    if let _ = selectedDragValue, let dragDate = selectedDragDate, previousPeriodData.count > 0 {
+                        // Calculate previous period value at the same time position
+                        let dragPos = selectedDragPosition ?? 0
+                        let targetTime = periodStartDate.addingTimeInterval((periodEndDate.timeIntervalSince(periodStartDate)) * dragPos)
+                        
+                        // Find corresponding previous period value
+                        let previousValue = findPreviousPeriodValue(at: targetTime, in: previousPeriodData)
+                        
+                        // CRITICAL FIX: Calculate equivalent date in previous period
+                        let periodDuration = periodEndDate.timeIntervalSince(periodStartDate)
+                        let previousPeriodStartDate = periodStartDate.addingTimeInterval(-periodDuration)
+                        let equivalentPreviousPeriodDate = previousPeriodStartDate.addingTimeInterval(dragDate.timeIntervalSince(periodStartDate))
+                        
+                        HStack(alignment: .top, spacing: 4) {
+                            Text(formatExactAmount(previousValue))
+                                .font(Font.custom("Overused Grotesk", size: 12).weight(.medium))
+                                .multilineTextAlignment(.center)
+                                .foregroundColor(AppColors.foregroundPrimary)
+                            Text(formatLegendDate(equivalentPreviousPeriodDate, rangeSelection: rangeSelection))
+                                .font(Font.custom("Overused Grotesk", size: 12).weight(.medium))
+                                .multilineTextAlignment(.center)
+                                .foregroundColor(AppColors.foregroundSecondary)
+                        }
+                        .padding(0)
+                    } else if let selectedIndex = selectedDataPointIndex,
+                       selectedIndex < currentPeriodData.count, previousPeriodData.count > 0 {
+                        // Fallback to discrete data point selection
+                        let selectedData = currentPeriodData[selectedIndex]
+                        let periodDuration = periodEndDate.timeIntervalSince(periodStartDate)
+                        let timeOffset = selectedData.date.timeIntervalSince(periodStartDate)
+                        let normalizedTime: Double = periodDuration > 0 ? timeOffset / periodDuration : 0
+                        let targetTime = periodStartDate.addingTimeInterval((periodEndDate.timeIntervalSince(periodStartDate)) * normalizedTime)
+                        
+                        // Find corresponding previous period value
+                        let previousValue = findPreviousPeriodValue(at: targetTime, in: previousPeriodData)
+                        
+                        // CRITICAL FIX: Calculate equivalent date in previous period for discrete selection
+                        let previousPeriodStartDate = periodStartDate.addingTimeInterval(-periodDuration)
+                        let equivalentPreviousPeriodDate = previousPeriodStartDate.addingTimeInterval(selectedData.date.timeIntervalSince(periodStartDate))
+                        
+                        HStack(alignment: .top, spacing: 4) {
+                            Text(formatExactAmount(previousValue))
+                                .font(Font.custom("Overused Grotesk", size: 12).weight(.medium))
+                                .multilineTextAlignment(.center)
+                                .foregroundColor(AppColors.foregroundPrimary)
+                            Text(formatLegendDate(equivalentPreviousPeriodDate, rangeSelection: rangeSelection))
+                                .font(Font.custom("Overused Grotesk", size: 12).weight(.medium))
+                                .multilineTextAlignment(.center)
+                                .foregroundColor(AppColors.foregroundSecondary)
+                        }
+                        .padding(0)
+                    } else if previousPeriodData.count > 0 {
+                        // Default state - show previous period total
+                        let previousTotal = previousPeriodData.last?.amount ?? 0
+                        HStack(alignment: .top, spacing: 4) {
+                            Text(formatExactAmount(previousTotal))
+                                .font(Font.custom("Overused Grotesk", size: 12).weight(.medium))
+                                .multilineTextAlignment(.center)
+                                .foregroundColor(AppColors.foregroundPrimary)
+                            Text(rangeSelection == .day ? "Yesterday" : previousPeriodLabel)
+                                .font(Font.custom("Overused Grotesk", size: 12).weight(.medium))
+                                .multilineTextAlignment(.center)
+                                .foregroundColor(AppColors.foregroundSecondary)
+                        }
+                        .padding(0)
+                    } else {
+                        Text(rangeSelection == .day ? "Yesterday" : previousPeriodLabel)
+                            .font(Font.custom("Overused Grotesk", size: 12).weight(.medium))
+                            .multilineTextAlignment(.center)
+                            .foregroundColor(AppColors.foregroundSecondary)
+                    }
+                }
+                
+                Spacer()
+            }
+            
+            // Chart Area
+            GeometryReader { geometry in
+                let width = geometry.size.width
+                let height = geometry.size.height
+                let chartWidth = width - 36 // Reserve 36pt gap for Y-axis labels
+                
+                
+                let maxValue = max(
+                    currentPeriodData.map { $0.amount }.max() ?? 1,
+                    previousPeriodData.map { $0.amount }.max() ?? 1,
+                    1
+                )
+                let minValue: Double = 0
+                
+                ZStack {
+                    // Y-axis labels
+                    VStack {
+                        HStack {
+                            Spacer()
+                            Text(formatLineChartValue(maxValue))
+                                .font(AppFonts.overusedGroteskMedium(size: 12))
+                                .foregroundColor(AppColors.foregroundSecondary)
+                        }
+                        Spacer()
+                        HStack {
+                            Spacer()
+                            Text(formatLineChartValue(maxValue * 0.67))
+                                .font(AppFonts.overusedGroteskMedium(size: 12))
+                                .foregroundColor(AppColors.foregroundSecondary)
+                        }
+                        Spacer()
+                        HStack {
+                            Spacer()
+                            Text(formatLineChartValue(maxValue * 0.33))
+                                .font(AppFonts.overusedGroteskMedium(size: 12))
+                                .foregroundColor(AppColors.foregroundSecondary)
+                        }
+                        Spacer()
+                        HStack {
+                            Spacer()
+                            Text("0")
+                                .font(AppFonts.overusedGroteskMedium(size: 12))
+                                .foregroundColor(AppColors.foregroundSecondary)
+                        }
+                    }
+                    
+                    // Previous period line (background) - gray comparison line
+                    if previousPeriodData.count > 0 {
+                        Path { path in
+                            for dataPoint in previousPeriodData {
+                                let periodDuration = periodEndDate.timeIntervalSince(periodStartDate)
+                                let timeOffset = dataPoint.date.timeIntervalSince(periodStartDate)
+                                let normalizedTime: Double = periodDuration > 0 ? timeOffset / periodDuration : 0
+                                
+                                let x = chartWidth * CGFloat(max(0, min(1, normalizedTime)))
+                                let normalizedAmount = max(0, min(1, (dataPoint.amount - minValue) / (maxValue - minValue)))
+                                let y = height - (height * CGFloat(normalizedAmount))
+                                
+                                if path.isEmpty {
+                                    path.move(to: CGPoint(x: x, y: y))
+                                } else {
+                                    path.addLine(to: CGPoint(x: x, y: y))
+                                }
+                            }
+                        }
+                        .stroke(AppColors.linePrimary, lineWidth: 2)
+                        .animation(.easeInOut(duration: 0.6), value: chartFilter)
+                        .animation(.easeInOut(duration: 0.6), value: rangeSelection)
+                    }
+                    
+                    // Crosshairs (behind the lines)
+                    // Enhanced crosshairs for smooth dragging
+                    if let dragPos = selectedDragPosition, let dragValue = selectedDragValue {
+                        // Smooth drag crosshairs
+                        let pointX = chartWidth * CGFloat(dragPos)
+                        let normalizedValue = max(0, min(1, (dragValue - minValue) / (maxValue - minValue)))
+                        let pointY = height - (height * CGFloat(normalizedValue))
+                        
+                        // Vertical crosshair - dashed with DCE2F4 color
+                        Path { path in
+                            path.move(to: CGPoint(x: pointX, y: 0))
+                            path.addLine(to: CGPoint(x: pointX, y: height))
+                        }
+                        .stroke(AppColors.linePrimary, style: StrokeStyle(lineWidth: 1, dash: [5, 5]))
+                        
+                        // Horizontal crosshair - dashed with DCE2F4 color
+                        Path { path in
+                            path.move(to: CGPoint(x: 0, y: pointY))
+                            path.addLine(to: CGPoint(x: chartWidth, y: pointY))
+                        }
+                        .stroke(AppColors.linePrimary, style: StrokeStyle(lineWidth: 1, dash: [5, 5]))
+                        
+                        // Data point indicator at drag point (current period) - only show if there's current data
+                        if selectedDragHasCurrentData {
+                            Circle()
+                                .fill(chartFilter == .income ? AppColors.successForeground : AppColors.destructiveForeground)
+                                .frame(width: 8, height: 8)
+                                .overlay(
+                                    Circle()
+                                        .stroke(.white, lineWidth: 1)
+                                        .frame(width: 8, height: 8)
+                                )
+                                .position(x: pointX, y: pointY)
+                                .zIndex(20)
+                        }
+                        
+                        // Previous period data point indicator (gray dot)
+                        if previousPeriodData.count > 0, let dragPos = selectedDragPosition {
+                            // Calculate previous period value at the same X position
+                            let targetTime = periodStartDate.addingTimeInterval((periodEndDate.timeIntervalSince(periodStartDate)) * dragPos)
+                            
+                            // Find closest previous period data point or interpolate
+                            let previousValue = findPreviousPeriodValue(at: targetTime, in: previousPeriodData)
+                            
+                            let previousPointY = height - (height * CGFloat((previousValue - minValue) / (maxValue - minValue)))
+                            
+                            Circle()
+                                .fill(Color(red: 0.86, green: 0.89, blue: 0.96))
+                                .frame(width: 8, height: 8)
+                                .overlay(
+                                    Circle()
+                                        .stroke(.white, lineWidth: 1)
+                                        .frame(width: 8, height: 8)
+                                )
+                                .position(x: pointX, y: previousPointY)
+                                .zIndex(10)
+                        }
+                        
+                    } else if let selectedIndex = selectedDataPointIndex,
+                       selectedIndex < currentPeriodData.count {
+                        let selectedData = currentPeriodData[selectedIndex]
+                        
+                        // Calculate position for the selected data point (fallback)
+                        let periodDuration = periodEndDate.timeIntervalSince(periodStartDate)
+                        let timeOffset = selectedData.date.timeIntervalSince(periodStartDate)
+                        let normalizedTime: Double = periodDuration > 0 ? timeOffset / periodDuration : 0
+                        let pointX = chartWidth * CGFloat(max(0, min(1, normalizedTime)))
+                        let pointY = height - (height * CGFloat((selectedData.amount - minValue) / (maxValue - minValue)))
+                        
+                        // Vertical line (grey)
+                        Path { path in
+                            path.move(to: CGPoint(x: pointX, y: 0))
+                            path.addLine(to: CGPoint(x: pointX, y: height))
+                        }
+                        .stroke(AppColors.linePrimary, style: StrokeStyle(lineWidth: 1, dash: [5, 5]))
+                        
+                        // Horizontal line (grey)
+                        Path { path in
+                            path.move(to: CGPoint(x: 0, y: pointY))
+                            path.addLine(to: CGPoint(x: chartWidth, y: pointY))
+                        }
+                        .stroke(AppColors.linePrimary, style: StrokeStyle(lineWidth: 1, dash: [5, 5]))
+                        
+                        // Data point indicator at data point (current period) - only show if data is not in future
+                        let currentTime = Date()
+                        if selectedData.date <= currentTime {
+                            Circle()
+                                .fill(chartFilter == .income ? AppColors.successForeground : AppColors.destructiveForeground)
+                                .frame(width: 8, height: 8)
+                                .overlay(
+                                    Circle()
+                                        .stroke(.white, lineWidth: 1)
+                                        .frame(width: 8, height: 8)
+                                )
+                                .position(x: pointX, y: pointY)
+                                .zIndex(20)
+                        }
+                        
+                        // Previous period data point indicator (gray dot) for discrete selection
+                        if previousPeriodData.count > 0 {
+                            // Calculate previous period value at the same X position
+                            let periodDuration = periodEndDate.timeIntervalSince(periodStartDate)
+                            let timeOffset = selectedData.date.timeIntervalSince(periodStartDate)
+                            let normalizedTime: Double = periodDuration > 0 ? timeOffset / periodDuration : 0
+                            let targetTime = periodStartDate.addingTimeInterval((periodEndDate.timeIntervalSince(periodStartDate)) * normalizedTime)
+                            
+                            // Find closest previous period data point
+                            let previousValue = findPreviousPeriodValue(at: targetTime, in: previousPeriodData)
+                            
+                            let previousPointY = height - (height * CGFloat((previousValue - minValue) / (maxValue - minValue)))
+                            
+                            Circle()
+                                .fill(Color(red: 0.86, green: 0.89, blue: 0.96))
+                                .frame(width: 8, height: 8)
+                                .overlay(
+                                    Circle()
+                                        .stroke(.white, lineWidth: 1)
+                                        .frame(width: 8, height: 8)
+                                )
+                                .position(x: pointX, y: previousPointY)
+                                .zIndex(10)
+                        }
+                    }
+                    
+                    // Current period line (foreground) - positioned relative to X-axis labels
+                    if currentPeriodData.count > 0 {
+                        
+                        // Split into current and future segments
+                        let currentTime = Date()
+                        
+                        // Current data (up to now) - straight lines with smooth transitions
+                        Path { path in
+                            for dataPoint in currentPeriodData {
+                                // Only show data points up to current time
+                                if dataPoint.date <= currentTime {
+                                    let periodDuration = periodEndDate.timeIntervalSince(periodStartDate)
+                                    let timeOffset = dataPoint.date.timeIntervalSince(periodStartDate)
+                                    let normalizedTime: Double = periodDuration > 0 ? timeOffset / periodDuration : 0
+                                    
+                                    let x = chartWidth * CGFloat(max(0, min(1, normalizedTime)))
+                                    let y = height - (height * CGFloat((dataPoint.amount - minValue) / (maxValue - minValue)))
+                                    
+                                    if path.isEmpty {
+                                        path.move(to: CGPoint(x: x, y: y))
+                                    } else {
+                                        path.addLine(to: CGPoint(x: x, y: y))
+                                    }
+                                }
+                            }
+                        }
+                        .stroke(chartFilter == .income ? (AppColors.chartIncome2) : (AppColors.chartExpense1), lineWidth: 2)
+                        .animation(.easeInOut(duration: 0.6), value: chartFilter)
+                        .animation(.easeInOut(duration: 0.6), value: rangeSelection)
+                        
+                        // Future data (beyond now) - transparent (0% opacity)
+                        Path { path in
+                            for dataPoint in currentPeriodData {
+                                // Only show data points beyond current time
+                                if dataPoint.date > currentTime {
+                                    // Calculate actual position based on timestamp within the period for granularity
+                                    let periodDuration = periodEndDate.timeIntervalSince(periodStartDate)
+                                    let timeOffset = dataPoint.date.timeIntervalSince(periodStartDate)
+                                    let normalizedTime: Double = periodDuration > 0 ? timeOffset / periodDuration : 0
+                                    
+                                    let x = chartWidth * CGFloat(max(0, min(1, normalizedTime)))
+                                    let y = height - (height * CGFloat((dataPoint.amount - minValue) / (maxValue - minValue)))
+                                    
+                                    if path.isEmpty {
+                                        path.move(to: CGPoint(x: x, y: y))
+                                    } else {
+                                        path.addLine(to: CGPoint(x: x, y: y))
+                                    }
+                                }
+                            }
+                        }
+                        .stroke((chartFilter == .income ? (AppColors.chartIncome2) : (AppColors.chartExpense1)).opacity(0), lineWidth: 2) // 0% opacity for future data
+                        .animation(.easeInOut(duration: 0.6), value: chartFilter)
+                        .animation(.easeInOut(duration: 0.6), value: rangeSelection)
+                    }
+                    
+                    // Crosshairs moved to appear behind lines
+                    
+                    // Interactive overlay for hover detection
+                    Rectangle()
+                        .fill(Color.clear)
+                        .contentShape(Rectangle())
+                        .gesture(
+                            DragGesture(minimumDistance: 0)
+                                .onChanged { value in
+                                    // Enhanced smooth dragging - calculate running total for any X position
+                                    if currentPeriodData.count > 0 {
+                                        let normalizedX = max(0, min(1, value.location.x / chartWidth))
+                                        
+                                        // Calculate the date for this X position
+                                        let periodDuration = periodEndDate.timeIntervalSince(periodStartDate)
+                                        let timeAtPosition = periodStartDate.addingTimeInterval(periodDuration * normalizedX)
+                                        
+                                        // Find running total at this time position (previous value logic)
+                                        let runningTotalAtPosition = calculateRunningTotalAtTime(
+                                            targetTime: timeAtPosition,
+                                            transactions: currentPeriodTransactions,
+                                            startDate: periodStartDate,
+                                            chartFilter: chartFilter,
+                                            rangeSelection: rangeSelection
+                                        )
+                                        
+                                        // Check if this position has actual current period data (not future)
+                                        let currentTime = Date()
+                                        let hasCurrentData = timeAtPosition <= currentTime && timeAtPosition <= min(currentTime, periodEndDate)
+                                        
+                                        // Store the drag position and calculated value (always for crosshairs)
+                                        selectedDragPosition = normalizedX
+                                        selectedDragValue = runningTotalAtPosition
+                                        selectedDragDate = timeAtPosition
+                                        selectedDragHasCurrentData = hasCurrentData
+                                        showingDataPointValue = true
+                                    }
+                                }
+                                .onEnded { _ in
+                                    // Reset drag state after a delay
+                                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                                        selectedDragPosition = nil
+                                        selectedDragValue = nil
+                                        selectedDragDate = nil
+                                        selectedDragHasCurrentData = false
+                                        selectedDataPointIndex = nil
+                                        showingDataPointValue = false
+                                    }
+                                }
+                        )
+                }
+            }
+            .frame(maxHeight: .infinity)
+            
+            // X-axis labels - Multiple intermediate points
+            HStack {
+                let labels = getXAxisLabels(startDate: periodStartDate, endDate: periodEndDate)
+                ForEach(Array(labels.enumerated()), id: \.offset) { index, label in
+                    if index == 0 {
+                        Text(label)
+                            .font(AppFonts.overusedGroteskMedium(size: 12))
+                            .foregroundColor(AppColors.foregroundSecondary)
+                    } else {
+                        Spacer()
+                        Text(label)
+                            .font(AppFonts.overusedGroteskMedium(size: 12))
+                            .foregroundColor(AppColors.foregroundSecondary)
+                    }
+                }
+            }
+            .padding(.trailing, 24)
+        }
+        .frame(height: 280)
+    }
+    
+    // Helper function to get current filtered total for legend
+    private func getCurrentFilteredTotal() -> String {
+        let transactions = accountManager.filteredTransactions
+        let cal = Calendar.current
+        let now = Date()
+        
+        // Get current period boundaries
+        let (periodStartDate, periodEndDate) = {
+            switch rangeSelection {
+            case .day:
+                let start = cal.startOfDay(for: now)
+                let end = cal.dateInterval(of: .day, for: now)?.end ?? now
+                return (start, end)
+            case .week:
+                let start = cal.dateInterval(of: .weekOfYear, for: now)?.start ?? now
+                let end = cal.dateInterval(of: .weekOfYear, for: now)?.end ?? now
+                return (start, end)
+            case .month:
+                let start = cal.dateInterval(of: .month, for: now)?.start ?? now
+                let end = cal.dateInterval(of: .month, for: now)?.end ?? now
+                return (start, end)
+            case .quarter:
+                let currentMonth = cal.component(.month, from: now)
+                let quarterStartMonth = ((currentMonth - 1) / 3) * 3 + 1
+                let start = cal.date(from: DateComponents(year: cal.component(.year, from: now), month: quarterStartMonth, day: 1)) ?? now
+                let quarterEndMonth = quarterStartMonth + 2
+                let end = cal.date(from: DateComponents(year: cal.component(.year, from: now), month: quarterEndMonth + 1, day: 1))?.addingTimeInterval(-24*3600) ?? now
+                return (start, end)
+            }
+        }()
+        
+        // Filter transactions for current period
+        let periodTransactions = transactions.filter { txn in
+            txn.date >= periodStartDate && txn.date <= min(now, periodEndDate)
+        }
+        
+        // Calculate total based on chart filter
+        let total = periodTransactions.reduce(0.0) { sum, txn in
+            switch chartFilter {
+            case .balance:
+                return sum + txn.amount
+            case .income:
+                return sum + (txn.amount > 0 ? txn.amount : 0)
+            case .expense:
+                return sum + (txn.amount < 0 ? abs(txn.amount) : 0)
+            }
+        }
+        
+        return formatExactAmount(total)
+    }
+    
+    // Helper function to format data point date and time
+    private func formatDataPointDateTime(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .short
+        formatter.timeStyle = .short
+        return formatter.string(from: date)
+    }
+    
+    // Helper function to generate X-axis labels with intermediate points
+    private func getXAxisLabels(startDate: Date, endDate: Date) -> [String] {
+        let formatter = DateFormatter()
+        let cal = Calendar.current
+        
+        switch rangeSelection {
+        case .day:
+            // For day view, show times (e.g., 12AM, 6AM, 12PM, 6PM, 12AM)
+            formatter.dateFormat = "ha"
+            let interval: TimeInterval = 6 * 3600 // 6 hours
+            var labels: [String] = []
+            var currentDate = startDate
+            
+            while currentDate <= endDate {
+                labels.append(formatter.string(from: currentDate))
+                currentDate = currentDate.addingTimeInterval(interval)
+            }
+            // Ensure we have the end time
+            if labels.count < 5 {
+                labels.append(formatter.string(from: endDate))
+            }
+            return Array(labels.prefix(5))
+            
+        case .week:
+            // For week view, show days (e.g., Mon, Tue, Wed, Thu, Fri, Sat, Sun)
+            formatter.dateFormat = "E"
+            var labels: [String] = []
+            var currentDate = startDate
+            
+            for _ in 0..<7 {
+                labels.append(formatter.string(from: currentDate))
+                currentDate = cal.date(byAdding: .day, value: 1, to: currentDate) ?? currentDate
+            }
+            return labels
+            
+        case .month:
+            // For month view, show week intervals
+            formatter.dateFormat = "M/d"
+            let weekInterval: TimeInterval = 7 * 24 * 3600 // 1 week
+            var labels: [String] = []
+            var currentDate = startDate
+            
+            while currentDate <= endDate {
+                labels.append(formatter.string(from: currentDate))
+                currentDate = currentDate.addingTimeInterval(weekInterval)
+            }
+            // Ensure we have the end date
+            if labels.count < 5 {
+                labels.append(formatter.string(from: endDate))
+            }
+            return Array(labels.prefix(5))
+            
+        case .quarter:
+            // For quarter view, show months
+            formatter.dateFormat = "MMM"
+            var labels: [String] = []
+            var currentDate = startDate
+            
+            for _ in 0..<3 {
+                labels.append(formatter.string(from: currentDate))
+                currentDate = cal.date(byAdding: .month, value: 1, to: currentDate) ?? currentDate
+            }
+            return labels
+        }
+    }
+}

@@ -14,6 +14,7 @@
 		CBCAC3BC2EB21667002CB3B1 /* GoogleSignIn in Frameworks */ = {isa = PBXBuildFile; productRef = CBCAC3BB2EB21667002CB3B1 /* GoogleSignIn */; };
 		CBCAC3BE2EB21667002CB3B1 /* GoogleSignInSwift in Frameworks */ = {isa = PBXBuildFile; productRef = CBCAC3BD2EB21667002CB3B1 /* GoogleSignInSwift */; };
 		CBCAC3C12EB216BC002CB3B1 /* RevenueCat in Frameworks */ = {isa = PBXBuildFile; productRef = CBCAC3C02EB216BC002CB3B1 /* RevenueCat */; };
+		CBEAE1432ECE30C70044BD60 /* RevenueCatUI in Frameworks */ = {isa = PBXBuildFile; productRef = CBEAE1422ECE30C70044BD60 /* RevenueCatUI */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -40,23 +41,27 @@
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
-		CBB5CC662E6F0DF4001B5E7B /* Exceptions for "CashMonki" folder in "CashMonkiTests" target */ = {
+		CBE1FAC92EE185B10010B134 /* Exceptions for "CashMonki" folder in "CashMonkiTests" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
-				"DesignSystem/OverusedGrotesk-Bold.ttf",
-				"DesignSystem/OverusedGrotesk-Medium.ttf",
-				"DesignSystem/OverusedGrotesk-Roman.ttf",
-				"DesignSystem/OverusedGrotesk-SemiBold.ttf",
+				"File Assets/cashmonki pro text.png",
+				"File Assets/feature usage card image.svg",
+				"File Assets/home-line.svg",
+				"File Assets/paywall bg.jpg",
+				"File Assets/receipt-check.svg",
+				"File Assets/user-02.svg",
 			);
 			target = CB02A6422E69FAE300B15F44 /* CashMonkiTests */;
 		};
-		CBB5CC672E6F0DF4001B5E7B /* Exceptions for "CashMonki" folder in "CashMonkiUITests" target */ = {
+		CBE1FACA2EE185B10010B134 /* Exceptions for "CashMonki" folder in "CashMonkiUITests" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
-				"DesignSystem/OverusedGrotesk-Bold.ttf",
-				"DesignSystem/OverusedGrotesk-Medium.ttf",
-				"DesignSystem/OverusedGrotesk-Roman.ttf",
-				"DesignSystem/OverusedGrotesk-SemiBold.ttf",
+				"File Assets/cashmonki pro text.png",
+				"File Assets/feature usage card image.svg",
+				"File Assets/home-line.svg",
+				"File Assets/paywall bg.jpg",
+				"File Assets/receipt-check.svg",
+				"File Assets/user-02.svg",
 			);
 			target = CB02A64C2E69FAE300B15F44 /* CashMonkiUITests */;
 		};
@@ -66,8 +71,8 @@
 		CB02A6322E69FAE000B15F44 /* CashMonki */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
-				CBB5CC662E6F0DF4001B5E7B /* Exceptions for "CashMonki" folder in "CashMonkiTests" target */,
-				CBB5CC672E6F0DF4001B5E7B /* Exceptions for "CashMonki" folder in "CashMonkiUITests" target */,
+				CBE1FAC92EE185B10010B134 /* Exceptions for "CashMonki" folder in "CashMonkiTests" target */,
+				CBE1FACA2EE185B10010B134 /* Exceptions for "CashMonki" folder in "CashMonkiUITests" target */,
 			);
 			path = CashMonki;
 			sourceTree = "<group>";
@@ -93,6 +98,7 @@
 				CB8D47312EBB475A00760A39 /* Lottie in Frameworks */,
 				CBCAC3B72EB21602002CB3B1 /* FirebaseCore in Frameworks */,
 				CBCAC3C12EB216BC002CB3B1 /* RevenueCat in Frameworks */,
+				CBEAE1432ECE30C70044BD60 /* RevenueCatUI in Frameworks */,
 				CBCAC3BC2EB21667002CB3B1 /* GoogleSignIn in Frameworks */,
 				CBCAC3B52EB21602002CB3B1 /* FirebaseAuth in Frameworks */,
 				CBCAC3B92EB21602002CB3B1 /* FirebaseFirestore in Frameworks */,
@@ -163,6 +169,7 @@
 				CBCAC3BD2EB21667002CB3B1 /* GoogleSignInSwift */,
 				CBCAC3C02EB216BC002CB3B1 /* RevenueCat */,
 				CB8D47302EBB475A00760A39 /* Lottie */,
+				CBEAE1422ECE30C70044BD60 /* RevenueCatUI */,
 			);
 			productName = "Cashooya Playground";
 			productReference = CB02A6302E69FAE000B15F44 /* CashMonki.app */;
@@ -731,6 +738,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = CBCAC3BF2EB216BC002CB3B1 /* XCRemoteSwiftPackageReference "purchases-ios" */;
 			productName = RevenueCat;
+		};
+		CBEAE1422ECE30C70044BD60 /* RevenueCatUI */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = CBCAC3BF2EB216BC002CB3B1 /* XCRemoteSwiftPackageReference "purchases-ios" */;
+			productName = RevenueCatUI;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
