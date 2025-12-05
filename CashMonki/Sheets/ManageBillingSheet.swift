@@ -14,34 +14,39 @@ struct ManageBillingSheet: View {
         revenueCatManager.customerInfo?.entitlements.active.values.first
     }
     
-    private var subscriptionTitle: String {
-        guard let subscription = currentSubscription else { return "No Active Subscription" }
-        return subscription.productIdentifier.contains("yearly") ? "CashMonki Pro Annual" : "CashMonki Pro Monthly"
+    private var planTitle: String {
+        guard let subscription = currentSubscription else { return "No Plan" }
+        return subscription.productIdentifier.contains("yearly") ? "Pro Annual" : "Pro Monthly"
     }
     
-    private var subscriptionPrice: String {
-        guard let subscription = currentSubscription,
-              let originalPurchaseDate = subscription.originalPurchaseDate else { 
-            return "Unknown" 
-        }
+    private var planPrice: String {
+        guard let subscription = currentSubscription else { return "Free" }
         
-        // Get price from product identifier
         if subscription.productIdentifier.contains("yearly") {
-            return "$99.99/year"
+            return "$99.99 / year"
         } else {
-            return "$9.99/month"
+            return "$9.99 / month"
         }
     }
     
-    private var nextBillingDate: String {
-        guard let subscription = currentSubscription,
-              let expirationDate = subscription.expirationDate else { 
-            return "Unknown" 
-        }
+    private var priceAmount: String {
+        guard let subscription = currentSubscription else { return "Free" }
         
-        let formatter = DateFormatter()
-        formatter.dateStyle = .medium
-        return formatter.string(from: expirationDate)
+        if subscription.productIdentifier.contains("yearly") {
+            return "$99.99"
+        } else {
+            return "$9.99"
+        }
+    }
+    
+    private var pricePeriod: String {
+        guard let subscription = currentSubscription else { return "" }
+        
+        if subscription.productIdentifier.contains("yearly") {
+            return " / year"
+        } else {
+            return " / month"
+        }
     }
     
     private var isTrialActive: Bool {
@@ -54,231 +59,234 @@ struct ManageBillingSheet: View {
         return Date() < (trialEndDate ?? Date())
     }
     
+    private var trialEndDate: String {
+        guard let subscription = currentSubscription,
+              let originalPurchaseDate = subscription.originalPurchaseDate else { 
+            return "December 5, 2025" // Fallback 
+        }
+        
+        if let trialEnd = Calendar.current.date(byAdding: .day, value: 7, to: originalPurchaseDate) {
+            let formatter = DateFormatter()
+            formatter.dateStyle = .long
+            return formatter.string(from: trialEnd)
+        }
+        
+        return "December 5, 2025"
+    }
+    
     var body: some View {
-        ZStack {
-            VStack(spacing: 0) {
-                // Fixed close button area
-                HStack {
-                    Spacer()
-                    Button(action: {
-                        isPresented = false
-                    }) {
-                        Image(systemName: "xmark")
-                            .font(.system(size: 16, weight: .medium))
-                            .foregroundColor(AppColors.foregroundSecondary)
-                            .frame(width: 32, height: 32)
-                            .background(AppColors.surfacePrimary)
-                            .clipShape(Circle())
-                    }
-                }
-                .padding(.horizontal, 20)
-                .padding(.top, 20)
-                
-                // Scrollable content
-                ScrollView(showsIndicators: false) {
-                    VStack(spacing: 32) {
-                        // Header section
-                        VStack(spacing: 16) {
-                            Image("cashmonki-pro-text")
-                                .resizable()
-                                .aspectRatio(contentMode: .fit)
-                                .frame(maxWidth: .infinity)
-                                .frame(height: 60)
-                            
-                            Text("Manage Your Subscription")
-                                .font(
-                                    Font.custom("Overused Grotesk", size: 24)
-                                        .weight(.semibold)
-                                )
-                                .foregroundColor(AppColors.foregroundPrimary)
-                                .multilineTextAlignment(.center)
-                        }
-                        
-                        // Subscription status card
-                        VStack(spacing: 20) {
-                            // Status badge
-                            HStack {
-                                HStack(spacing: 8) {
+        VStack(spacing: 0) {
+            // Header
+            SheetHeader.basic(title: "Manage Billing") {
+                isPresented = false
+            }
+            
+            // Content
+            ScrollView(showsIndicators: false) {
+                VStack(spacing: 32) {
+                    // Hero area with monkey illustration
+                    VStack(spacing: 0) {
+                        // Background pattern with monkey
+                        ZStack {
+                            // Yellow blob background pattern
+                            HStack(spacing: -20) {
+                                ForEach(0..<6, id: \.self) { _ in
                                     Circle()
-                                        .fill(AppColors.successBackground)
-                                        .frame(width: 8, height: 8)
-                                    
-                                    Text(isTrialActive ? "Free Trial Active" : "Pro Active")
-                                        .font(
-                                            Font.custom("Overused Grotesk", size: 14)
-                                                .weight(.semibold)
-                                        )
-                                        .foregroundColor(AppColors.successForeground)
+                                        .fill(Color.yellow.opacity(0.8))
+                                        .frame(width: 80, height: 80)
+                                        .opacity(0.6)
                                 }
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 6)
-                                .background(AppColors.successBackground.opacity(0.1))
-                                .cornerRadius(20)
-                                
-                                Spacer()
                             }
+                            .clipped()
                             
-                            // Subscription details
-                            VStack(spacing: 16) {
-                                HStack {
-                                    VStack(alignment: .leading, spacing: 4) {
-                                        Text("Plan")
-                                            .font(
-                                                Font.custom("Overused Grotesk", size: 14)
-                                                    .weight(.medium)
-                                            )
-                                            .foregroundColor(AppColors.foregroundSecondary)
-                                        
-                                        Text(subscriptionTitle)
-                                            .font(
-                                                Font.custom("Overused Grotesk", size: 18)
-                                                    .weight(.semibold)
-                                            )
-                                            .foregroundColor(AppColors.foregroundPrimary)
+                            // Monkey character
+                            ZStack {
+                                Circle()
+                                    .fill(AppColors.accentBackground)
+                                    .frame(width: 60, height: 60)
+                                
+                                Text("🐵")
+                                    .font(.system(size: 32))
+                            }
+                        }
+                        .frame(height: 120)
+                        .frame(maxWidth: .infinity)
+                        .background(Color.yellow.opacity(0.3))
+                        .cornerRadius(16)
+                    }
+                    
+                    // Current Plan Section
+                    VStack(alignment: .leading, spacing: 16) {
+                        Text("Current Plan")
+                            .font(Font.custom("Overused Grotesk", size: 14).weight(.medium))
+                            .foregroundColor(AppColors.foregroundSecondary)
+                        
+                        HStack(alignment: .top) {
+                            VStack(alignment: .leading, spacing: 8) {
+                                HStack(spacing: 8) {
+                                    Text(planTitle)
+                                        .font(Font.custom("Overused Grotesk", size: 20).weight(.semibold))
+                                        .multilineTextAlignment(.center)
+                                        .foregroundColor(AppColors.foregroundPrimary)
+                                    
+                                    if isTrialActive {
+                                        Text("1 week trial")
+                                            .font(Font.custom("Overused Grotesk", size: 12).weight(.medium))
+                                            .foregroundColor(.white)
+                                            .padding(.horizontal, 8)
+                                            .padding(.vertical, 4)
+                                            .background(Color.teal)
+                                            .cornerRadius(12)
                                     }
+                                }
+                                
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(isTrialActive ? "Trial ends" : "Next billing")
+                                        .font(Font.custom("Overused Grotesk", size: 14).weight(.medium))
+                                        .foregroundColor(AppColors.foregroundSecondary)
                                     
-                                    Spacer()
-                                    
-                                    Text(subscriptionPrice)
-                                        .font(
-                                            Font.custom("Overused Grotesk", size: 18)
-                                                .weight(.semibold)
-                                        )
+                                    Text(trialEndDate)
+                                        .font(Font.custom("Overused Grotesk", size: 16).weight(.semibold))
+                                        .multilineTextAlignment(.center)
                                         .foregroundColor(AppColors.foregroundPrimary)
                                 }
+                            }
+                            
+                            Spacer()
+                            
+                            // Price breakdown
+                            HStack(spacing: 0) {
+                                Text(priceAmount)
+                                    .font(Font.custom("Overused Grotesk", size: 20).weight(.medium))
+                                    .multilineTextAlignment(.center)
+                                    .foregroundColor(AppColors.foregroundPrimary)
                                 
-                                HStack {
-                                    VStack(alignment: .leading, spacing: 4) {
-                                        Text(isTrialActive ? "Trial ends" : "Next billing")
-                                            .font(
-                                                Font.custom("Overused Grotesk", size: 14)
-                                                    .weight(.medium)
-                                            )
-                                            .foregroundColor(AppColors.foregroundSecondary)
-                                        
-                                        Text(nextBillingDate)
-                                            .font(
-                                                Font.custom("Overused Grotesk", size: 16)
-                                                    .weight(.medium)
-                                            )
-                                            .foregroundColor(AppColors.foregroundPrimary)
-                                    }
-                                    
-                                    Spacer()
-                                }
+                                Text(pricePeriod)
+                                    .font(Font.custom("Overused Grotesk", size: 12).weight(.medium))
+                                    .multilineTextAlignment(.center)
+                                    .foregroundColor(AppColors.foregroundSecondary)
                             }
                         }
-                        .padding(20)
-                        .background(.white)
-                        .cornerRadius(16)
-                        .shadow(color: .black.opacity(0.05), radius: 8, x: 0, y: 2)
+                    }
+                    .padding(20)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(.white)
+                    .cornerRadius(12)
+                    .shadow(color: .black.opacity(0.05), radius: 8, x: 0, y: 2)
+                    
+                    // Action Items
+                    VStack(spacing: 16) {
+                        // Manage Subscription
+                        Button(action: {
+                            openAppleSubscriptionManagement()
+                        }) {
+                            HStack(spacing: 16) {
+                                // Gear icon
+                                ZStack {
+                                    Circle()
+                                        .fill(Color.gray.opacity(0.1))
+                                        .frame(width: 48, height: 48)
+                                    
+                                    Image(systemName: "gear")
+                                        .font(.system(size: 20, weight: .medium))
+                                        .foregroundColor(AppColors.foregroundSecondary)
+                                }
+                                
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("Manage Subscription")
+                                        .font(Font.custom("Overused Grotesk", size: 16).weight(.semibold))
+                                        .foregroundColor(AppColors.foregroundPrimary)
+                                    
+                                    Text("Change plan, cancel, or update payment method")
+                                        .font(Font.custom("Overused Grotesk", size: 14).weight(.medium))
+                                        .foregroundColor(AppColors.foregroundSecondary)
+                                        .multilineTextAlignment(.leading)
+                                }
+                                
+                                Spacer()
+                                
+                                Image(systemName: "chevron.right")
+                                    .font(.system(size: 14, weight: .medium))
+                                    .foregroundColor(AppColors.foregroundSecondary)
+                            }
+                            .padding(.horizontal, 20)
+                            .padding(.vertical, 16)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(.white)
+                            .cornerRadius(12)
+                            .shadow(color: .black.opacity(0.05), radius: 4, x: 0, y: 2)
+                        }
+                        .buttonStyle(PlainButtonStyle())
                         
-                        // Management options
-                        VStack(spacing: 16) {
-                            // Apple Subscription Management
-                            Button(action: {
-                                openAppleSubscriptionManagement()
-                            }) {
-                                HStack {
-                                    VStack(alignment: .leading, spacing: 4) {
-                                        Text("Manage Subscription")
-                                            .font(
-                                                Font.custom("Overused Grotesk", size: 16)
-                                                    .weight(.semibold)
-                                            )
-                                            .foregroundColor(AppColors.foregroundPrimary)
-                                        
-                                        Text("Change plan, cancel, or update payment")
-                                            .font(
-                                                Font.custom("Overused Grotesk", size: 14)
-                                                    .weight(.medium)
-                                            )
-                                            .foregroundColor(AppColors.foregroundSecondary)
-                                    }
+                        // Already Purchased / Restore Purchases
+                        Button(action: {
+                            restorePurchases()
+                        }) {
+                            HStack(spacing: 16) {
+                                // Shopping cart icon
+                                ZStack {
+                                    Circle()
+                                        .fill(Color.gray.opacity(0.1))
+                                        .frame(width: 48, height: 48)
                                     
-                                    Spacer()
+                                    Image(systemName: "cart")
+                                        .font(.system(size: 20, weight: .medium))
+                                        .foregroundColor(AppColors.foregroundSecondary)
+                                }
+                                
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("Already Purchased?")
+                                        .font(Font.custom("Overused Grotesk", size: 16).weight(.semibold))
+                                        .foregroundColor(AppColors.foregroundPrimary)
                                     
+                                    Text("Restore purchases made on another device")
+                                        .font(Font.custom("Overused Grotesk", size: 14).weight(.medium))
+                                        .foregroundColor(AppColors.foregroundSecondary)
+                                        .multilineTextAlignment(.leading)
+                                }
+                                
+                                Spacer()
+                                
+                                if isLoading {
+                                    ProgressView()
+                                        .scaleEffect(0.8)
+                                } else {
                                     Image(systemName: "chevron.right")
                                         .font(.system(size: 14, weight: .medium))
                                         .foregroundColor(AppColors.foregroundSecondary)
                                 }
-                                .padding(16)
-                                .background(.white)
-                                .cornerRadius(12)
-                                .shadow(color: .black.opacity(0.05), radius: 4, x: 0, y: 1)
                             }
-                            .buttonStyle(PlainButtonStyle())
-                            
-                            // Restore Purchases
-                            Button(action: {
-                                restorePurchases()
-                            }) {
-                                HStack {
-                                    VStack(alignment: .leading, spacing: 4) {
-                                        Text("Restore Purchases")
-                                            .font(
-                                                Font.custom("Overused Grotesk", size: 16)
-                                                    .weight(.semibold)
-                                            )
-                                            .foregroundColor(AppColors.foregroundPrimary)
-                                        
-                                        Text("If you purchased on another device")
-                                            .font(
-                                                Font.custom("Overused Grotesk", size: 14)
-                                                    .weight(.medium)
-                                            )
-                                            .foregroundColor(AppColors.foregroundSecondary)
-                                    }
-                                    
-                                    Spacer()
-                                    
-                                    if isLoading {
-                                        ProgressView()
-                                            .scaleEffect(0.8)
-                                    } else {
-                                        Image(systemName: "arrow.clockwise")
-                                            .font(.system(size: 14, weight: .medium))
-                                            .foregroundColor(AppColors.foregroundSecondary)
-                                    }
-                                }
-                                .padding(16)
-                                .background(.white)
-                                .cornerRadius(12)
-                                .shadow(color: .black.opacity(0.05), radius: 4, x: 0, y: 1)
-                            }
-                            .buttonStyle(PlainButtonStyle())
-                            .disabled(isLoading)
+                            .padding(.horizontal, 20)
+                            .padding(.vertical, 16)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(.white)
+                            .cornerRadius(12)
+                            .shadow(color: .black.opacity(0.05), radius: 4, x: 0, y: 2)
                         }
-                        
-                        // Footer info
-                        VStack(spacing: 8) {
-                            Text("Questions or need help?")
-                                .font(
-                                    Font.custom("Overused Grotesk", size: 14)
-                                        .weight(.medium)
-                                )
-                                .foregroundColor(AppColors.foregroundSecondary)
-                            
-                            Button("Contact Support") {
-                                openSupportEmail()
-                            }
-                            .font(
-                                Font.custom("Overused Grotesk", size: 14)
-                                    .weight(.semibold)
-                            )
-                            .foregroundColor(AppColors.accentBackground)
-                        }
-                        
-                        // Bottom padding
-                        Spacer()
-                            .frame(height: 40)
+                        .buttonStyle(PlainButtonStyle())
+                        .disabled(isLoading)
                     }
-                    .padding(.horizontal, 20)
-                    .padding(.top, 32)
+                    
+                    Spacer()
+                        .frame(height: 40)
                 }
+                .padding(.horizontal, 20)
+                .padding(.top, 24)
             }
+            
+            // Footer
+            VStack(spacing: 8) {
+                Text("Made with 🧠 & ❤️ by")
+                    .font(Font.custom("Overused Grotesk", size: 14).weight(.medium))
+                    .foregroundColor(AppColors.foregroundSecondary)
+                
+                Text("Rosebud Studio")
+                    .font(Font.custom("Overused Grotesk", size: 14).weight(.bold))
+                    .foregroundColor(AppColors.foregroundPrimary)
+            }
+            .padding(.bottom, 20)
         }
-        .background(AppColors.surfacePrimary)
+        .background(AppColors.backgroundWhite)
     }
     
     // MARK: - Actions
@@ -309,15 +317,8 @@ struct ManageBillingSheet: View {
             }
         }
     }
-    
-    private func openSupportEmail() {
-        #if canImport(UIKit)
-        if let url = URL(string: "mailto:support@cashmonki.app?subject=CashMonki%20Pro%20Support") {
-            UIApplication.shared.open(url)
-        }
-        #endif
-    }
 }
+
 
 // MARK: - Preview
 #Preview {

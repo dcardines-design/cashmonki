@@ -9,6 +9,7 @@ struct CustomPaywallSheet: View {
     @State private var selectedPlan: PricingPlan = .yearly
     @State private var showingManageBilling = false
     @ObservedObject private var revenueCatManager = RevenueCatManager.shared
+    @EnvironmentObject private var toastManager: ToastManager
     
     // MARK: - RevenueCat Package Helpers
     private var targetOffering: Offering? {
@@ -104,7 +105,8 @@ struct CustomPaywallSheet: View {
                     
                     // Content area with Cashmonki Pro text image
                     VStack(spacing: 24) {
-                        Image("cashmonki-pro-text")
+                        // Header image - different for lapsed trial users
+                        Image(revenueCatManager.hasUsedTrialBefore ? "cashmonki pro text trial ended" : "cashmonki-pro-text")
                             .resizable()
                             .aspectRatio(contentMode: .fit)
                             .frame(maxWidth: .infinity)
@@ -448,18 +450,20 @@ struct CustomPaywallSheet: View {
                         showingManageBilling = true
                     }
                 } else {
-                    AppButton.primary("Start my free week", size: .extraSmall) {
+                    // Different button text for lapsed trial users
+                    let buttonText = revenueCatManager.hasUsedTrialBefore ? "Continue with Pro" : "Start my free week"
+                    AppButton.primary(buttonText, size: .extraSmall) {
                         handleStartFreeTrial()
                     }
                 }
                 
-                // Payment terms text
+                // Payment terms text - different for lapsed trial users
                 HStack(spacing: 8) {
                     Image(systemName: "checkmark")
                         .font(.system(size: 12, weight: .medium))
                         .foregroundColor(AppColors.foregroundSecondary)
                     
-                    Text("No payment now")
+                    Text(revenueCatManager.hasUsedTrialBefore ? "Secure checkout" : "No payment now")
                         .font(
                             Font.custom("Overused Grotesk", size: 14)
                                 .weight(.medium)
@@ -475,7 +479,7 @@ struct CustomPaywallSheet: View {
                         .multilineTextAlignment(.center)
                         .foregroundColor(AppColors.foregroundSecondary)
                     
-                    Text("Free 7 days then \(paymentTermsText)")
+                    Text(revenueCatManager.hasUsedTrialBefore ? "Cancel anytime" : "Free 7 days then \(paymentTermsText)")
                         .font(
                             Font.custom("Overused Grotesk", size: 14)
                                 .weight(.medium)
@@ -559,9 +563,27 @@ struct CustomPaywallSheet: View {
             await MainActor.run {
                 if result.success {
                     print("🎉 PAYWALL: Purchase successful!")
+                    print("✅ SUBSCRIPTION SUCCESS DEBUG: CustomPaywall purchase successful")
+                    
+                    // Show success toast
+                    toastManager.showDone("Done analyzing!")
+                    
                     isPresented = false
                 } else {
                     print("❌ PAYWALL: Purchase failed: \(result.error?.localizedDescription ?? "Unknown error")")
+                    print("🚨 SUBSCRIPTION ERROR DEBUG: CustomPaywall failure triggered")
+                    print("🚨 ERROR DETAILS: \(result.error?.localizedDescription ?? "Unknown error")")
+                    if let error = result.error {
+                        print("🚨 ERROR CODE: \((error as NSError).code)")
+                        print("🚨 ERROR DOMAIN: \((error as NSError).domain)")
+                        print("🚨 ERROR USER INFO: \((error as NSError).userInfo)")
+                    }
+                    
+                    // Show error toast
+                    print("🍞 TOAST DEBUG: About to show subscription error toast (CustomPaywall)")
+                    toastManager.showError("Something went wrong")
+                    print("🍞 TOAST DEBUG: Subscription error toast command sent successfully (CustomPaywall)")
+                    
                     // Keep paywall open for retry
                 }
             }

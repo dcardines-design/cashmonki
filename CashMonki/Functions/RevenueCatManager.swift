@@ -34,6 +34,26 @@ class RevenueCatManager: NSObject, ObservableObject {
         return isSubscriptionActive
     }
     
+    /// Check if user has used trial before but isn't currently subscribed
+    var hasUsedTrialBefore: Bool {
+        // DEBUG: Uncomment the line below to force lapsed trial state for testing
+        // return true
+        
+        guard let customerInfo = customerInfo else { return false }
+        
+        // If currently subscribed, they're not a "lapsed" user
+        if isProUser { return false }
+        
+        // Check if user has any previous purchases (indicating they used trial before)
+        let hasAnyPurchases = !customerInfo.allPurchasedProductIdentifiers.isEmpty
+        
+        // Also check if they have any entitlements (active or inactive)
+        let hasAnyEntitlements = !customerInfo.entitlements.all.isEmpty
+        
+        // User is "lapsed" if they have purchase history or entitlements but aren't currently active
+        return hasAnyPurchases || hasAnyEntitlements
+    }
+    
     // Offering ID from RevenueCat dashboard
     private let offeringID = "Cashmonki"  // Your actual offering ID from dashboard
     
