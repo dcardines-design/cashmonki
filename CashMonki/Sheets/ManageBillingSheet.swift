@@ -84,36 +84,12 @@ struct ManageBillingSheet: View {
             // Content
             ScrollView(showsIndicators: false) {
                 VStack(spacing: 32) {
-                    // Hero area with monkey illustration
-                    VStack(spacing: 0) {
-                        // Background pattern with monkey
-                        ZStack {
-                            // Yellow blob background pattern
-                            HStack(spacing: -20) {
-                                ForEach(0..<6, id: \.self) { _ in
-                                    Circle()
-                                        .fill(Color.yellow.opacity(0.8))
-                                        .frame(width: 80, height: 80)
-                                        .opacity(0.6)
-                                }
-                            }
-                            .clipped()
-                            
-                            // Monkey character
-                            ZStack {
-                                Circle()
-                                    .fill(AppColors.accentBackground)
-                                    .frame(width: 60, height: 60)
-                                
-                                Text("🐵")
-                                    .font(.system(size: 32))
-                            }
-                        }
+                    // Hero area with manage billing image
+                    Image("manage-billing-image")
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
                         .frame(height: 120)
                         .frame(maxWidth: .infinity)
-                        .background(Color.yellow.opacity(0.3))
-                        .cornerRadius(16)
-                    }
                     
                     // Current Plan Section
                     VStack(alignment: .leading, spacing: 16) {
@@ -135,7 +111,7 @@ struct ManageBillingSheet: View {
                                             .foregroundColor(.white)
                                             .padding(.horizontal, 8)
                                             .padding(.vertical, 4)
-                                            .background(Color.teal)
+                                            .background(AppColors.successForeground)
                                             .cornerRadius(12)
                                     }
                                 }
@@ -180,41 +156,29 @@ struct ManageBillingSheet: View {
                         Button(action: {
                             openAppleSubscriptionManagement()
                         }) {
-                            HStack(spacing: 16) {
-                                // Gear icon
-                                ZStack {
-                                    Circle()
-                                        .fill(Color.gray.opacity(0.1))
-                                        .frame(width: 48, height: 48)
-                                    
-                                    Image(systemName: "gear")
-                                        .font(.system(size: 20, weight: .medium))
-                                        .foregroundColor(AppColors.foregroundSecondary)
-                                }
+                            HStack(spacing: 12) {
+                                Text("⚙️")
+                                    .font(.system(size: 24))
                                 
-                                VStack(alignment: .leading, spacing: 4) {
+                                VStack(alignment: .leading, spacing: 2) {
                                     Text("Manage Subscription")
-                                        .font(Font.custom("Overused Grotesk", size: 16).weight(.semibold))
-                                        .foregroundColor(AppColors.foregroundPrimary)
+                                        .font(Font.custom("Overused Grotesk", size: 16).weight(.medium))
+                                        .foregroundColor(.primary)
                                     
                                     Text("Change plan, cancel, or update payment method")
                                         .font(Font.custom("Overused Grotesk", size: 14).weight(.medium))
-                                        .foregroundColor(AppColors.foregroundSecondary)
-                                        .multilineTextAlignment(.leading)
+                                        .foregroundColor(.secondary)
                                 }
                                 
                                 Spacer()
                                 
                                 Image(systemName: "chevron.right")
                                     .font(.system(size: 14, weight: .medium))
-                                    .foregroundColor(AppColors.foregroundSecondary)
+                                    .foregroundColor(.secondary)
                             }
-                            .padding(.horizontal, 20)
-                            .padding(.vertical, 16)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(.white)
-                            .cornerRadius(12)
-                            .shadow(color: .black.opacity(0.05), radius: 4, x: 0, y: 2)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 12)
+                            .background(Color.clear)
                         }
                         .buttonStyle(PlainButtonStyle())
                         
@@ -222,27 +186,18 @@ struct ManageBillingSheet: View {
                         Button(action: {
                             restorePurchases()
                         }) {
-                            HStack(spacing: 16) {
-                                // Shopping cart icon
-                                ZStack {
-                                    Circle()
-                                        .fill(Color.gray.opacity(0.1))
-                                        .frame(width: 48, height: 48)
-                                    
-                                    Image(systemName: "cart")
-                                        .font(.system(size: 20, weight: .medium))
-                                        .foregroundColor(AppColors.foregroundSecondary)
-                                }
+                            HStack(spacing: 12) {
+                                Text("🛒")
+                                    .font(.system(size: 24))
                                 
-                                VStack(alignment: .leading, spacing: 4) {
+                                VStack(alignment: .leading, spacing: 2) {
                                     Text("Already Purchased?")
-                                        .font(Font.custom("Overused Grotesk", size: 16).weight(.semibold))
-                                        .foregroundColor(AppColors.foregroundPrimary)
+                                        .font(Font.custom("Overused Grotesk", size: 16).weight(.medium))
+                                        .foregroundColor(.primary)
                                     
                                     Text("Restore purchases made on another device")
                                         .font(Font.custom("Overused Grotesk", size: 14).weight(.medium))
-                                        .foregroundColor(AppColors.foregroundSecondary)
-                                        .multilineTextAlignment(.leading)
+                                        .foregroundColor(.secondary)
                                 }
                                 
                                 Spacer()
@@ -253,15 +208,12 @@ struct ManageBillingSheet: View {
                                 } else {
                                     Image(systemName: "chevron.right")
                                         .font(.system(size: 14, weight: .medium))
-                                        .foregroundColor(AppColors.foregroundSecondary)
+                                        .foregroundColor(.secondary)
                                 }
                             }
-                            .padding(.horizontal, 20)
-                            .padding(.vertical, 16)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(.white)
-                            .cornerRadius(12)
-                            .shadow(color: .black.opacity(0.05), radius: 4, x: 0, y: 2)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 12)
+                            .background(Color.clear)
                         }
                         .buttonStyle(PlainButtonStyle())
                         .disabled(isLoading)
@@ -286,7 +238,7 @@ struct ManageBillingSheet: View {
             }
             .padding(.bottom, 20)
         }
-        .background(AppColors.backgroundWhite)
+        .background(AppColors.surfacePrimary)
     }
     
     // MARK: - Actions
