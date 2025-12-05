@@ -85,18 +85,20 @@ struct ManageBillingSheet: View {
             ScrollView(showsIndicators: false) {
                 VStack(spacing: 32) {
                     // Combined Hero + Current Plan Section
-                    VStack(alignment: .leading, spacing: 20) {
+                    VStack(alignment: .leading, spacing: 0) {
                         // Manage billing image at top
                         Image("manage-billing-image")
                             .resizable()
                             .aspectRatio(contentMode: .fit)
                             .frame(height: 120)
                             .frame(maxWidth: .infinity)
+                            .padding(.bottom, 20)
                         
                         // Current Plan label
                         Text("Current Plan")
                             .font(Font.custom("Overused Grotesk", size: 14).weight(.medium))
                             .foregroundColor(AppColors.foregroundSecondary)
+                            .padding(.bottom, 4)
                         
                         HStack(alignment: .top) {
                             VStack(alignment: .leading, spacing: 8) {
