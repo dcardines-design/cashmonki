@@ -81,6 +81,9 @@ struct SettingsPage: View {
     @State private var showingGoalsOnboarding = false
     @State private var showingTransactionOnboarding = false
     
+    // Billing management state
+    @State private var showingManageBilling = false
+    
     // Currency change confirmation state
     @State private var showingCurrencyChangeConfirmation = false
     @State private var pendingCurrencyChange: Currency?
@@ -159,6 +162,9 @@ struct SettingsPage: View {
             .fullScreenCover(isPresented: $showingCustomPaywall) {
                 CustomPaywallSheet(isPresented: $showingCustomPaywall)
                     .environmentObject(toastManager)
+            }
+            .fullScreenCover(isPresented: $showingManageBilling) {
+                ManageBillingSheet(isPresented: $showingManageBilling)
             }
             .fullScreenCover(isPresented: $showingNativePaywall) {
                 #if canImport(RevenueCatUI)
@@ -941,7 +947,11 @@ struct SettingsPage: View {
             
             // Get Cashmonki Pro button / Manage Billing for pro users
             AppButton.secondary(revenueCatManager.isProUser ? "Manage Billing" : "Get Cashmonki Pro ⭐", size: .extraSmall) {
-                showingCustomPaywall = true // Show custom paywall for both free and pro users
+                if revenueCatManager.isProUser {
+                    showingManageBilling = true // Show manage billing for pro users
+                } else {
+                    showingCustomPaywall = true // Show paywall for free users
+                }
             }
         }
         .padding(20)
