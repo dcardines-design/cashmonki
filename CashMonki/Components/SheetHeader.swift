@@ -84,7 +84,7 @@ struct SheetHeader: View {
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 16)
-        .background(AppColors.backgroundWhite)
+        .background(AppColors.surfacePrimary)
     }
 }
 

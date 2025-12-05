@@ -153,8 +153,8 @@ struct ManageBillingSheet: View {
                     .cornerRadius(16)
                     .shadow(color: .black.opacity(0.05), radius: 8, x: 0, y: 2)
                     
-                    // Action Items
-                    VStack(spacing: 16) {
+                    // Action Items - grouped together like settings buttons
+                    VStack(spacing: 0) {
                         // Manage Subscription
                         Button(action: {
                             openAppleSubscriptionManagement()
@@ -181,11 +181,12 @@ struct ManageBillingSheet: View {
                             }
                             .padding(.horizontal, 16)
                             .padding(.vertical, 12)
-                            .background(.white)
-                            .cornerRadius(12)
-                            .shadow(color: .black.opacity(0.05), radius: 4, x: 0, y: 2)
+                            .background(Color.clear)
                         }
                         .buttonStyle(PlainButtonStyle())
+                        
+                        Divider()
+                            .padding(.leading, 52)
                         
                         // Already Purchased / Restore Purchases
                         Button(action: {
@@ -218,13 +219,14 @@ struct ManageBillingSheet: View {
                             }
                             .padding(.horizontal, 16)
                             .padding(.vertical, 12)
-                            .background(.white)
-                            .cornerRadius(12)
-                            .shadow(color: .black.opacity(0.05), radius: 4, x: 0, y: 2)
+                            .background(Color.clear)
                         }
                         .buttonStyle(PlainButtonStyle())
                         .disabled(isLoading)
                     }
+                    .background(.white)
+                    .cornerRadius(16)
+                    .clipShape(RoundedRectangle(cornerRadius: 16))
                     
                     Spacer()
                         .frame(height: 40)
@@ -235,7 +237,7 @@ struct ManageBillingSheet: View {
             
             // Footer
             VStack(spacing: 8) {
-                Text("Made with 🧠 & ❤️ by")
+                Text("Made with ☕️ & ♥️ by")
                     .font(Font.custom("Overused Grotesk", size: 14).weight(.medium))
                     .foregroundColor(AppColors.foregroundSecondary)
                 
