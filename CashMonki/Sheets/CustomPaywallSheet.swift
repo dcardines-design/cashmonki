@@ -565,10 +565,13 @@ struct CustomPaywallSheet: View {
                     print("🎉 PAYWALL: Purchase successful!")
                     print("✅ SUBSCRIPTION SUCCESS DEBUG: CustomPaywall purchase successful")
                     
-                    // Show success toast
-                    toastManager.showDone("Done analyzing!")
+                    // Show success toast with proper text
+                    toastManager.showSubscriptionSuccess()
                     
-                    isPresented = false
+                    // Delay dismissal to allow toast to be visible
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                        isPresented = false
+                    }
                 } else {
                     print("❌ PAYWALL: Purchase failed: \(result.error?.localizedDescription ?? "Unknown error")")
                     print("🚨 SUBSCRIPTION ERROR DEBUG: CustomPaywall failure triggered")
@@ -579,9 +582,9 @@ struct CustomPaywallSheet: View {
                         print("🚨 ERROR USER INFO: \((error as NSError).userInfo)")
                     }
                     
-                    // Show error toast
+                    // Show error toast using failed animation
                     print("🍞 TOAST DEBUG: About to show subscription error toast (CustomPaywall)")
-                    toastManager.showError("Something went wrong")
+                    toastManager.showFailed("Something went wrong")
                     print("🍞 TOAST DEBUG: Subscription error toast command sent successfully (CustomPaywall)")
                     
                     // Keep paywall open for retry

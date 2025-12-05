@@ -34,10 +34,26 @@ class RevenueCatManager: NSObject, ObservableObject {
         return isSubscriptionActive
     }
     
+    // MARK: - Debug Testing
+    @Published var debugTrialState: DebugTrialState = .normal
+    
+    enum DebugTrialState {
+        case normal          // Use real RevenueCat data
+        case forceLapsed     // Force lapsed trial state
+        case forceNew        // Force new user state
+    }
+    
     /// Check if user has used trial before but isn't currently subscribed
     var hasUsedTrialBefore: Bool {
-        // DEBUG: Uncomment the line below to force lapsed trial state for testing
-        // return true
+        // DEBUG: Check debug state first
+        switch debugTrialState {
+        case .forceLapsed:
+            return true
+        case .forceNew:
+            return false
+        case .normal:
+            break // Use real logic below
+        }
         
         guard let customerInfo = customerInfo else { return false }
         
@@ -52,6 +68,24 @@ class RevenueCatManager: NSObject, ObservableObject {
         
         // User is "lapsed" if they have purchase history or entitlements but aren't currently active
         return hasAnyPurchases || hasAnyEntitlements
+    }
+    
+    /// Reset debug trial state to normal
+    func resetDebugTrialState() {
+        debugTrialState = .normal
+        print("🔧 DEBUG: Trial state reset to normal")
+    }
+    
+    /// Force lapsed trial state for testing
+    func forceDebugLapsedTrial() {
+        debugTrialState = .forceLapsed
+        print("🔧 DEBUG: Trial state forced to lapsed")
+    }
+    
+    /// Force new user state for testing
+    func forceDebugNewUser() {
+        debugTrialState = .forceNew
+        print("🔧 DEBUG: Trial state forced to new user")
     }
     
     // Offering ID from RevenueCat dashboard

@@ -1231,6 +1231,42 @@ struct SettingsPage: View {
                 OnboardingStateManager.shared.resetOnboardingState()
                 toastManager.showSuccess("Onboarding state reset successfully")
             }
+            
+            Divider()
+                .padding(.leading, 52)
+            
+            settingsRow(
+                title: "Force Lapsed Trial State",
+                subtitle: "Test lapsed trial paywall variant",
+                icon: "⏰"
+            ) {
+                RevenueCatManager.shared.forceDebugLapsedTrial()
+                toastManager.showSuccess("Forced lapsed trial state")
+            }
+            
+            Divider()
+                .padding(.leading, 52)
+            
+            settingsRow(
+                title: "Force New User State", 
+                subtitle: "Test new user paywall variant",
+                icon: "✨"
+            ) {
+                RevenueCatManager.shared.forceDebugNewUser()
+                toastManager.showSuccess("Forced new user state")
+            }
+            
+            Divider()
+                .padding(.leading, 52)
+            
+            settingsRow(
+                title: "Reset Trial Debug State",
+                subtitle: "Return to normal RevenueCat data",
+                icon: "🔧"
+            ) {
+                RevenueCatManager.shared.resetDebugTrialState()
+                toastManager.showSuccess("Trial debug state reset")
+            }
         }
     }
     

@@ -24,9 +24,9 @@ struct ToastView: View {
         case .failed:
             return "Try again in good lighting or cropping closer"
         case .error:
-            return "Please try again"
+            return "Try again later maybe!"
         case .success:
-            return "" // No subtitle for success toast
+            return "Your future self says thanks 😉"
         case .deleted:
             return "" // No subtitle for deleted toast
         case .welcome:
@@ -278,6 +278,17 @@ class ToastManager: ObservableObject {
         // Auto-dismiss after 2.5 seconds (1 second longer than transaction added toast)
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
             print("🎉 ToastManager: Auto-dismissing welcome toast after 2.5 seconds")
+            self.dismiss()
+        }
+    }
+    
+    func showSubscriptionSuccess() {
+        print("🎯 ToastManager: ======= SUBSCRIPTION SUCCESS TOAST =======")
+        show("Welcome to Cashmonki Pro!", type: .success)
+        
+        // Auto-dismiss after 3 seconds (longer to allow reading)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
+            print("🎯 ToastManager: Auto-dismissing subscription success toast")
             self.dismiss()
         }
     }
