@@ -84,15 +84,16 @@ struct ManageBillingSheet: View {
             // Content
             ScrollView(showsIndicators: false) {
                 VStack(spacing: 32) {
-                    // Hero area with manage billing image
-                    Image("manage-billing-image")
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
-                        .frame(height: 120)
-                        .frame(maxWidth: .infinity)
-                    
-                    // Current Plan Section
-                    VStack(alignment: .leading, spacing: 16) {
+                    // Combined Hero + Current Plan Section
+                    VStack(alignment: .leading, spacing: 20) {
+                        // Manage billing image at top
+                        Image("manage-billing-image")
+                            .resizable()
+                            .aspectRatio(contentMode: .fit)
+                            .frame(height: 120)
+                            .frame(maxWidth: .infinity)
+                        
+                        // Current Plan label
                         Text("Current Plan")
                             .font(Font.custom("Overused Grotesk", size: 14).weight(.medium))
                             .foregroundColor(AppColors.foregroundSecondary)
@@ -147,7 +148,7 @@ struct ManageBillingSheet: View {
                     .padding(20)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(.white)
-                    .cornerRadius(12)
+                    .cornerRadius(16)
                     .shadow(color: .black.opacity(0.05), radius: 8, x: 0, y: 2)
                     
                     // Action Items
