@@ -106,7 +106,7 @@ struct CustomPaywallSheet: View {
                     // Content area with Cashmonki Pro text image
                     VStack(spacing: 24) {
                         // Header image - different for lapsed trial users
-                        Image(revenueCatManager.hasUsedTrialBefore ? "cashmonki pro text trial ended" : "cashmonki-pro-text")
+                        Image(revenueCatManager.hasUsedTrialBefore ? "cashmonki-pro-text-trial-ended" : "cashmonki-pro-text")
                             .resizable()
                             .aspectRatio(contentMode: .fit)
                             .frame(maxWidth: .infinity)

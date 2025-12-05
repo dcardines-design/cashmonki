@@ -158,6 +158,7 @@ struct SettingsPage: View {
             }
             .fullScreenCover(isPresented: $showingCustomPaywall) {
                 CustomPaywallSheet(isPresented: $showingCustomPaywall)
+                    .environmentObject(toastManager)
             }
             .fullScreenCover(isPresented: $showingNativePaywall) {
                 #if canImport(RevenueCatUI)
@@ -166,13 +167,14 @@ struct SettingsPage: View {
                     if let targetOffering = revenueCatManager.targetOffering {
                         // Use YOUR RevenueCat dashboard paywall with target offering
                         PaywallView(offering: targetOffering)
+                            .environmentObject(toastManager)
                             .onPurchaseCompleted { customerInfo in
                                 print("🎉 PAYWALL: Purchase completed successfully!")
                                 showingNativePaywall = false
                                 
                                 // Show success toast
                                 DispatchQueue.main.async {
-                                    toastManager.showSuccess("🎉 Welcome to CashMonki Pro!")
+                                    toastManager.showDone("Done analyzing!")
                                 }
                                 
                                 // Update RevenueCat manager
@@ -192,26 +194,34 @@ struct SettingsPage: View {
                             }
                             .onPurchaseFailure { error in
                                 print("❌ PAYWALL: Purchase failed: \(error.localizedDescription)")
+                                print("🚨 SUBSCRIPTION ERROR DEBUG: Target offering paywall failure triggered")
+                                print("🚨 ERROR DETAILS: \(error)")
+                                print("🚨 ERROR CODE: \((error as NSError).code)")
+                                print("🚨 ERROR DOMAIN: \((error as NSError).domain)")
                                 // Don't dismiss paywall on failure, let user retry
                                 
                                 // Show error toast
                                 DispatchQueue.main.async {
-                                    toastManager.showError("❌ Purchase failed. Please try again.")
+                                    print("🍞 TOAST DEBUG: About to show subscription error toast (Target Offering)")
+                                    toastManager.showError("Something went wrong")
+                                    print("🍞 TOAST DEBUG: Subscription error toast command sent successfully")
                                 }
                             }
                             .onAppear {
                                 print("✅ PAYWALL: Using target offering '\(targetOffering.identifier)'")
+                                print("🛡️ PAYWALL DEBUG: Target offering paywall appeared - ready for subscription attempts")
                             }
                     } else if let offerings = revenueCatManager.offerings, let firstOffering = offerings.all.first?.value {
                         // Fallback to first available offering
                         PaywallView(offering: firstOffering)
+                            .environmentObject(toastManager)
                             .onPurchaseCompleted { customerInfo in
                                 print("🎉 PAYWALL: Purchase completed successfully!")
                                 showingNativePaywall = false
                                 
                                 // Show success toast
                                 DispatchQueue.main.async {
-                                    toastManager.showSuccess("🎉 Welcome to CashMonki Pro!")
+                                    toastManager.showDone("Done analyzing!")
                                 }
                                 
                                 // Update RevenueCat manager
@@ -235,7 +245,9 @@ struct SettingsPage: View {
                                 
                                 // Show error toast
                                 DispatchQueue.main.async {
-                                    toastManager.showError("❌ Purchase failed. Please try again.")
+                                    print("🍞 DEBUG: About to show error toast for purchase failure")
+                                    toastManager.showError("Something went wrong")
+                                    print("🍞 DEBUG: Error toast command sent")
                                 }
                             }
                             .onAppear {
@@ -244,13 +256,14 @@ struct SettingsPage: View {
                     } else if let offerings = revenueCatManager.offerings, let currentOffering = offerings.current {
                         // Fallback to current offering
                         PaywallView(offering: currentOffering)
+                            .environmentObject(toastManager)
                             .onPurchaseCompleted { customerInfo in
                                 print("🎉 PAYWALL: Purchase completed successfully!")
                                 showingNativePaywall = false
                                 
                                 // Show success toast
                                 DispatchQueue.main.async {
-                                    toastManager.showSuccess("🎉 Welcome to CashMonki Pro!")
+                                    toastManager.showDone("Done analyzing!")
                                 }
                                 
                                 // Update RevenueCat manager
@@ -274,7 +287,9 @@ struct SettingsPage: View {
                                 
                                 // Show error toast
                                 DispatchQueue.main.async {
-                                    toastManager.showError("❌ Purchase failed. Please try again.")
+                                    print("🍞 DEBUG: About to show error toast for purchase failure")
+                                    toastManager.showError("Something went wrong")
+                                    print("🍞 DEBUG: Error toast command sent")
                                 }
                             }
                             .onAppear {
@@ -325,6 +340,34 @@ struct SettingsPage: View {
                 .onPurchaseCompleted { customerInfo in
                     print("✅ PAYWALL: Purchase completed: \(customerInfo.entitlements)")
                     showingNativePaywall = false
+                    
+                    // Show success toast
+                    DispatchQueue.main.async {
+                        toastManager.showDone("Done analyzing!")
+                    }
+                    
+                    // Update RevenueCat manager
+                    revenueCatManager.customerInfo = customerInfo
+                }
+                .onPurchaseFailure { error in
+                    print("❌ PAYWALL: Purchase failed: \(error.localizedDescription)")
+                    print("🚨 SUBSCRIPTION ERROR DEBUG: MAIN PAYWALL failure triggered - THIS IS THE LIKELY HANDLER!")
+                    print("🚨 ERROR DETAILS: \(error)")
+                    print("🚨 ERROR CODE: \((error as NSError).code)")
+                    print("🚨 ERROR DOMAIN: \((error as NSError).domain)")
+                    print("🚨 ERROR USER INFO: \((error as NSError).userInfo)")
+                    // Don't dismiss paywall on failure, let user retry
+                    
+                    // Show error toast
+                    DispatchQueue.main.async {
+                        print("🍞 TOAST DEBUG: About to show subscription error toast (MAIN PAYWALL - MOST LIKELY TO FIRE)")
+                        toastManager.showError("Something went wrong")
+                        print("🍞 TOAST DEBUG: Subscription error toast command sent successfully (MAIN)")
+                        
+                        // Additional verification
+                        print("🍞 TOAST VERIFICATION: Toast manager type: \(type(of: toastManager))")
+                        print("🍞 TOAST VERIFICATION: Currently on main thread: \(Thread.isMainThread)")
+                    }
                 }
                 .onRestoreCompleted { customerInfo in
                     print("✅ PAYWALL: Purchases restored: \(customerInfo.entitlements)")
@@ -334,6 +377,7 @@ struct SettingsPage: View {
                     print("👋 PAYWALL: User dismissed paywall")
                     showingNativePaywall = false
                 }
+                .environmentObject(toastManager)
                 #else
                 let _ = print("❌ PAYWALL DEBUG: RevenueCatUI NOT AVAILABLE - This is why you see 'not available'")
                 Text("RevenueCat Paywall Not Available")
@@ -808,7 +852,7 @@ struct SettingsPage: View {
                     
                     Spacer()
                     
-                    Text(revenueCatManager.isProUser ? "Unlimited" : "\(receiptsScannedToday)/3 today")
+                    Text(revenueCatManager.isProUser ? "Unlimited" : "\(usedScansToday)/3 today")
                         .font(Font.custom("Overused Grotesk", size: 16).weight(.medium))
                         .foregroundColor(AppColors.foregroundSecondary)
                         .opacity(revenueCatManager.isProUser ? 0.8 : 1.0)
@@ -825,7 +869,7 @@ struct SettingsPage: View {
                     Rectangle()
                         .fill(revenueCatManager.isProUser ? AppColors.successForeground : Color(red: 0x4C/255.0, green: 0x3B/255.0, blue: 0xF5/255.0))
                         .frame(width: .infinity, height: 10)
-                        .scaleEffect(x: revenueCatManager.isProUser ? 1.0 : Double(receiptsScannedToday)/3.0, anchor: .leading)
+                        .scaleEffect(x: revenueCatManager.isProUser ? 1.0 : Double(usedScansToday)/3.0, anchor: .leading)
                         .opacity(revenueCatManager.isProUser ? 0.9 : 1.0)
                         .animation(.easeInOut(duration: 0.5), value: revenueCatManager.isProUser)
                 }
@@ -841,7 +885,7 @@ struct SettingsPage: View {
                     
                     Spacer()
                     
-                    Text(revenueCatManager.isProUser ? "Go nuts" : "No Custom Categories")
+                    Text(revenueCatManager.isProUser ? "Go bananas" : "No Custom Categories")
                         .font(Font.custom("Overused Grotesk", size: 16).weight(.medium))
                         .foregroundColor(AppColors.foregroundSecondary)
                 }
@@ -923,6 +967,13 @@ struct SettingsPage: View {
         }
         
         return todayTransactions.count
+    }
+    
+    private var usedScansToday: Int {
+        // Use DailyUsageManager to get the actual API usage count
+        let maxUsage = 3
+        let remaining = dailyUsageManager.getRemainingUsage()
+        return maxUsage - remaining
     }
     
     private var currentWalletCount: Int {
@@ -1018,7 +1069,7 @@ struct SettingsPage: View {
                     subtitle: "Get help with your account",
                     icon: "😀"
                 ) {
-                    // TODO: Add customer support functionality
+                    openSupportEmail()
                 }
             }
             .background(AppColors.backgroundWhite)
@@ -2761,6 +2812,29 @@ struct SettingsPage: View {
             }
             .background(AppColors.surfaceSecondary)
             .cornerRadius(12)
+        }
+    }
+    
+    // MARK: - Support Functions
+    
+    /// Opens the user's default email app with support email pre-filled
+    private func openSupportEmail() {
+        let email = "dcardinesiii@gmail.com"
+        let subject = "CashMonki Support Request"
+        let body = "Hi there,\n\nI need help with my CashMonki app.\n\n"
+        
+        // Create mailto URL with pre-filled content
+        let encodedSubject = subject.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
+        let encodedBody = body.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
+        let mailtoString = "mailto:\(email)?subject=\(encodedSubject)&body=\(encodedBody)"
+        
+        if let mailtoURL = URL(string: mailtoString) {
+            #if canImport(UIKit)
+            UIApplication.shared.open(mailtoURL)
+            #else
+            // For macOS or other platforms
+            NSWorkspace.shared.open(mailtoURL)
+            #endif
         }
     }
 }
