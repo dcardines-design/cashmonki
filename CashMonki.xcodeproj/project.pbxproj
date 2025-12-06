@@ -44,9 +44,11 @@
 		CBE1FAC92EE185B10010B134 /* Exceptions for "CashMonki" folder in "CashMonkiTests" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
+				"File Assets/cashmonki pro text trial ended.png",
 				"File Assets/cashmonki pro text.png",
 				"File Assets/feature usage card image.svg",
 				"File Assets/home-line.svg",
+				"File Assets/manage billing image.svg",
 				"File Assets/paywall bg.jpg",
 				"File Assets/receipt-check.svg",
 				"File Assets/user-02.svg",
@@ -56,9 +58,11 @@
 		CBE1FACA2EE185B10010B134 /* Exceptions for "CashMonki" folder in "CashMonkiUITests" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
+				"File Assets/cashmonki pro text trial ended.png",
 				"File Assets/cashmonki pro text.png",
 				"File Assets/feature usage card image.svg",
 				"File Assets/home-line.svg",
+				"File Assets/manage billing image.svg",
 				"File Assets/paywall bg.jpg",
 				"File Assets/receipt-check.svg",
 				"File Assets/user-02.svg",
@@ -171,7 +175,7 @@
 				CB8D47302EBB475A00760A39 /* Lottie */,
 				CBEAE1422ECE30C70044BD60 /* RevenueCatUI */,
 			);
-			productName = "Cashooya Playground";
+			productName = "CashMonki";
 			productReference = CB02A6302E69FAE000B15F44 /* CashMonki.app */;
 			productType = "com.apple.product-type.application";
 		};
@@ -545,14 +549,14 @@
 				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				MACOSX_DEPLOYMENT_TARGET = 15.0;
 				MARKETING_VERSION = 1.0.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "Rosebud.Cashooya-PlaygroundTests";
+				PRODUCT_BUNDLE_IDENTIFIER = com.dante.cashmonkiTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = auto;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx xros xrsimulator";
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2,7";
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Cashooya Playground.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Cashooya Playground";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/CashMonki.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/CashMonki";
 				XROS_DEPLOYMENT_TARGET = 2.0;
 			};
 			name = Debug;
@@ -569,14 +573,14 @@
 				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				MACOSX_DEPLOYMENT_TARGET = 15.0;
 				MARKETING_VERSION = 1.0.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "Rosebud.Cashooya-PlaygroundTests";
+				PRODUCT_BUNDLE_IDENTIFIER = com.dante.cashmonkiTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = auto;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx xros xrsimulator";
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2,7";
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Cashooya Playground.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Cashooya Playground";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/CashMonki.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/CashMonki";
 				XROS_DEPLOYMENT_TARGET = 2.0;
 			};
 			name = Release;
@@ -592,14 +596,14 @@
 				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				MACOSX_DEPLOYMENT_TARGET = 15.0;
 				MARKETING_VERSION = 1.0.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "Rosebud.Cashooya-PlaygroundUITests";
+				PRODUCT_BUNDLE_IDENTIFIER = com.dante.cashmonkiUITests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = auto;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx xros xrsimulator";
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2,7";
-				TEST_TARGET_NAME = "Cashooya Playground";
+				TEST_TARGET_NAME = "CashMonki";
 				XROS_DEPLOYMENT_TARGET = 2.0;
 			};
 			name = Debug;
@@ -615,14 +619,14 @@
 				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				MACOSX_DEPLOYMENT_TARGET = 15.0;
 				MARKETING_VERSION = 1.0.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "Rosebud.Cashooya-PlaygroundUITests";
+				PRODUCT_BUNDLE_IDENTIFIER = com.dante.cashmonkiUITests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = auto;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx xros xrsimulator";
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2,7";
-				TEST_TARGET_NAME = "Cashooya Playground";
+				TEST_TARGET_NAME = "CashMonki";
 				XROS_DEPLOYMENT_TARGET = 2.0;
 			};
 			name = Release;
