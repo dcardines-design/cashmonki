@@ -64,8 +64,8 @@ struct AddTransactionSheet: View {
                     // Merchant Name Field
                     AppInputField.merchant(text: $merchantName, size: .md, focusBinding: $isMerchantFocused)
 
-                    // Date Field
-                    AppInputField.date(title: "Date", dateValue: $date, size: .md)
+                    // Date Field with Time
+                    AppInputField.date(title: "Date", dateValue: $date, components: [.date, .hourAndMinute], size: .md)
 
                     // Category Field
                     AppInputField.categoryById(selectedCategoryId: $selectedCategoryId, size: .md)
