@@ -28,7 +28,7 @@ struct AccountSelectorButton: View {
                     .fill(AppColors.walletAvatar)
                     .frame(width: 40, height: 40)
                     .overlay(
-                        Text(accountManager.currentSubAccount?.initials ?? "?")
+                        Text(accountManager.currentSubAccount?.initials ?? userManager.currentUser.subAccounts.first?.initials ?? "P")
                             .font(AppFonts.overusedGroteskSemiBold(size: 16))
                             .foregroundColor(.white)
                     )
@@ -54,7 +54,9 @@ struct AccountSelectorButton: View {
                                 .font(AppFonts.overusedGroteskMedium(size: 16))
                                 .foregroundColor(AppColors.foregroundPrimary)
                         } else {
-                            Text("All accounts")
+                            // Fallback to first available wallet or create default
+                            let fallbackName = userManager.currentUser.subAccounts.first?.name ?? "Personal"
+                            Text(fallbackName)
                                 .font(AppFonts.overusedGroteskMedium(size: 16))
                                 .foregroundColor(AppColors.foregroundPrimary)
                         }

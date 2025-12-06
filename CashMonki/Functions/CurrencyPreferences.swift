@@ -155,6 +155,30 @@ final class CurrencyPreferences: ObservableObject {
         print("   💱 Secondary: \(secondaryCurrency?.rawValue ?? "none") (\(secondaryCurrency?.displayName ?? "none")) - Symbol: \(secondarySymbol)")
         print("   📱 Example formatting: \(formatPrimaryAmount(1234.56))")
     }
+    
+    /// Reset all currency preferences to fresh state (for account deletion)
+    func resetToDefault() {
+        print("🔄 CurrencyPreferences: Resetting to fresh state - new user will select currency during onboarding")
+        
+        // Reset to initial default (PHP - technical default to prevent crashes)
+        primaryCurrency = .php
+        secondaryCurrency = nil
+        
+        // CRITICAL: Clear ALL stored preferences and flags
+        UserDefaults.standard.removeObject(forKey: "userPrimaryCurrency")
+        UserDefaults.standard.removeObject(forKey: "userSecondaryCurrency")
+        UserDefaults.standard.removeObject(forKey: "hasSetPrimaryCurrency")
+        UserDefaults.standard.removeObject(forKey: "hasCompletedCurrencySelection")
+        
+        // Don't save to storage - let new user pick their currency
+        // saveToStorage() is intentionally NOT called here
+        
+        // Trigger UI update
+        objectWillChange.send()
+        
+        print("✅ CurrencyPreferences: Reset to fresh state - PHP technical default, no stored preferences")
+        print("   New user will select their preferred currency during onboarding")
+    }
 }
 
 // MARK: - Global Convenience Functions

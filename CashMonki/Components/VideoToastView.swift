@@ -20,7 +20,7 @@ struct VideoToastView: View {
         case .done:
             return "All scanned and sorted ✨"
         case .error:
-            return "Please try again"
+            return "Try again later maybe!"
         }
     }
     

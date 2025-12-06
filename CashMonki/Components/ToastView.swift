@@ -26,6 +26,8 @@ struct ToastView: View {
         case .error:
             return "Try again later maybe!"
         case .success:
+            return "" // No subtitle for regular success toasts
+        case .subscriptionSuccess:
             return "Your future self says thanks 😉"
         case .deleted:
             return "" // No subtitle for deleted toast
@@ -42,6 +44,7 @@ struct ToastView: View {
         case failed
         case error
         case success
+        case subscriptionSuccess
         case deleted
         case welcome
         case noConnection
@@ -58,6 +61,8 @@ struct ToastView: View {
                 return "error-warning" // You can add this later
             case .success:
                 return "toast-done" // Use same animation as done state
+            case .subscriptionSuccess:
+                return "toast-done" // Use same animation as success state
             case .deleted:
                 return "toast-deleted" // Use deleted Lottie animation
             case .welcome:
@@ -79,6 +84,8 @@ struct ToastView: View {
                 return "error-warning" // You can add this later
             case .success:
                 return "toast-done" // Use same Lottie as done state
+            case .subscriptionSuccess:
+                return "toast-done" // Use same Lottie as success state
             case .deleted:
                 return "toast-deleted" // Use deleted Lottie animation
             case .welcome:
@@ -100,6 +107,29 @@ struct ToastView: View {
         var backgroundColor: Color {
             // All toasts use black background now
             return Color.black
+        }
+        
+        var description: String {
+            switch self {
+            case .scanning:
+                return "scanning"
+            case .done:
+                return "done"
+            case .failed:
+                return "failed"
+            case .error:
+                return "error"
+            case .success:
+                return "success"
+            case .subscriptionSuccess:
+                return "subscriptionSuccess"
+            case .deleted:
+                return "deleted"
+            case .welcome:
+                return "welcome"
+            case .noConnection:
+                return "noConnection"
+            }
         }
     }
     
@@ -186,8 +216,11 @@ struct ToastView: View {
         .shadow(color: Color(red: 0.06, green: 0.09, blue: 0.16).opacity(0.18), radius: 24, x: 0, y: 24)
         .padding(.horizontal, 15)
         .transition(.asymmetric(
-            insertion: .move(edge: .bottom),
-            removal: .move(edge: .bottom).combined(with: .offset(y: 100))
+            insertion: .move(edge: .bottom)
+                .animation(.bouncy(duration: 0.3)),
+            removal: .move(edge: .bottom)
+                .combined(with: .offset(y: 100))
+                .animation(.bouncy(duration: 0.3))
         ))
         .onAppear {
             // Auto-dismiss is now handled by ToastManager only
@@ -211,12 +244,33 @@ class ToastManager: ObservableObject {
     }
     
     func show(_ message: String, type: ToastView.ToastType) {
+        print("🍞 === SHOW() CORE DEBUG START ===")
         print("🍞 DEBUG: ToastManager.show() called with message: '\(message)', type: \(type)")
-        print("🍞 DEBUG: 🔧 FIXED: ToastManager object ID: \(ObjectIdentifier(self))")
+        print("🍞 DEBUG: ToastManager object ID: \(ObjectIdentifier(self))")
+        print("🍞 DEBUG: Current thread: \(Thread.current)")
+        print("🍞 DEBUG: Is main thread: \(Thread.isMainThread)")
+        print("🍞 DEBUG: Existing currentToast before clear: \(currentToast?.message ?? "nil")")
+        
+        // Clear any existing toast first
+        currentToast = nil
+        print("🍞 DEBUG: Cleared existing toast")
+        
+        print("🍞 DEBUG: About to create new ToastData...")
+        let newToast = ToastData(message: message, type: type)
+        print("🍞 DEBUG: Created ToastData - message: '\(newToast.message)', type: \(newToast.type.description)")
+        print("🍞 DEBUG: ToastData isShowing: \(newToast.isShowing)")
+        
+        print("🍞 DEBUG: About to set currentToast with animation...")
         withAnimation(.bouncy(duration: 0.3)) {
-            currentToast = ToastData(message: message, type: type)
-            print("🍞 DEBUG: Toast created successfully")
+            currentToast = newToast
+            print("🍞 DEBUG: Set currentToast inside animation block")
         }
+        
+        print("🍞 DEBUG: Animation block completed")
+        print("🍞 DEBUG: Final currentToast: \(currentToast?.message ?? "nil")")
+        print("🍞 DEBUG: Final currentToast type: \(currentToast?.type.description ?? "nil")")
+        print("🍞 DEBUG: Final currentToast isShowing: \(currentToast?.isShowing ?? false)")
+        print("🍞 === SHOW() CORE DEBUG END ===")
     }
     
     func showScanning(_ message: String = "Crunching the numbers...") {
@@ -228,11 +282,36 @@ class ToastManager: ObservableObject {
     }
     
     func showFailed(_ message: String = "Couldn't read that one 🤔") {
+        print("🍞 === SHOWFAILED DEBUG START ===")
+        print("🍞 showFailed() called with message: '\(message)'")
+        print("🍞 ToastManager object ID: \(ObjectIdentifier(self))")
+        print("🍞 Current toast before showFailed: \(currentToast?.message ?? "nil")")
+        print("🍞 Current toast type before: \(currentToast?.type.description ?? "nil")")
+        print("🍞 About to call show() with .failed type...")
+        
         show(message, type: .failed)
+        
+        print("🍞 show() call completed")
+        print("🍞 Current toast after show(): \(currentToast?.message ?? "nil")")
+        print("🍞 Current toast type after: \(currentToast?.type.description ?? "nil")")
+        print("🍞 Current toast isShowing: \(currentToast?.isShowing ?? false)")
+        print("🍞 === SHOWFAILED DEBUG END ===")
+        
+        // Auto-dismiss failed toast after 3 seconds
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
+            print("🚨 ToastManager: Auto-dismissing failed toast after 3 seconds")
+            self.dismiss()
+        }
     }
     
     func showError(_ message: String = "Processing failed. Please try again.") {
         show(message, type: .error)
+        
+        // Auto-dismiss error toast after 3 seconds
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
+            print("❌ ToastManager: Auto-dismissing error toast after 3 seconds")
+            self.dismiss()
+        }
     }
     
     func showSuccess(_ message: String = "Transaction added!") {
@@ -284,10 +363,10 @@ class ToastManager: ObservableObject {
     
     func showSubscriptionSuccess() {
         print("🎯 ToastManager: ======= SUBSCRIPTION SUCCESS TOAST =======")
-        show("Welcome to Cashmonki Pro!", type: .success)
+        show("Welcome to Cashmonki Pro!", type: .subscriptionSuccess)
         
-        // Auto-dismiss after 3 seconds (longer to allow reading)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
+        // Auto-dismiss after 4 seconds (longer to allow reading)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 4.0) {
             print("🎯 ToastManager: Auto-dismissing subscription success toast")
             self.dismiss()
         }
@@ -494,21 +573,36 @@ struct ToastOverlay: ViewModifier {
     func body(content: Content) -> some View {
         content
             .overlay(alignment: .bottom) {
-                if let toast = toastManager.currentToast {
-                    ToastView(
-                        message: toast.message,
-                        type: toast.type,
-                        isShowing: Binding(
-                            get: { toast.isShowing },
-                            set: { _ in toastManager.dismiss() }
-                        ),
-                        showFailedOverlay: toast.showFailedOverlay
-                    )
-                    .padding(.bottom, 65) // 65px above navbar
-                    .zIndex(1000)
+                Group {
+                    if let toast = toastManager.currentToast {
+                        ToastView(
+                            message: toast.message,
+                            type: toast.type,
+                            isShowing: Binding(
+                                get: { toast.isShowing },
+                                set: { _ in toastManager.dismiss() }
+                            ),
+                            showFailedOverlay: toast.showFailedOverlay
+                        )
+                        .padding(.bottom, 65) // 65px above navbar
+                        .zIndex(1000)
+                        .onAppear {
+                            print("🍞 UI: ToastView appeared on screen!")
+                        }
+                        .onDisappear {
+                            print("🍞 UI: ToastView disappeared from screen!")
+                        }
+                    }
                 }
             }
             .environmentObject(toastManager)
+            .onReceive(toastManager.$currentToast) { newToast in
+                if let toast = newToast {
+                    print("🍞 UI: ToastOverlay received new toast: '\(toast.message)', type: \(toast.type.description)")
+                } else {
+                    print("🍞 UI: ToastOverlay received nil toast (dismissal)")
+                }
+            }
     }
 }
 

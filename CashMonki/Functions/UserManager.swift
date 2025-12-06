@@ -52,6 +52,7 @@ class UserManager: ObservableObject {
             email: "guest@cashmonki.com",
             transactions: [],
             accounts: [defaultWallet],
+            onboardingCompleted: 0, // Default: not started
             enableFirebaseSync: false // DEFAULT TO OFF for local-first approach
         )
         
@@ -241,6 +242,8 @@ class UserManager: ObservableObject {
                 accounts: localUser.accounts,
                 createdAt: localUser.createdAt,
                 updatedAt: localUser.updatedAt,
+                goals: localUser.goals,
+                onboardingCompleted: localUser.onboardingCompleted, // Preserve onboarding progress
                 enableFirebaseSync: false // Default to OFF - local first
             )
             
@@ -295,6 +298,7 @@ class UserManager: ObservableObject {
             email: email,
             transactions: [],
             accounts: [defaultWallet],
+            onboardingCompleted: 0, // New user starts onboarding from beginning
             enableFirebaseSync: false // DEFAULT TO OFF - local first approach
         )
         
@@ -652,6 +656,19 @@ class UserManager: ObservableObject {
         }
     }
     
+    /// Update user's onboarding progression number
+    func updateOnboardingProgress(_ progress: Int) {
+        print("🔢 UserManager: Updating onboarding progress: \(currentUser.onboardingCompleted) → \(progress)")
+        currentUser.onboardingCompleted = progress
+        currentUser.updatedAt = Date()
+        
+        // SINGLE SOURCE OF TRUTH: Only save locally - no Firebase sync for onboarding
+        saveCurrentUserLocally()
+        
+        print("🔢 UserManager: Onboarding progress saved locally only (no Firebase sync)")
+        print("   - Onboarding state is device-specific and doesn't need cross-device sync")
+    }
+    
     private func updateFirebaseDisplayName(_ name: String) {
         #if canImport(FirebaseAuth)
         if let user = Auth.auth().currentUser {
@@ -785,7 +802,8 @@ class UserManager: ObservableObject {
             name: "Guest User",
             email: "guest@cashmonki.com",
             transactions: [],
-            accounts: []
+            accounts: [],
+            onboardingCompleted: 0 // Reset onboarding on logout
         )
         
         objectWillChange.send()
@@ -1424,7 +1442,7 @@ class UserManager: ObservableObject {
                         // Merge accounts instead of replacing everything
                         let mergedAccounts = self.mergeAccounts(local: self.currentUser.accounts, firebase: userData.accounts)
                         
-                        // Create updated user with merged accounts but preserve other local changes
+                        // Create updated user with merged accounts but preserve LOCAL onboarding state
                         let mergedUser = UserData(
                             id: userData.id,
                             name: userData.name,
@@ -1433,8 +1451,14 @@ class UserManager: ObservableObject {
                             accounts: mergedAccounts,
                             createdAt: userData.createdAt,
                             updatedAt: max(self.currentUser.updatedAt, userData.updatedAt),
+                            goals: userData.goals,
+                            onboardingCompleted: self.currentUser.onboardingCompleted, // SINGLE SOURCE OF TRUTH: Keep local progress, ignore Firebase
                             enableFirebaseSync: userData.enableFirebaseSync
                         )
+                        
+                        print("🔢 UserManager: Keeping LOCAL onboarding progress: \(self.currentUser.onboardingCompleted)")
+                        print("   - Firebase onboarding field excluded from sync (local-only)")
+                        print("   - Each device tracks its own onboarding state independently")
                         
                         self.currentUser = mergedUser
                         print("🔄 UserManager: Merged accounts - final count: \(mergedAccounts.count)")
@@ -1640,6 +1664,18 @@ class UserManager: ObservableObject {
     func deleteAccount(withId accountId: UUID) {
         currentUser.removeAccount(withId: accountId)
         
+        // Check if this was the last wallet - if so, reset onboarding to 1
+        if currentUser.accounts.isEmpty {
+            print("🚨 UserManager: Last wallet deleted - resetting onboarding to step 1 (name collection)")
+            print("   User will skip email verification but redo name/currency/goals setup")
+            updateOnboardingProgress(1)
+            
+            // Also reset the OnboardingStateManager to ensure UI consistency
+            OnboardingStateManager.shared.resetOnboardingToStep(1)
+        } else {
+            print("💾 UserManager: Wallet deleted - \(currentUser.accounts.count) wallets remaining")
+        }
+        
         // Save to local storage immediately
         saveCurrentUserLocally()
         
@@ -1648,7 +1684,7 @@ class UserManager: ObservableObject {
             self.objectWillChange.send()
         }
         
-        print("💾 UserManager: Wallet deleted and saved locally")
+        print("💾 UserManager: Wallet deletion complete and saved locally")
     }
     
     func setDefaultSubAccount(_ accountId: UUID) {

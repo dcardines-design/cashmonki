@@ -220,23 +220,51 @@ class RevenueCatManager: NSObject, ObservableObject {
     }
     
     private func updateSubscriptionStatus(_ customerInfo: CustomerInfo) {
-        // Check if user has any active entitlements
-        // Check for "Pro" entitlement (must match dashboard exactly)
-        let hasProEntitlement = customerInfo.entitlements["Pro"]?.isActive == true
-        let hasPremiumEntitlement = customerInfo.entitlements["premium"]?.isActive == true
+        print("🔍 RevenueCat: ======= SUBSCRIPTION STATUS UPDATE =======")
         
-        isSubscriptionActive = hasProEntitlement || hasPremiumEntitlement
+        // Check if user has any active entitlements
+        // Check for common entitlement names (case variations)
+        let proEntitlement = customerInfo.entitlements["Pro"]?.isActive == true
+        let premiumEntitlement = customerInfo.entitlements["premium"]?.isActive == true
+        let cashmonkiProEntitlement = customerInfo.entitlements["Cashmonki Pro"]?.isActive == true
+        let cashmonkiEntitlement = customerInfo.entitlements["Cashmonki"]?.isActive == true
+        
+        // Also check for any active entitlement at all
+        let hasAnyActiveEntitlement = !customerInfo.entitlements.active.isEmpty
+        
+        isSubscriptionActive = proEntitlement || premiumEntitlement || cashmonkiProEntitlement || cashmonkiEntitlement || hasAnyActiveEntitlement
         
         print("💰 RevenueCat: Entitlement status check:")
-        print("   🎯 'pro' entitlement: \(hasProEntitlement)")
-        print("   ✨ 'premium' entitlement: \(hasPremiumEntitlement)")
+        print("   🎯 'Pro' entitlement: \(proEntitlement)")
+        print("   ✨ 'premium' entitlement: \(premiumEntitlement)")
+        print("   💎 'Cashmonki Pro' entitlement: \(cashmonkiProEntitlement)")
+        print("   🐒 'Cashmonki' entitlement: \(cashmonkiEntitlement)")
+        print("   🔥 Any active entitlement: \(hasAnyActiveEntitlement)")
         print("   📱 Final subscription active: \(isSubscriptionActive)")
         
         // Debug: Show all available entitlements
-        print("🔍 RevenueCat: Available entitlements:")
+        print("🔍 RevenueCat: All entitlements:")
         for (identifier, entitlement) in customerInfo.entitlements.all {
-            print("   📋 \(identifier): active=\(entitlement.isActive)")
+            print("   📋 '\(identifier)': active=\(entitlement.isActive), expires=\(entitlement.expirationDate?.description ?? "never")")
         }
+        
+        // Debug: Show active entitlements specifically
+        print("🔥 RevenueCat: Active entitlements:")
+        if customerInfo.entitlements.active.isEmpty {
+            print("   ❌ No active entitlements found")
+        } else {
+            for (identifier, entitlement) in customerInfo.entitlements.active {
+                print("   ✅ '\(identifier)': expires=\(entitlement.expirationDate?.description ?? "never")")
+            }
+        }
+        
+        print("🔍 RevenueCat: ======= STATUS UPDATE COMPLETE =======")
+    }
+    
+    /// Force refresh customer info from RevenueCat (useful for debugging)
+    func forceRefreshCustomerInfo() async {
+        print("🔄 RevenueCat: Force refreshing customer info...")
+        await loadCustomerInfo()
     }
     
     // MARK: - Offerings
@@ -367,26 +395,62 @@ class RevenueCatManager: NSObject, ObservableObject {
     // MARK: - Purchasing
     
     func purchase(package: Package) async -> (success: Bool, error: Error?) {
-        print("💳 RevenueCat: Starting purchase for \(package.storeProduct.localizedTitle)...")
+        print("💳 === REVENUECAT PURCHASE DEBUG START ===")
+        print("💳 RevenueCat: Starting purchase for \(package.storeProduct.localizedTitle)")
+        print("💳 Package ID: \(package.storeProduct.productIdentifier)")
+        print("💳 Package Type: \(package.packageType)")
+        print("💳 Package Price: \(package.storeProduct.localizedPriceString)")
+        print("💳 Current customer info before purchase: \(customerInfo?.description ?? "nil")")
+        print("💳 Current subscription status: \(isSubscriptionActive)")
         
         do {
+            print("💳 RevenueCat: Calling Purchases.shared.purchase()...")
             let result = try await Purchases.shared.purchase(package: package)
+            print("💳 RevenueCat: Purchase call completed successfully")
+            print("💳 Purchase result - userCancelled: \(result.userCancelled)")
+            print("💳 Purchase result - customerInfo: \(result.customerInfo.description)")
             
             await MainActor.run {
                 if !result.userCancelled {
+                    print("💳 RevenueCat: Processing successful purchase...")
                     self.customerInfo = result.customerInfo
                     self.updateSubscriptionStatus(result.customerInfo)
-                    print("✅ RevenueCat: Purchase successful")
+                    print("✅ RevenueCat: Purchase successful - subscription updated")
+                    print("✅ New subscription status: \(self.isSubscriptionActive)")
                 } else {
                     print("⏹️ RevenueCat: Purchase cancelled by user")
                 }
             }
             
-            return (success: !result.userCancelled, error: nil)
+            let success = !result.userCancelled
+            print("💳 RevenueCat: Returning success: \(success), error: nil")
+            print("💳 === REVENUECAT PURCHASE DEBUG END ===")
+            return (success: success, error: nil)
         } catch {
-            await MainActor.run {
-                print("❌ RevenueCat: Purchase failed: \(error.localizedDescription)")
+            print("❌ === REVENUECAT PURCHASE ERROR ===")
+            print("❌ RevenueCat: Purchase threw exception")
+            print("❌ Error: \(error)")
+            print("❌ Error description: \(error.localizedDescription)")
+            
+            let nsError = error as NSError
+            print("❌ NSError domain: \(nsError.domain)")
+            print("❌ NSError code: \(nsError.code)")
+            print("❌ NSError userInfo: \(nsError.userInfo)")
+            
+            // Check for common purchase errors
+            if nsError.domain == "SKErrorDomain" {
+                print("❌ StoreKit error detected in RevenueCatManager")
+                if nsError.code == 2 {
+                    print("❌ User cancelled purchase in StoreKit")
+                }
             }
+            
+            await MainActor.run {
+                print("❌ RevenueCat: Purchase failed on main actor: \(error.localizedDescription)")
+            }
+            
+            print("❌ RevenueCat: Returning success: false, error: \(error)")
+            print("❌ === REVENUECAT PURCHASE ERROR END ===")
             return (success: false, error: error)
         }
     }

@@ -893,6 +893,7 @@ struct CategoryByIdInputField: View {
                         assetName: "chevron-right",
                         fallbackSystemName: "chevron.right"
                     )
+                    .foregroundStyle(AppColors.primary)
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, size.verticalPadding)
@@ -956,7 +957,7 @@ struct CurrencyInputField: View {
                         assetName: "chevron-right",
                         fallbackSystemName: "chevron.right"
                     )
-                    .foregroundColor(AppColors.foregroundSecondary)
+                    .foregroundStyle(AppColors.primary)
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, size.verticalPadding)

@@ -1,0 +1,122 @@
+{
+  "identifier" : "F4A8C1B0",
+  "nonRenewingSubscriptions" : [
+
+  ],
+  "products" : [
+
+  ],
+  "settings" : {
+    "_failTransactionsEnabled" : false,
+    "_locale" : "en_US",
+    "_storefront" : "USA",
+    "_storeKitErrors" : [
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Load Products"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Purchase"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Verification"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "App Store Sync"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Subscription Status"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "App Transaction"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Manage Subscriptions Sheet"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Refund Request Sheet"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Offer Code Redeem Sheet"
+      }
+    ]
+  },
+  "subscriptions" : [
+    {
+      "adHocOffers" : [
+
+      ],
+      "codeOffers" : [
+
+      ],
+      "displayPrice" : "9.99",
+      "familyShareable" : false,
+      "groupNumber" : 1,
+      "internalID" : "6736123456",
+      "introductoryOffer" : null,
+      "localizations" : [
+        {
+          "description" : "Get unlimited transactions, advanced analytics, and premium features",
+          "displayName" : "CashMonki Premium Monthly",
+          "locale" : "en_US"
+        }
+      ],
+      "productID" : "cashmonki_pro_monthly",
+      "recurringSubscriptionPeriod" : "P1M",
+      "referenceName" : "Premium Monthly",
+      "subscriptionGroupID" : "21835937",
+      "type" : "RecurringSubscription"
+    },
+    {
+      "adHocOffers" : [
+
+      ],
+      "codeOffers" : [
+
+      ],
+      "displayPrice" : "99.99",
+      "familyShareable" : false,
+      "groupNumber" : 1,
+      "internalID" : "6736123457",
+      "introductoryOffer" : {
+        "displayPrice" : "0.00",
+        "internalID" : "20781234",
+        "paymentMode" : "free",
+        "subscriptionPeriod" : "P1W"
+      },
+      "localizations" : [
+        {
+          "description" : "Get unlimited transactions, advanced analytics, and premium features with annual savings",
+          "displayName" : "CashMonki Premium Annual",
+          "locale" : "en_US"
+        }
+      ],
+      "productID" : "cashmonki_pro_yearly",
+      "recurringSubscriptionPeriod" : "P1Y",
+      "referenceName" : "Premium Annual",
+      "subscriptionGroupID" : "21835937",
+      "type" : "RecurringSubscription"
+    }
+  ],
+  "version" : {
+    "major" : 4,
+    "minor" : 0
+  }
+}

@@ -144,7 +144,217 @@ class OnboardingStateManager: ObservableObject {
         }
     }
     
-    // MARK: - Gate Validation
+    // MARK: - Numerical Progression System
+    
+    /// Get current onboarding step based on user's progression number
+    /// 0=not started, 1=email done, 2=name done, 3=currency done, 4=goals done, 5=complete
+    func getCurrentOnboardingStep() -> OnboardingStep {
+        let user = UserManager.shared.currentUser
+        
+        // Auto-migrate legacy users if they haven't been migrated
+        if user.onboardingCompleted == 0 && !hasMigrationCompleted() {
+            migrateLegacyUserToNumericalSystem()
+        }
+        
+        let progressNumber = user.onboardingCompleted
+        print("🔢 OnboardingStateManager: Current progression number: \(progressNumber)")
+        
+        switch progressNumber {
+        case 0:
+            // Not started - determine initial step
+            return determineInitialStep()
+        case 1:
+            // Email done, show name collection
+            print("🔢 Next step: Name Collection (email completed)")
+            return .nameCollection
+        case 2:
+            // Name done, show currency selection
+            print("🔢 Next step: Currency Selection (name completed)")
+            return .currencySelection
+        case 3:
+            // Currency done, show goal selection
+            print("🔢 Next step: Goal Selection (currency completed)")
+            return .goalSelection
+        case 4:
+            // Goals done, show transaction addition
+            print("🔢 Next step: Transaction Addition (goals completed)")
+            return .transactionAddition
+        case 5:
+            // Fully complete
+            print("🔢 Onboarding fully complete")
+            return .transactionAddition // Fallback, shouldn't show onboarding
+        default:
+            // Invalid progression number - fix it
+            if progressNumber > 5 {
+                print("🚨 INVALID progression number \(progressNumber) > 5 - correcting to 5 (complete)")
+                UserManager.shared.updateOnboardingProgress(5)
+                return .transactionAddition
+            } else if progressNumber < 0 {
+                print("🚨 INVALID progression number \(progressNumber) < 0 - correcting to 0 (not started)")
+                UserManager.shared.updateOnboardingProgress(0)
+                return determineInitialStep()
+            } else {
+                print("⚠️ Unknown progression number \(progressNumber), defaulting to email confirmation")
+                return .emailConfirmation
+            }
+        }
+    }
+    
+    /// Determine initial step for new users (progression = 0)
+    private func determineInitialStep() -> OnboardingStep {
+        print("🔢 Determining initial step for new user...")
+        
+        #if canImport(FirebaseAuth)
+        // Check if this is a Google user with verified email
+        if let currentUser = Auth.auth().currentUser {
+            let isGoogleSignIn = currentUser.providerData.contains { $0.providerID == "google.com" }
+            
+            if isGoogleSignIn {
+                print("🔢 Google user detected - checking current progression")
+                let currentProgress = UserManager.shared.currentUser.onboardingCompleted
+                
+                if currentProgress == 0 {
+                    print("🔢 Google user at step 0 - setting progression to 1 (email verified) and showing name collection")
+                    // For Google users, set progression to 1 (email verified) and show name collection
+                    setOnboardingProgress(to: 1)
+                    return .nameCollection
+                } else {
+                    print("🔢 Google user already has progression \(currentProgress) - determining step from progression")
+                    // User already has progression, determine step directly from number
+                    switch currentProgress {
+                    case 1: return .nameCollection
+                    case 2: return .currencySelection
+                    case 3: return .goalSelection
+                    case 4: return .transactionAddition
+                    case 5: return .transactionAddition // Complete
+                    default: return .emailConfirmation
+                    }
+                }
+            }
+        }
+        #endif
+        
+        // Regular users start with email verification
+        print("🔢 Regular user - starting at email confirmation (step 1)")
+        return .emailConfirmation
+    }
+    
+    /// Set user to specific onboarding progression number
+    func setOnboardingProgress(to targetProgress: Int) {
+        let currentProgress = UserManager.shared.currentUser.onboardingCompleted
+        
+        // Validate target progression
+        if targetProgress < 0 || targetProgress > 5 {
+            print("🚨 OnboardingStateManager: INVALID target progression \(targetProgress) - must be 0-5")
+            return
+        }
+        
+        // CRITICAL FIX: Never downgrade progression to prevent race conditions
+        if targetProgress < currentProgress {
+            print("🚨 OnboardingStateManager: PREVENTING downgrade from \(currentProgress) to \(targetProgress)")
+            print("   - This prevents race conditions during migration")
+            return
+        }
+        
+        print("🔢 Setting onboarding progression: \(currentProgress) → \(targetProgress)")
+        UserManager.shared.updateOnboardingProgress(targetProgress)
+        
+        // Mark as complete if we've reached the final step
+        if targetProgress >= 5 {
+            print("🎉 OnboardingStateManager: Reached progression 5 - marking onboarding as complete")
+            markAsComplete()
+        }
+    }
+    
+    /// Legacy method - use setOnboardingProgress(to:) instead
+    @available(*, deprecated, message: "Use setOnboardingProgress(to:) instead")
+    func advanceToNextStep() {
+        let currentProgress = UserManager.shared.currentUser.onboardingCompleted
+        let nextProgress = min(currentProgress + 1, 5) // Safety cap at 5
+        setOnboardingProgress(to: nextProgress)
+    }
+    
+    /// Check if onboarding is fully complete
+    func isOnboardingComplete() -> Bool {
+        return UserManager.shared.currentUser.onboardingCompleted >= 5
+    }
+    
+    /// Migrate existing users from legacy gate system to numerical progression
+    func migrateLegacyUserToNumericalSystem() {
+        let user = UserManager.shared.currentUser
+        
+        // Skip migration if user already has a progression number > 0
+        if user.onboardingCompleted > 0 {
+            print("🔄 OnboardingStateManager: User already has progression number \(user.onboardingCompleted), skipping migration")
+            return
+        }
+        
+        // CRITICAL FIX: Prevent multiple migrations in the same session
+        if UserDefaults.standard.bool(forKey: "migrationInProgress") {
+            print("🚨 OnboardingStateManager: Migration already in progress - skipping to prevent race condition")
+            return
+        }
+        
+        // Set migration lock
+        UserDefaults.standard.set(true, forKey: "migrationInProgress")
+        
+        print("🔄 OnboardingStateManager: ======= MIGRATING LEGACY USER =======")
+        print("🔄 Starting migration from legacy gate system to numerical progression")
+        
+        // Check each gate and determine highest completed step
+        var highestCompletedStep = 0
+        
+        // Email verification (step 1)
+        if checkEmailVerificationGate() {
+            highestCompletedStep = 1
+            print("🔄 Migration: Email verification ✅ → progression: 1")
+        }
+        
+        // Name collection (step 2)
+        if checkNameCollectionGate() {
+            highestCompletedStep = 2
+            print("🔄 Migration: Name collection ✅ → progression: 2")
+        }
+        
+        // Currency selection (step 3)
+        if checkCurrencySelectionGate() {
+            highestCompletedStep = 3
+            print("🔄 Migration: Currency selection ✅ → progression: 3")
+        }
+        
+        // Goal selection (step 4)
+        if checkGoalSelectionGate() {
+            highestCompletedStep = 4
+            print("🔄 Migration: Goal selection ✅ → progression: 4")
+        }
+        
+        // Transaction addition (step 5)
+        if checkTransactionGate() {
+            highestCompletedStep = 5
+            print("🔄 Migration: Transaction addition ✅ → progression: 5 (complete)")
+        }
+        
+        print("🔄 Migration: Final progression number: \(highestCompletedStep)")
+        
+        // Update user's progression number
+        UserManager.shared.updateOnboardingProgress(highestCompletedStep)
+        
+        // Set migration flag to prevent re-migration
+        UserDefaults.standard.set(true, forKey: "hasCompletedNumericalMigration")
+        
+        // Clear migration lock
+        UserDefaults.standard.set(false, forKey: "migrationInProgress")
+        
+        print("🔄 OnboardingStateManager: ======= MIGRATION COMPLETE =======")
+        print("🔄 User migrated to progression number: \(highestCompletedStep)")
+    }
+    
+    /// Check if migration has been completed
+    private func hasMigrationCompleted() -> Bool {
+        return UserDefaults.standard.bool(forKey: "hasCompletedNumericalMigration")
+    }
+    
+    // MARK: - Legacy Gate Validation (for migration)
     
     /// Validate all onboarding gates and return their status
     func validateAllGates() -> [OnboardingGate: Bool] {
@@ -155,7 +365,7 @@ class OnboardingStateManager: ObservableObject {
         results[.currencySelection] = checkCurrencySelectionGate()
         results[.goalSelection] = checkGoalSelectionGate()
         
-        print("🔍 OnboardingStateManager: Gate validation results:")
+        print("🔍 OnboardingStateManager: Legacy gate validation results:")
         for (gate, passed) in results {
             print("   \(gate.displayName): \(passed ? "✅" : "❌")")
         }
@@ -283,14 +493,20 @@ class OnboardingStateManager: ObservableObject {
     }
     
     func checkCurrencySelectionGate() -> Bool {
-        // Simple check: if user has a currency saved locally, they've completed currency selection
-        let hasPrimaryCurrency = !CurrencyPreferences.shared.primaryCurrency.rawValue.isEmpty
+        // Only check completion flags since all users have a primary currency by default
+        let hasCompletedCurrencySelection = UserDefaults.standard.bool(forKey: "hasCompletedCurrencySelection")
+        let hasSetPrimaryCurrency = UserDefaults.standard.bool(forKey: "hasSetPrimaryCurrency")
         
-        print("🔍 OnboardingStateManager: Currency gate - complete: \(hasPrimaryCurrency)")
+        // Either completion flag being true means currency onboarding is complete
+        let currencyComplete = hasCompletedCurrencySelection || hasSetPrimaryCurrency
+        
+        print("🔍 OnboardingStateManager: Currency gate - complete: \(currencyComplete)")
         print("   - Primary currency: \(CurrencyPreferences.shared.primaryCurrency.rawValue)")
-        print("   - Has currency: \(hasPrimaryCurrency)")
+        print("   - Completed currency selection: \(hasCompletedCurrencySelection)")
+        print("   - Has set primary currency: \(hasSetPrimaryCurrency)")
+        print("   - Final result: \(currencyComplete)")
         
-        return hasPrimaryCurrency
+        return currencyComplete
     }
     
     func checkGoalSelectionGate() -> Bool {
@@ -316,6 +532,19 @@ class OnboardingStateManager: ObservableObject {
         guard AuthenticationManager.shared.isAuthenticated else {
             print("🎯 OnboardingStateManager: User not authenticated - no onboarding needed")
             return false
+        }
+        
+        // CRITICAL FIX: Check for invalid progression numbers first
+        let currentProgress = UserManager.shared.currentUser.onboardingCompleted
+        if currentProgress > 5 {
+            print("🚨 OnboardingStateManager: INVALID progression \(currentProgress) > 5 - fixing to 5 and completing onboarding")
+            UserManager.shared.updateOnboardingProgress(5)
+            markAsComplete()
+            return false
+        } else if currentProgress < 0 {
+            print("🚨 OnboardingStateManager: INVALID progression \(currentProgress) < 0 - fixing to 0")
+            UserManager.shared.updateOnboardingProgress(0)
+            // Continue with normal flow
         }
         
         // SPECIAL CASE: If user has reached the transaction step, never show onboarding again
@@ -366,25 +595,27 @@ class OnboardingStateManager: ObservableObject {
                 }
             }
             
-            // Check if gates are now complete (including transaction gate)
-            if areAllGatesComplete() && checkTransactionGate() {
-                print("✅ OnboardingStateManager: All gates now complete - marking as finished")
-                markAsComplete()
-                return false
-            }
+            // IMPORTANT: Preserve user's current UI step to respect back navigation
+            // The user should stay where they were in the UI, regardless of progression number
+            print("🔄 OnboardingStateManager: In progress at \(step) - staying at current UI step")
             
-            print("🔄 OnboardingStateManager: In progress at \(step) - continuing onboarding")
+            // CRITICAL FIX: Don't auto-advance based on progression when resuming
+            // User might have gone back in UI but progression number is ahead
+            print("🎯 OnboardingStateManager: Preserving UI step (\(step)) regardless of progression number")
+            print("   - This respects back navigation and prevents auto-skipping")
+            
             return true
         }
         
-        // Not started - check if onboarding is needed
-        if areAllGatesComplete() {
-            print("✅ OnboardingStateManager: All gates complete - marking as finished")
+        // Not started - check if onboarding is needed based on numerical progression
+        if isOnboardingComplete() {
+            print("✅ OnboardingStateManager: Numerical progression complete - marking as finished")
             markAsComplete()
             return false
         } else {
-            print("🆕 OnboardingStateManager: Not started and gates incomplete - starting onboarding")
-            updateState(to: .inProgress(step: determineCurrentStep(), lastActiveTime: Date()))
+            print("🆕 OnboardingStateManager: Not started - starting onboarding based on numerical progression")
+            let currentStep = getCurrentOnboardingStep()
+            updateState(to: .inProgress(step: currentStep, lastActiveTime: Date()))
             return true
         }
     }
@@ -469,26 +700,57 @@ class OnboardingStateManager: ObservableObject {
     
     // MARK: - Debugging and Testing
     
-    /// Reset onboarding state (for testing)
-    func resetOnboardingState() {
-        print("🔄 OnboardingStateManager: RESETTING onboarding state")
-        updateState(to: .notStarted)
+    /// Reset onboarding state to a specific progression number (for wallet deletion)
+    func resetOnboardingToStep(_ targetProgression: Int) {
+        print("🔄 OnboardingStateManager: RESETTING onboarding state to progression \(targetProgression)")
         
-        // Clear legacy flags
-        UserDefaults.standard.set(false, forKey: "hasCompletedOnboarding")
-        UserDefaults.standard.set(false, forKey: "hasCompletedCurrencySelection")
-        UserDefaults.standard.set(false, forKey: "hasSetPrimaryCurrency")
-        UserDefaults.standard.set(false, forKey: "hasCompletedGoalSelection")
+        // Update state based on target progression
+        if targetProgression == 0 {
+            updateState(to: .notStarted)
+        } else {
+            let targetStep = getCurrentOnboardingStepForProgression(targetProgression)
+            updateState(to: .inProgress(step: targetStep, lastActiveTime: Date()))
+        }
         
-        // Clear goal values
-        UserDefaults.standard.removeObject(forKey: "selectedPrimaryGoal")
-        UserDefaults.standard.removeObject(forKey: "selectedPrimaryGoals")
+        // Clear legacy flags based on target progression
+        if targetProgression <= 1 {
+            UserDefaults.standard.set(false, forKey: "hasCompletedOnboarding")
+            UserDefaults.standard.set(false, forKey: "hasCompletedCurrencySelection")
+            UserDefaults.standard.set(false, forKey: "hasSetPrimaryCurrency")
+            UserDefaults.standard.set(false, forKey: "hasCompletedGoalSelection")
+            
+            // Clear goal values if resetting to name collection
+            UserDefaults.standard.removeObject(forKey: "selectedPrimaryGoal")
+            UserDefaults.standard.removeObject(forKey: "selectedPrimaryGoals")
+        }
         
-        // CRITICAL FIX: Clear transaction step flag to prevent blocking new user onboarding
+        // Always clear transaction step flags when resetting
         UserDefaults.standard.set(false, forKey: "hasReachedTransactionStep")
         UserDefaults.standard.set(false, forKey: "hasSkippedTransactionOnboarding")
         
-        print("🔄 OnboardingStateManager: Cleared all onboarding flags and goal values")
+        print("🔄 OnboardingStateManager: Reset to progression \(targetProgression) with appropriate flags cleared")
+    }
+    
+    /// Helper to get onboarding step for a specific progression number
+    private func getCurrentOnboardingStepForProgression(_ progression: Int) -> OnboardingStep {
+        switch progression {
+        case 0: return .emailConfirmation
+        case 1: return .nameCollection
+        case 2: return .currencySelection
+        case 3: return .goalSelection
+        case 4, 5: return .transactionAddition
+        default: return .emailConfirmation
+        }
+    }
+    
+    /// Reset onboarding state (for testing)
+    func resetOnboardingState() {
+        print("🔄 OnboardingStateManager: FULL RESET onboarding state")
+        resetOnboardingToStep(0)
+        
+        // Clear migration flags to allow fresh migration
+        UserDefaults.standard.set(false, forKey: "hasCompletedNumericalMigration")
+        UserDefaults.standard.set(false, forKey: "migrationInProgress")
     }
     
     /// Get detailed state information for debugging

@@ -15,6 +15,7 @@ struct EditCategoriesSheet: View {
     @State private var showingCustomPaywall = false
     @ObservedObject private var categoriesManager = CategoriesManager.shared
     @ObservedObject private var revenueCatManager = RevenueCatManager.shared
+    @EnvironmentObject private var toastManager: ToastManager
     @State private var selectedCategoryForEdit: DisplayCategoryData?
     @State private var selectedTab: CategoryTab = .expense
     

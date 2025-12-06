@@ -1415,6 +1415,7 @@ struct UserData: Identifiable, Codable {
     
     // User preferences and settings
     var goals: String? // User's selected goals from onboarding (comma-separated)
+    var onboardingCompleted: Int // Numerical progression: 0=not started, 1=email done, 2=name done, 3=currency done, 4=goals done, 5=complete
     
     // Firebase sync preference - true by default for existing users
     var enableFirebaseSync: Bool
@@ -1428,6 +1429,7 @@ struct UserData: Identifiable, Codable {
         createdAt: Date = Date(),
         updatedAt: Date = Date(),
         goals: String? = nil,
+        onboardingCompleted: Int = 0, // Default to not started - LOCAL ONLY, not synced to Firebase
         enableFirebaseSync: Bool = true // Default to enabled for new users
     ) {
         self.id = id
@@ -1438,6 +1440,7 @@ struct UserData: Identifiable, Codable {
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.goals = goals
+        self.onboardingCompleted = onboardingCompleted
         self.enableFirebaseSync = enableFirebaseSync
     }
     
@@ -1535,7 +1538,7 @@ struct UserData: Identifiable, Codable {
     // MARK: - Custom Codable Implementation
     
     enum CodingKeys: String, CodingKey {
-        case id, name, email, accounts, createdAt, updatedAt, enableFirebaseSync
+        case id, name, email, accounts, createdAt, updatedAt, goals, onboardingCompleted, enableFirebaseSync
         // Note: transactions excluded because Txn contains UIImage which isn't Codable
     }
     
@@ -1547,6 +1550,9 @@ struct UserData: Identifiable, Codable {
         accounts = try container.decode([AccountData].self, forKey: .accounts)
         createdAt = try container.decode(Date.self, forKey: .createdAt)
         updatedAt = try container.decode(Date.self, forKey: .updatedAt)
+        // Backward compatibility for new properties
+        goals = try container.decodeIfPresent(String.self, forKey: .goals)
+        onboardingCompleted = try container.decodeIfPresent(Int.self, forKey: .onboardingCompleted) ?? 0
         // Default to true for backward compatibility with existing users
         enableFirebaseSync = try container.decodeIfPresent(Bool.self, forKey: .enableFirebaseSync) ?? true
         transactions = [] // Initialize empty, will be loaded separately
@@ -1560,6 +1566,8 @@ struct UserData: Identifiable, Codable {
         try container.encode(accounts, forKey: .accounts)
         try container.encode(createdAt, forKey: .createdAt)
         try container.encode(updatedAt, forKey: .updatedAt)
+        try container.encodeIfPresent(goals, forKey: .goals)
+        try container.encode(onboardingCompleted, forKey: .onboardingCompleted)
         try container.encode(enableFirebaseSync, forKey: .enableFirebaseSync)
         // Note: transactions not encoded due to UIImage
     }

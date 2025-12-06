@@ -161,7 +161,6 @@ struct SettingsPage: View {
             }
             .fullScreenCover(isPresented: $showingCustomPaywall) {
                 CustomPaywallSheet(isPresented: $showingCustomPaywall)
-                    .environmentObject(toastManager)
             }
             .fullScreenCover(isPresented: $showingManageBilling) {
                 ManageBillingSheet(isPresented: $showingManageBilling)
@@ -209,7 +208,7 @@ struct SettingsPage: View {
                                 // Show error toast
                                 DispatchQueue.main.async {
                                     print("🍞 TOAST DEBUG: About to show subscription error toast (Target Offering)")
-                                    toastManager.showError("Something went wrong")
+                                    toastManager.showFailed("Try again later maybe!")
                                     print("🍞 TOAST DEBUG: Subscription error toast command sent successfully")
                                 }
                             }
@@ -252,7 +251,7 @@ struct SettingsPage: View {
                                 // Show error toast
                                 DispatchQueue.main.async {
                                     print("🍞 DEBUG: About to show error toast for purchase failure")
-                                    toastManager.showError("Something went wrong")
+                                    toastManager.showFailed("Try again later maybe!")
                                     print("🍞 DEBUG: Error toast command sent")
                                 }
                             }
@@ -294,7 +293,7 @@ struct SettingsPage: View {
                                 // Show error toast
                                 DispatchQueue.main.async {
                                     print("🍞 DEBUG: About to show error toast for purchase failure")
-                                    toastManager.showError("Something went wrong")
+                                    toastManager.showFailed("Try again later maybe!")
                                     print("🍞 DEBUG: Error toast command sent")
                                 }
                             }
@@ -655,6 +654,19 @@ struct SettingsPage: View {
             // dataSection
             supportSection
             
+            // Footer
+            VStack(spacing: 8) {
+                Text("Made with ☕️ & ♥️ by")
+                    .font(Font.custom("Overused Grotesk", size: 14).weight(.medium))
+                    .foregroundColor(AppColors.foregroundSecondary)
+                
+                Text("Rosebud Studio")
+                    .font(Font.custom("Overused Grotesk", size: 14).weight(.semibold))
+                    .foregroundColor(AppColors.foregroundPrimary)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.top, 8)
+            
             // HIDDEN: Account Debug section
             // duplicateAccountDebugSection // DEBUG: Temporary for duplicate account issue
         }
@@ -858,10 +870,9 @@ struct SettingsPage: View {
                     
                     Spacer()
                     
-                    Text(revenueCatManager.isProUser ? "Unlimited" : "\(usedScansToday)/3 today")
+                    Text(revenueCatManager.isProUser ? "Unlimited" : "\(max(0, 3 - usedScansToday))/3 left today")
                         .font(Font.custom("Overused Grotesk", size: 16).weight(.medium))
                         .foregroundColor(AppColors.foregroundSecondary)
-                        .opacity(revenueCatManager.isProUser ? 0.8 : 1.0)
                         .animation(.easeInOut(duration: 0.3), value: revenueCatManager.isProUser)
                 }
                 
@@ -923,7 +934,7 @@ struct SettingsPage: View {
                     
                     Spacer()
                     
-                    Text(revenueCatManager.isProUser ? "Let loose" : "\(currentWalletCount)/2")
+                    Text(revenueCatManager.isProUser ? "Let loose" : "\(max(0, 2 - currentWalletCount))/2 wallets left")
                         .font(Font.custom("Overused Grotesk", size: 16).weight(.medium))
                         .foregroundColor(AppColors.foregroundSecondary)
                 }
@@ -957,7 +968,7 @@ struct SettingsPage: View {
         .padding(20)
         .frame(maxWidth: .infinity, alignment: .topLeading)
         .background(.white)
-        .opacity(revenueCatManager.isProUser ? 0.85 : 1.0)
+        .opacity(1.0)
         .animation(.easeInOut(duration: 0.3), value: revenueCatManager.isProUser)
     }
     
@@ -1077,7 +1088,7 @@ struct SettingsPage: View {
                 settingsRow(
                     title: "Need Customer Support?",
                     subtitle: "Get help with your account",
-                    icon: "😀"
+                    icon: "😁"
                 ) {
                     openSupportEmail()
                 }
@@ -2213,26 +2224,61 @@ struct SettingsPage: View {
         UserDefaults.standard.removeObject(forKey: "hasVerifiedEmail")
         UserDefaults.standard.removeObject(forKey: "hasCompletedEmailVerification")
         
+        // CRITICAL: Clear OnboardingStateManager persisted state 
+        UserDefaults.standard.removeObject(forKey: "onboardingState")
+        
+        // CRITICAL: Clear migration flags to prevent race conditions
+        UserDefaults.standard.removeObject(forKey: "hasCompletedNumericalMigration")
+        UserDefaults.standard.removeObject(forKey: "migrationInProgress")
+        
         print("✅ Settings: All onboarding gates reset - new user will see full onboarding flow")
         print("   - Goal selection: reset")
         print("   - Currency selection: reset") 
         print("   - Name collection: reset")
         print("   - Welcome status: reset")
         print("   - Onboarding completion: reset")
+        print("   - OnboardingStateManager state: reset")
     }
     
     private func completeAccountDeletion() {
-        print("🎉 Settings: Account deletion process completed")
-        print("🔄 Settings: New users will now see the complete onboarding flow")
+        print("🎉 Settings: Account deletion process completed - performing COMPLETE data wipe")
         
-        // Clear any remaining local user data
-        userManager.currentUser.transactions.removeAll()
-        userManager.objectWillChange.send()
+        // 1. Get current user info before clearing
+        let userEmail = userManager.currentUser.email
+        let userId = userManager.currentUser.id.uuidString
+        let firebaseUID = AuthenticationManager.shared.currentUser?.firebaseUID ?? ""
         
-        // Log out the current user from AuthenticationManager
+        print("🗑️ Settings: Wiping ALL data for user: \(userEmail)")
+        print("🗑️ Settings: Local ID: \(userId), Firebase UID: \(firebaseUID.prefix(8))")
+        
+        // 2. Clear ALL UserDefaults - complete wipe
+        let userDefaults = UserDefaults.standard
+        let domain = Bundle.main.bundleIdentifier!
+        userDefaults.removePersistentDomain(forName: domain)
+        userDefaults.synchronize()
+        print("🧹 Settings: Cleared ALL UserDefaults data")
+        
+        // 3. Clear UserManager completely and reset to guest
+        userManager.signOut() // This resets to guest with onboardingCompleted = 0
+        print("🧹 Settings: Reset UserManager to guest state")
+        
+        // 4. Reset OnboardingStateManager completely 
+        OnboardingStateManager.shared.resetOnboardingState()
+        print("🧹 Settings: Reset OnboardingStateManager to fresh state")
+        
+        // 5. Clear currency preferences completely
+        CurrencyPreferences.shared.resetToDefault()
+        print("🧹 Settings: Reset currency preferences to default")
+        
+        // 6. Log out from AuthenticationManager (clears auth state)
         AuthenticationManager.shared.logout()
+        print("🧹 Settings: Logged out from AuthenticationManager")
         
-        print("✅ Settings: Account deletion and cleanup completed successfully")
+        // 7. Clear any other managers/caches if needed
+        // TODO: Add other manager resets here if we have them
+        
+        print("✅ Settings: COMPLETE account deletion and data wipe finished")
+        print("🎯 Settings: App is now in fresh state - new user can register")
     }
     
     private func handleReauthenticationRequired() {
@@ -2874,13 +2920,26 @@ struct SettingsPage: View {
         let encodedBody = body.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
         let mailtoString = "mailto:\(email)?subject=\(encodedSubject)&body=\(encodedBody)"
         
+        print("📧 Support Email: Attempting to open \(mailtoString)")
+        
         if let mailtoURL = URL(string: mailtoString) {
             #if canImport(UIKit)
-            UIApplication.shared.open(mailtoURL)
+            // Check if the URL can be opened before attempting
+            if UIApplication.shared.canOpenURL(mailtoURL) {
+                print("📧 Support Email: Mail app available, opening...")
+                UIApplication.shared.open(mailtoURL)
+            } else {
+                print("❌ Support Email: No mail app configured on device")
+                // Fallback: copy email to clipboard
+                UIPasteboard.general.string = email
+                print("📧 Support Email: Email address copied to clipboard")
+            }
             #else
             // For macOS or other platforms
             NSWorkspace.shared.open(mailtoURL)
             #endif
+        } else {
+            print("❌ Support Email: Failed to create mailto URL")
         }
     }
 }

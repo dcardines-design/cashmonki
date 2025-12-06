@@ -50,11 +50,17 @@ class DailyUsageManager: ObservableObject {
     }
     
     /// Record a receipt analysis usage
-    func recordReceiptAnalysis() {
+    func recordReceiptAnalysis(isOnboarding: Bool = false) {
         resetUsageIfNewDay()
         
         // Don't count usage for Pro users
         if RevenueCatManager.shared.isProUser {
+            return
+        }
+        
+        // Don't count onboarding receipt analysis towards daily limit
+        if isOnboarding {
+            print("📊 DailyUsageManager: Onboarding receipt analysis - not counting towards daily limit")
             return
         }
         
