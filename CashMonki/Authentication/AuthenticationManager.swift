@@ -297,6 +297,15 @@ class AuthenticationManager: ObservableObject {
         }
         #endif
         
+        // Sign out from Google SDK if available
+        #if canImport(GoogleSignIn)
+        GIDSignIn.sharedInstance.signOut()
+        print("✅ AuthenticationManager: Google SDK signout completed")
+        #endif
+        
+        // Note: Apple Sign-In doesn't have explicit SDK logout - tokens are managed by iOS
+        print("ℹ️ AuthenticationManager: Apple Sign-In tokens managed by iOS (no explicit logout needed)")
+        
         currentUser = nil
         isAuthenticated = false
         authError = nil
