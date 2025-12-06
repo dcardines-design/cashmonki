@@ -442,20 +442,26 @@ struct OnboardingFlow: View {
            !displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             
             let isGoogleSignIn = firebaseUser.providerData.contains { $0.providerID == "google.com" }
+            let isAppleSignIn = firebaseUser.providerData.contains { $0.providerID == "apple.com" }
+            let isSocialSignIn = isGoogleSignIn || isAppleSignIn
+            
             print("🔍 OnboardingFlow: Firebase user found:")
             print("   - Display name: '\(displayName)'")
             print("   - Is Google sign-in: \(isGoogleSignIn)")
+            print("   - Is Apple sign-in: \(isAppleSignIn)")
+            print("   - Is social sign-in: \(isSocialSignIn)")
             
-            if isGoogleSignIn {
+            if isSocialSignIn {
                 let firebaseNameComponents = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
                     .components(separatedBy: " ").filter { !$0.isEmpty }
                 hasValidFirebaseName = firebaseNameComponents.count >= 1 && firebaseNameComponents[0].count >= 1
                 
-                print("🔍 OnboardingFlow: Google user Firebase name check:")
+                let signInType = isGoogleSignIn ? "Google" : "Apple"
+                print("🔍 OnboardingFlow: \(signInType) user Firebase name check:")
                 print("   - Firebase displayName: '\(displayName)' → \(hasValidFirebaseName ? "✅" : "❌")")
                 print("   - Name components: \(firebaseNameComponents)")
             } else {
-                print("🔍 OnboardingFlow: Not a Google sign-in, skipping Firebase name check")
+                print("🔍 OnboardingFlow: Not a social sign-in, skipping Firebase name check")
             }
         } else {
             print("🔍 OnboardingFlow: No Firebase user or displayName found")
@@ -537,16 +543,21 @@ struct OnboardingFlow: View {
         if let currentUser = Auth.auth().currentUser {
             let isVerified = currentUser.isEmailVerified
             let isGoogleSignIn = currentUser.providerData.contains { $0.providerID == "google.com" }
+            let isAppleSignIn = currentUser.providerData.contains { $0.providerID == "apple.com" }
+            let isSocialSignIn = isGoogleSignIn || isAppleSignIn
             
             print("🔍 OnboardingFlow: Email verification status:")
             print("   - Firebase verified: \(isVerified)")
             print("   - Persistent flag: \(hasCompletedEmailVerification)")
             print("   - Google sign-in: \(isGoogleSignIn)")
+            print("   - Apple sign-in: \(isAppleSignIn)")
+            print("   - Social sign-in: \(isSocialSignIn)")
             print("   - Provider data: \(currentUser.providerData.map { $0.providerID })")
             
-            // ENHANCED: Gmail signups are typically auto-verified
-            if isGoogleSignIn {
-                print("🔍 OnboardingFlow: Google sign-in detected - treating as verified")
+            // ENHANCED: Social signups (Google/Apple) are typically auto-verified
+            if isSocialSignIn {
+                let signInType = isGoogleSignIn ? "Google" : "Apple"
+                print("🔍 OnboardingFlow: \(signInType) sign-in detected - treating as verified")
                 return true
             }
             
@@ -757,20 +768,25 @@ struct OnboardingFlow: View {
     /// Check if this user should see name collection step
     private func shouldShowNameCollection() -> Bool {
         #if canImport(FirebaseAuth)
-        // For Gmail users with complete Firebase displayName, skip name collection
+        // For social users (Google/Apple) with complete Firebase displayName, skip name collection
         if let currentUser = Auth.auth().currentUser,
            let displayName = currentUser.displayName, !displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             let components = displayName.components(separatedBy: " ")
             let hasValidFirebaseName = components.count >= 2 && components.allSatisfy { !$0.isEmpty }
             
-            if hasValidFirebaseName {
-                print("🔍 OnboardingFlow: Gmail user with valid displayName - skipping name collection")
+            let isGoogleSignIn = currentUser.providerData.contains { $0.providerID == "google.com" }
+            let isAppleSignIn = currentUser.providerData.contains { $0.providerID == "apple.com" }
+            let isSocialSignIn = isGoogleSignIn || isAppleSignIn
+            
+            if hasValidFirebaseName && isSocialSignIn {
+                let signInType = isGoogleSignIn ? "Google" : "Apple"
+                print("🔍 OnboardingFlow: \(signInType) user with valid displayName - skipping name collection")
                 return false
             }
         }
         #endif
         
-        // Regular users or Gmail users without complete names need name collection
+        // Regular users or social users without complete names need name collection
         return true
     }
 }

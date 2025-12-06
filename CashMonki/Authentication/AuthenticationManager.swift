@@ -865,6 +865,10 @@ class AuthenticationManager: ObservableObject {
                 isEmailVerified: firebaseUser.isEmailVerified
             )
             
+            // Check if user has complete Firebase profile data (for Apple sign-ins)
+            let hasFirebaseDisplayName = firebaseUser.displayName != nil && 
+                                       !firebaseUser.displayName!.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            
             await MainActor.run {
                 self.currentUser = authenticatedUser
                 self.isAuthenticated = true
@@ -876,22 +880,30 @@ class AuthenticationManager: ObservableObject {
                 
                 // Treat as new registration if:
                 // 1. Firebase says it's a new user, OR
-                // 2. User has no onboarding completion (could be deleted account signing in again)
-                self.isNewRegistration = firebaseIsNewUser || !hasCompletedOnboarding
+                // 2. User has no onboarding completion AND no Firebase profile data (could be deleted account signing in again)
+                // 3. Users with complete Firebase profile (like Apple sign-in) should NOT be treated as new
+                self.isNewRegistration = firebaseIsNewUser || (!hasCompletedOnboarding && !hasFirebaseDisplayName)
                 
                 // Save authentication state
                 saveAuthenticationState()
-                
-                print("✅ AuthenticationManager: Apple Sign-In successful for \(authenticatedUser.name)")
-                print("🔐 AuthenticationManager: Post-Apple auth state:")
-                print("   - isAuthenticated: \(self.isAuthenticated)")
-                print("   - currentUser: \(authenticatedUser.email)")
-                print("   - firebaseIsNewUser: \(firebaseIsNewUser)")
-                print("   - hasCompletedOnboarding: \(hasCompletedOnboarding)")
-                print("   - isNewRegistration: \(self.isNewRegistration) (final decision)")
-                print("   - userName: '\(authenticatedUser.name)'")
-                print("   - firebaseUID: \(authenticatedUser.firebaseUID)")
             }
+            
+            // SYNC FIX: Update UserManager with Apple profile data to ensure consistent name checking
+            await syncAppleProfileToUserManager(authenticatedUser)
+                
+            print("✅ AuthenticationManager: Apple Sign-In successful for \(authenticatedUser.name)")
+            print("🔐 AuthenticationManager: Post-Apple auth state:")
+            print("   - isAuthenticated: \(self.isAuthenticated)")
+            print("   - currentUser: \(authenticatedUser.email)")
+            print("   - firebaseIsNewUser: \(firebaseIsNewUser)")
+            print("   - hasCompletedOnboarding: \(hasCompletedOnboarding)")
+            print("   - hasFirebaseDisplayName: \(hasFirebaseDisplayName)")
+            print("   - firebaseDisplayName: '\(firebaseUser.displayName ?? "nil")'")
+            print("   - isNewRegistration: \(self.isNewRegistration) (final decision)")
+            print("   - userName: '\(authenticatedUser.name)'")
+            print("   - firebaseUID: \(authenticatedUser.firebaseUID)")
+            print("   - fullName from Apple: '\(fullName)'")
+            print("   - email from Apple: '\(email)'")
             #else
             // If Firebase Auth is not available, create user directly from Apple info
             let authenticatedUser = AuthenticatedUser(
@@ -910,9 +922,12 @@ class AuthenticationManager: ObservableObject {
                 self.isNewRegistration = true // Assume new user for non-Firebase builds
                 
                 saveAuthenticationState()
-                
-                print("✅ AuthenticationManager: Apple Sign-In successful (non-Firebase) for \(authenticatedUser.name)")
             }
+            
+            // SYNC FIX: Update UserManager with Apple profile data (non-Firebase)
+            await syncAppleProfileToUserManager(authenticatedUser)
+            
+            print("✅ AuthenticationManager: Apple Sign-In successful (non-Firebase) for \(authenticatedUser.name)")
             #endif
             
         } catch {
@@ -1013,6 +1028,69 @@ class AuthenticationManager: ObservableObject {
         }
         
         print("🔄 AuthenticationManager: ======= GOOGLE PROFILE SYNC COMPLETE =======")
+    }
+    
+    /// Sync Apple profile data to UserManager to ensure consistent name checking
+    private func syncAppleProfileToUserManager(_ authenticatedUser: AuthenticatedUser) async {
+        print("🔄 AuthenticationManager: ======= SYNCING APPLE PROFILE TO USER MANAGER =======")
+        print("🔄 AuthenticationManager: Authenticated user name: '\(authenticatedUser.name)'")
+        print("🔄 AuthenticationManager: Authenticated user email: '\(authenticatedUser.email)'")
+        
+        // Get or create user profile in UserManager
+        let userManager = UserManager.shared
+        
+        // Check if user profile exists
+        if userManager.hasUserProfile {
+            print("🔄 AuthenticationManager: User profile exists, updating name...")
+            
+            // Update existing profile with Apple data
+            await MainActor.run {
+                userManager.currentUser.name = authenticatedUser.name
+                print("✅ AuthenticationManager: Updated UserManager name to: '\(userManager.currentUser.name)'")
+                
+                // Also sync to Firebase to ensure consistency
+                Task { @MainActor in
+                    userManager.syncToFirebase { success in
+                        print("🔥 AuthenticationManager: Firebase sync result: \(success ? "✅ Success" : "❌ Failed")")
+                    }
+                }
+            }
+        } else {
+            print("🔄 AuthenticationManager: No user profile exists, creating new one...")
+            
+            // Create new user data from Apple data
+            let defaultWallet = AccountData(
+                id: UUID(),
+                name: authenticatedUser.name + "'s Wallet",
+                type: .personal,
+                currency: .php,
+                isDefault: true
+            )
+            
+            let newUserData = UserData(
+                id: authenticatedUser.id,
+                name: authenticatedUser.name,
+                email: authenticatedUser.email,
+                transactions: [],
+                accounts: [defaultWallet],
+                onboardingCompleted: 0, // New user starts onboarding
+                enableFirebaseSync: true // Apple users likely want sync
+            )
+            
+            await MainActor.run {
+                userManager.currentUser = newUserData
+                print("✅ AuthenticationManager: Created new UserManager profile with name: '\(newUserData.name)'")
+                
+                // Sync to Firebase
+                Task { @MainActor in
+                    userManager.syncToFirebase { success in
+                        print("🔥 AuthenticationManager: New profile Firebase sync result: \(success ? "✅ Success" : "❌ Failed")")
+                    }
+                }
+            }
+        }
+        
+        print("🔄 AuthenticationManager: ======= APPLE PROFILE SYNC COMPLETE =======")
     }
     
     private func clearAuthenticationState() {
