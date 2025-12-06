@@ -173,7 +173,15 @@ fileprivate func calculateRunningTotalAtTime(
     for transaction in transactions {
         let normalizedTransactionDate = normalizeDateForChart(transaction.date, rangeSelection: rangeSelection)
         
-        if normalizedTransactionDate <= normalizedTargetTime {
+        // For days view, ignore time components completely in comparison
+        let shouldIncludeTransaction: Bool
+        if rangeSelection == .day {
+            shouldIncludeTransaction = normalizedTransactionDate <= normalizedTargetTime
+        } else {
+            shouldIncludeTransaction = normalizedTransactionDate <= normalizedTargetTime
+        }
+        
+        if shouldIncludeTransaction {
             let impact = getTransactionImpact(transaction, chartFilter: chartFilter)
             runningTotal += impact
         } else {
@@ -701,7 +709,12 @@ extension HomePage {
                         Path { path in
                             for dataPoint in previousPeriodData {
                                 let periodDuration = periodEndDate.timeIntervalSince(periodStartDate)
-                                let timeOffset = dataPoint.date.timeIntervalSince(periodStartDate)
+                                
+                                // For days view, use normalized date (no time component) for X positioning
+                                let dateForPositioning = rangeSelection == .day ? 
+                                    normalizeDateForChart(dataPoint.date, rangeSelection: rangeSelection) : dataPoint.date
+                                
+                                let timeOffset = dateForPositioning.timeIntervalSince(periodStartDate)
                                 let normalizedTime: Double = periodDuration > 0 ? timeOffset / periodDuration : 0
                                 
                                 let x = chartWidth * CGFloat(max(0, min(1, normalizedTime)))
@@ -784,7 +797,12 @@ extension HomePage {
                         
                         // Calculate position for the selected data point (fallback)
                         let periodDuration = periodEndDate.timeIntervalSince(periodStartDate)
-                        let timeOffset = selectedData.date.timeIntervalSince(periodStartDate)
+                        
+                        // For days view, use normalized date (no time component) for X positioning
+                        let dateForPositioning = rangeSelection == .day ? 
+                            normalizeDateForChart(selectedData.date, rangeSelection: rangeSelection) : selectedData.date
+                        
+                        let timeOffset = dateForPositioning.timeIntervalSince(periodStartDate)
                         let normalizedTime: Double = periodDuration > 0 ? timeOffset / periodDuration : 0
                         let pointX = chartWidth * CGFloat(max(0, min(1, normalizedTime)))
                         let pointY = height - (height * CGFloat((selectedData.amount - minValue) / (maxValue - minValue)))
@@ -856,7 +874,12 @@ extension HomePage {
                                 // Only show data points up to current time
                                 if dataPoint.date <= currentTime {
                                     let periodDuration = periodEndDate.timeIntervalSince(periodStartDate)
-                                    let timeOffset = dataPoint.date.timeIntervalSince(periodStartDate)
+                                    
+                                    // For days view, use normalized date (no time component) for X positioning
+                                    let dateForPositioning = rangeSelection == .day ? 
+                                        normalizeDateForChart(dataPoint.date, rangeSelection: rangeSelection) : dataPoint.date
+                                    
+                                    let timeOffset = dateForPositioning.timeIntervalSince(periodStartDate)
                                     let normalizedTime: Double = periodDuration > 0 ? timeOffset / periodDuration : 0
                                     
                                     let x = chartWidth * CGFloat(max(0, min(1, normalizedTime)))
@@ -879,9 +902,13 @@ extension HomePage {
                             for dataPoint in currentPeriodData {
                                 // Only show data points beyond current time
                                 if dataPoint.date > currentTime {
-                                    // Calculate actual position based on timestamp within the period for granularity
                                     let periodDuration = periodEndDate.timeIntervalSince(periodStartDate)
-                                    let timeOffset = dataPoint.date.timeIntervalSince(periodStartDate)
+                                    
+                                    // For days view, use normalized date (no time component) for X positioning
+                                    let dateForPositioning = rangeSelection == .day ? 
+                                        normalizeDateForChart(dataPoint.date, rangeSelection: rangeSelection) : dataPoint.date
+                                    
+                                    let timeOffset = dateForPositioning.timeIntervalSince(periodStartDate)
                                     let normalizedTime: Double = periodDuration > 0 ? timeOffset / periodDuration : 0
                                     
                                     let x = chartWidth * CGFloat(max(0, min(1, normalizedTime)))
