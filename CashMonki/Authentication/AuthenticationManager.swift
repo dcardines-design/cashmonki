@@ -932,9 +932,31 @@ class AuthenticationManager: ObservableObject {
             
         } catch {
             await MainActor.run {
-                self.authError = "Apple Sign-In failed: \(error.localizedDescription)"
+                // Enhanced error messaging for common Apple Sign-In issues
+                let errorMessage: String
+                if error.localizedDescription.contains("identity provider configuration") {
+                    errorMessage = """
+                    Apple Sign-In configuration error. Please check:
+                    1. Apple Developer Console: Enable 'Sign In with Apple' for your App ID
+                    2. Firebase Console: Enable Apple as a sign-in provider
+                    3. Ensure bundle ID matches: com.dante.cashmonki
+                    """
+                } else {
+                    errorMessage = "Apple Sign-In failed: \(error.localizedDescription)"
+                }
+                
+                self.authError = errorMessage
                 self.isLoading = false
                 print("❌ AuthenticationManager: Apple Sign-In failed: \(error.localizedDescription)")
+                
+                // Detailed error debugging
+                if let nsError = error as NSError? {
+                    print("🔍 AuthenticationManager: Apple Sign-In Error Details:")
+                    print("   - Domain: \(nsError.domain)")
+                    print("   - Code: \(nsError.code)")
+                    print("   - UserInfo: \(nsError.userInfo)")
+                    print("   - Localized Description: \(nsError.localizedDescription)")
+                }
             }
         }
     }
