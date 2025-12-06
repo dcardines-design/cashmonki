@@ -869,14 +869,14 @@ class AuthenticationManager: ObservableObject {
             let hasFirebaseDisplayName = firebaseUser.displayName != nil && 
                                        !firebaseUser.displayName!.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             
+            // ENHANCED: Determine if this should be treated as a new registration
+            let firebaseIsNewUser = authResult.additionalUserInfo?.isNewUser ?? false
+            let hasCompletedOnboarding = UserDefaults.standard.bool(forKey: "hasCompletedOnboarding")
+            
             await MainActor.run {
                 self.currentUser = authenticatedUser
                 self.isAuthenticated = true
                 self.isLoading = false
-                
-                // ENHANCED: Determine if this should be treated as a new registration
-                let firebaseIsNewUser = authResult.additionalUserInfo?.isNewUser ?? false
-                let hasCompletedOnboarding = UserDefaults.standard.bool(forKey: "hasCompletedOnboarding")
                 
                 // Treat as new registration if:
                 // 1. Firebase says it's a new user, OR
