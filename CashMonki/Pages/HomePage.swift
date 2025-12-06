@@ -355,10 +355,6 @@ struct HomePage: View {
             styledChartFilterTabs
             styledLineChart
             combinedTabSelectors
-            
-            // CURVY CHARTS COMPARISON SECTION
-            curvyChartsSection
-            
             actionTiles
             recentTransactionsSection
         }
@@ -408,53 +404,6 @@ struct HomePage: View {
         .cornerRadius(12)
     }
     
-    private var curvyChartsSection: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            // Section header
-            Text("📈 Curvy Charts Preview")
-                .font(AppFonts.overusedGroteskSemiBold(size: 18))
-                .foregroundColor(AppColors.foregroundPrimary)
-                .padding(.horizontal, 4)
-            
-            // Curvy line chart
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Smooth Line Chart")
-                    .font(AppFonts.overusedGroteskMedium(size: 14))
-                    .foregroundColor(AppColors.foregroundSecondary)
-                    .padding(.horizontal, 4)
-                
-                Group {
-                    if chartType == .line {
-                        curvyLineChart
-                            .frame(maxWidth: .infinity, minHeight: 280, maxHeight: 280, alignment: .top)
-                    } else {
-                        curvyComparisonChart
-                            .frame(maxWidth: .infinity, minHeight: 280, maxHeight: 280, alignment: .bottom)
-                    }
-                }
-                .padding(16)
-                .frame(maxWidth: .infinity)
-                .background(.white)
-                .cornerRadius(12)
-            }
-            
-            // Comparison note
-            HStack(spacing: 8) {
-                Image(systemName: "info.circle")
-                    .foregroundColor(.blue)
-                    .font(.system(size: 14))
-                
-                Text("Compare the smooth curves above with the angular charts earlier. The curvy version uses Bézier curves and enhanced corner radii for a more premium, organic feel.")
-                    .font(AppFonts.overusedGroteskMedium(size: 12))
-                    .foregroundColor(AppColors.foregroundSecondary)
-                    .multilineTextAlignment(.leading)
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
-            .background(Color.blue.opacity(0.05))
-            .cornerRadius(8)
-        }
-    }
     
     private var modifiersWrapper: HomePageModifiersWrapper {
         HomePageModifiersWrapper(
