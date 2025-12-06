@@ -175,7 +175,7 @@
 				CB8D47302EBB475A00760A39 /* Lottie */,
 				CBEAE1422ECE30C70044BD60 /* RevenueCatUI */,
 			);
-			productName = "CashMonki";
+			productName = "Cashmonki";
 			productReference = CB02A6302E69FAE000B15F44 /* CashMonki.app */;
 			productType = "com.apple.product-type.application";
 		};
@@ -556,7 +556,7 @@
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2,7";
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/CashMonki.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/CashMonki";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Cashmonki.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Cashmonki";
 				XROS_DEPLOYMENT_TARGET = 2.0;
 			};
 			name = Debug;
@@ -580,7 +580,7 @@
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2,7";
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/CashMonki.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/CashMonki";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Cashmonki.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Cashmonki";
 				XROS_DEPLOYMENT_TARGET = 2.0;
 			};
 			name = Release;
@@ -603,7 +603,7 @@
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2,7";
-				TEST_TARGET_NAME = "CashMonki";
+				TEST_TARGET_NAME = "Cashmonki";
 				XROS_DEPLOYMENT_TARGET = 2.0;
 			};
 			name = Debug;
@@ -626,7 +626,7 @@
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2,7";
-				TEST_TARGET_NAME = "CashMonki";
+				TEST_TARGET_NAME = "Cashmonki";
 				XROS_DEPLOYMENT_TARGET = 2.0;
 			};
 			name = Release;
