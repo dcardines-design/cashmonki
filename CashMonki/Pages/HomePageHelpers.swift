@@ -797,6 +797,8 @@ extension HomePage {
                     // Complete the toast animation and show confirmation sheet after done animation
                     toastManager.completeReceiptAnalysis {
                         print("🍞 Analysis toast completed, showing confirmation sheet")
+                        print("📸 Setting pendingReceiptImage - Size: \(image.size)")
+                        print("📸 Source was: \(source == .scan ? "CAMERA" : "UPLOAD")")
                         // This runs after the done animation has been shown
                         pendingReceiptImage = image
                         pendingReceiptAnalysis = analysis

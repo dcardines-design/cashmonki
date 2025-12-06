@@ -207,6 +207,8 @@ struct HomePage: View {
                     isPresented: $isCameraPresented,
                     onPhotoTaken: { image in
                         photoCaptureStartTime = Date()
+                        print("📸 HomePage: Camera photo received - Size: \(image.size)")
+                        print("📸 HomePage: Setting capturedImage for receipt analysis")
                         capturedImage = image
                     },
                     onCancel: {
@@ -227,10 +229,13 @@ struct HomePage: View {
                     }
                     
                     print("✅ HomePage: Camera captured image, starting analysis...")
+                    print("📸 HomePage: Image passed to analysis - Size: \(newImage.size)")
                     analyzeReceiptImage(newImage, source: .scan)
                     
-                    // Reset capture time
+                    // Reset capture time and clear captured image to free memory
                     photoCaptureStartTime = nil
+                    capturedImage = nil  // Clear after starting analysis
+                    print("🧹 HomePage: Cleared capturedImage after analysis started")
                     
                     print("🕐 HomePage: Analysis started")
                 }
@@ -271,9 +276,13 @@ struct HomePage: View {
                             print("   - Converted: \(confirmedTransaction.primaryCurrency.symbol)\(abs(confirmedTransaction.amount))")
                             print("   - Receipt image: \(confirmedTransaction.receiptImage != nil ? "✅ INCLUDED" : "❌ MISSING")")
                             print("   - Has receipt flag: \(confirmedTransaction.hasReceiptImage)")
+                            print("   - pendingReceiptImage was: \(pendingReceiptImage != nil ? "✅ AVAILABLE" : "❌ NIL")")
                             
                             if let image = confirmedTransaction.receiptImage {
-                                print("   - Image size: \(image.size.width) x \(image.size.height)")
+                                print("   - Final transaction image size: \(image.size.width) x \(image.size.height)")
+                            }
+                            if let pendingImage = pendingReceiptImage {
+                                print("   - Pending image size was: \(pendingImage.size.width) x \(pendingImage.size.height)")
                             }
                             
                             // Handle successful receipt confirmation
