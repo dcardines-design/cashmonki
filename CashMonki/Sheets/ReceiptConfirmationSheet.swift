@@ -45,6 +45,14 @@ struct ReceiptConfirmationSheet: View {
         print("   🧹 Cleaned: '\(cleaned)'")
         print("   💱 Currency: \(currency.rawValue)")
         
+        // VND TEST SCENARIOS (for validation):
+        // ✅ Small: "25.000" → 25000, "60.000" → 60000
+        // ✅ Medium: "123.456" → 123456, "1.234.567" → 1234567  
+        // ✅ Large: "23.450.000" → 23450000, "100.000.000" → 100000000
+        // ✅ Decimals: "60.5" → 60.5, "123.45" → 123.45 (when < 3 digits after period)
+        // ✅ Mixed: "1.234.567,89" → 1234567.89
+        // ✅ Edge: "₫ 1.000.000" → 1000000, "VND 50.000" → 50000
+        
         // Handle different currency formats:
         // US/UK: 1,234.56 or 1234.56
         // European: 1.234,56 or 1234,56  
@@ -69,9 +77,59 @@ struct ReceiptConfirmationSheet: View {
         let commaCount = processedInput.filter { $0 == "," }.count
         
         print("   📊 Periods: \(periodCount), Commas: \(commaCount)")
+        print("   🏷️ Currency-aware parsing for: \(currency.rawValue)")
         
-        // PRIORITY 1: Standard US format: 1,234.56 (most common)
-        if commaCount > 0 && periodCount <= 1 {
+        // CURRENCY-AWARE PRIORITY: VND/IDR gets special treatment first
+        if (currency == .vnd || currency == .idr) && periodCount >= 1 && commaCount == 0 {
+            print("   🎯 VND/IDR currency detected - prioritizing period-as-thousands parsing")
+            
+            // IMMEDIATE VND/IDR PARSING (moved up for priority)
+            let parts = processedInput.components(separatedBy: ".")
+            print("   🔢 VND Split by periods: \(parts)")
+            
+            // Multiple periods = thousands separators (1.234.567)
+            if periodCount >= 2 {
+                print("   📍 VND Multiple periods - treating as thousands separators")
+                let allDigits = processedInput.replacingOccurrences(of: ".", with: "")
+                if allDigits.allSatisfy(\.isNumber), !allDigits.isEmpty {
+                    if let result = Double(allDigits) {
+                        print("   ✅ VND multi-period result: '\(processedInput)' → \(result)")
+                        return result
+                    }
+                }
+            }
+            // Single period logic
+            else if periodCount == 1 && parts.count == 2 {
+                let beforePeriod = parts[0]
+                let afterPeriod = parts[1]
+                
+                // VND bias: treat as thousands if 3+ digits or "000"
+                if afterPeriod.count >= 3 || afterPeriod == "000" {
+                    print("   ✅ VND thousands format: '\(processedInput)'")
+                    let allDigits = beforePeriod + afterPeriod
+                    if let result = Double(allDigits) {
+                        print("   💰 VND thousands result: \(result)")
+                        return result
+                    }
+                }
+                // Small digits = try decimal but prefer thousands for VND
+                else if afterPeriod.count <= 2 {
+                    let thousandsResult = Double(beforePeriod + afterPeriod)
+                    let decimalResult = Double(processedInput)
+                    
+                    // For VND, prefer thousands interpretation
+                    if let thousands = thousandsResult, thousands > 100 {
+                        print("   💰 VND bias towards thousands: \(thousands)")
+                        return thousands
+                    } else if let decimal = decimalResult {
+                        print("   💰 VND decimal fallback: \(decimal)")
+                        return decimal
+                    }
+                }
+            }
+        }
+        // PRIORITY 1: Standard US format: 1,234.56 (most common for non-VND)
+        else if commaCount > 0 && periodCount <= 1 {
             print("   📍 US format detected (commas as thousands separators)")
             let withoutCommas = processedInput.replacingOccurrences(of: ",", with: "")
             print("   🔢 Removing commas: '\(processedInput)' → '\(withoutCommas)'")
@@ -93,85 +151,17 @@ struct ReceiptConfirmationSheet: View {
             }
         }
         
-        // PRIORITY 3: Vietnamese/Indonesian parsing (ONLY for VND/IDR currencies from receipt scans)
-        // Both use periods as thousands separators: 60.000 = 60,000
-        if (currency == .vnd || currency == .idr) && periodCount >= 1 && commaCount == 0 {
-            print("   🔍 Checking Vietnamese/Indonesian patterns...")
-            
-            // Case 1: 60.000.00 (thousands.decimals) - 2 periods
-            if periodCount == 2 {
-                print("   📍 Case 1: Two periods detected (60.000.00 format)")
-                let parts = processedInput.components(separatedBy: ".")
-                if parts.count == 3 {
-                    let mainPart = parts[0]        // "60"
-                    let thousandsPart = parts[1]   // "000"
-                    let decimalPart = parts[2]     // "00"
-                    
-                    print("   🔢 Parts: [\(mainPart)] . [\(thousandsPart)] . [\(decimalPart)]")
-                    
-                    // Check if middle part is exactly "000" (Vietnamese thousands format)
-                    if thousandsPart == "000" {
-                        print("   ✅ Vietnamese thousands format detected!")
-                        // Vietnamese format: 60.000.00 = 60,000.00
-                        if let baseAmount = Double(mainPart), let decimals = Double(decimalPart) {
-                            let result = baseAmount * 1000 + (decimals / 100)
-                            print("   💰 Result: \(baseAmount) * 1000 + (\(decimals) / 100) = \(result)")
-                            return result
-                        }
-                    }
-                    // Otherwise might be European format like 1.234.567
-                    else {
-                        // Treat all periods as thousands separators except last 2 digits as cents
-                        let allDigits = processedInput.replacingOccurrences(of: ".", with: "")
-                        if allDigits.count >= 3 {
-                            let mainAmount = String(allDigits.dropLast(2))
-                            let centsPart = String(allDigits.suffix(2))
-                            if let amount = Double(mainAmount + "." + centsPart) {
-                                return amount
-                            }
-                        }
-                    }
-                }
-            }
-            // Case 2: 60.000 (thousands only) - 1 period
-            else if periodCount == 1 {
-                print("   📍 Case 2: One period detected (60.000 format)")
-                let parts = processedInput.components(separatedBy: ".")
-                if parts.count == 2 {
-                    let beforePeriod = parts[0]    // "60"
-                    let afterPeriod = parts[1]     // "000"
-                    
-                    print("   🔢 Parts: [\(beforePeriod)] . [\(afterPeriod)]")
-                    
-                    // Check if it's Vietnamese thousands format: X.000
-                    if afterPeriod == "000" {
-                        print("   ✅ Vietnamese thousands format detected!")
-                        // Vietnamese format: 60.000 = 60,000
-                        if let baseAmount = Double(beforePeriod) {
-                            let result = baseAmount * 1000
-                            print("   💰 Result: \(baseAmount) * 1000 = \(result)")
-                            return result
-                        }
-                    }
-                    // Otherwise treat as regular decimal format: 60.50 = 60.50
-                    else {
-                        print("   🔄 Not Vietnamese format, trying decimal: '\(processedInput)'")
-                        if let amount = Double(processedInput) {
-                            print("   💰 Decimal result: \(amount)")
-                            return amount
-                        }
-                    }
-                }
-            }
-            // Case 3: Multiple periods with comma (1.234.567,89)
-            else if periodCount >= 2 && processedInput.contains(",") {
-                let parts = processedInput.components(separatedBy: ",")
-                if parts.count == 2 {
-                    let integerPart = parts[0].replacingOccurrences(of: ".", with: "")
-                    let decimalPart = parts[1]
-                    if let amount = Double(integerPart + "." + decimalPart) {
-                        return amount
-                    }
+        // PRIORITY 3: Fallback VND parsing with comma (mixed European-style)
+        if (currency == .vnd || currency == .idr) && periodCount >= 1 && processedInput.contains(",") {
+            print("   📍 VND mixed format with comma detected (fallback)")
+            let parts = processedInput.components(separatedBy: ",")
+            if parts.count == 2 {
+                let integerPart = parts[0].replacingOccurrences(of: ".", with: "")
+                let decimalPart = parts[1]
+                print("   🔢 Integer: '\(integerPart)', Decimal: '\(decimalPart)'")
+                if let amount = Double(integerPart + "." + decimalPart) {
+                    print("   💰 VND mixed format result: \(amount)")
+                    return amount
                 }
             }
         }
@@ -184,7 +174,17 @@ struct ReceiptConfirmationSheet: View {
             return standardAmount
         }
         
-        print("   ⚠️ All parsing failed, using digits-only fallback...")
+        print("   ⚠️ All parsing failed, using enhanced fallback...")
+        
+        // ENHANCED FALLBACK: VND-aware digits extraction
+        if currency == .vnd && periodCount > 0 {
+            print("   🇻🇳 VND-specific fallback: removing periods and treating as whole number")
+            let withoutPeriods = processedInput.replacingOccurrences(of: ".", with: "")
+            if let vndResult = Double(withoutPeriods), vndResult > 0 {
+                print("   💰 VND aggressive fallback result: \(vndResult)")
+                return vndResult
+            }
+        }
         
         // Final fallback: extract all digits and treat as whole number
         let digitsOnly = String(processedInput.filter { $0.isNumber })

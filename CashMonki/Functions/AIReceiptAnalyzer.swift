@@ -156,8 +156,16 @@ class AIReceiptAnalyzer {
         - Extract the EXACT timestamp from the receipt when available (e.g., "2024-11-16 14:30" for 2:30 PM)
         - If only date is visible, use format: YYYY-MM-DD
         - IMPORTANT: Always prioritize extracting time when visible on receipt. If no time found, the app will use creation time automatically.
-        - Currency should be the 3-letter ISO code (USD, EUR, GBP, PHP, etc.)
+        - Currency should be the 3-letter ISO code (USD, EUR, GBP, PHP, VND, etc.)
         - Detect the currency from currency symbols, text, or context on the receipt
+        
+        CURRENCY-SPECIFIC NUMBER FORMATTING:
+        - For Vietnamese Dong (VND) receipts: Convert period-separated numbers to standard format
+          Examples: "60.000" → 60000, "1.234.567" → 1234567, "23.450.000" → 23450000
+        - For VND amounts, periods are thousands separators, NOT decimal points
+        - Return clean numbers without formatting: 60000 instead of "60.000"
+        - If you see ₫ symbol or Vietnamese text, use VND currency code
+        - Vietnamese examples: "60.000 ₫" = 60000, "1.234.567 VND" = 1234567
         - Available categories (ONLY use these exact categories, do NOT create new ones):
           * Home: "Home", "Rent/Mortgage", "Property Tax", "Repairs"
           * Utilities: "Utilities", "Electricity", "Water", "Internet"
