@@ -11,6 +11,7 @@ struct SheetHeader: View {
     let title: String
     let onBackTap: () -> Void
     let rightAction: RightAction?
+    let backgroundColor: Color
     
     enum RightAction {
         case edit(action: () -> Void)
@@ -41,10 +42,11 @@ struct SheetHeader: View {
         }
     }
     
-    init(title: String, onBackTap: @escaping () -> Void, rightAction: RightAction? = nil) {
+    init(title: String, onBackTap: @escaping () -> Void, rightAction: RightAction? = nil, backgroundColor: Color = AppColors.backgroundWhite) {
         self.title = title
         self.onBackTap = onBackTap
         self.rightAction = rightAction
+        self.backgroundColor = backgroundColor
     }
     
     var body: some View {
@@ -84,7 +86,7 @@ struct SheetHeader: View {
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 16)
-        .background(AppColors.surfacePrimary)
+        .background(backgroundColor)
     }
 }
 
@@ -118,6 +120,19 @@ extension SheetHeader {
             title: title, 
             onBackTap: onBackTap, 
             rightAction: .custom(icon: rightIcon, systemIcon: rightSystemIcon, action: onRightTap)
+        )
+    }
+    
+    /// Header with custom background color (for special cases like Manage Billing)
+    static func withCustomBackground(
+        title: String, 
+        onBackTap: @escaping () -> Void, 
+        backgroundColor: Color
+    ) -> SheetHeader {
+        SheetHeader(
+            title: title, 
+            onBackTap: onBackTap, 
+            backgroundColor: backgroundColor
         )
     }
 }

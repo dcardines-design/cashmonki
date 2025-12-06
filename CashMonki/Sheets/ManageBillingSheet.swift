@@ -223,14 +223,12 @@ struct ManageBillingSheet: View {
     
     var body: some View {
         VStack(spacing: 0) {
-            // Header with forced surface color background
-            ZStack {
-                AppColors.surfacePrimary  // Force surface color background
-                SheetHeader.basic(title: "Manage Billing") {
-                    isPresented = false
-                }
-                .background(Color.clear)  // Make SheetHeader background transparent
-            }
+            // Header with surface color background
+            SheetHeader.withCustomBackground(
+                title: "Manage Billing",
+                onBackTap: { isPresented = false },
+                backgroundColor: AppColors.surfacePrimary
+            )
             
             // Content
             ScrollView(showsIndicators: false) {
