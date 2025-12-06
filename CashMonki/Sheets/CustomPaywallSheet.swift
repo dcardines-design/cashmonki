@@ -611,10 +611,12 @@ struct CustomPaywallSheet: View {
                         print("🚨 ERROR DESCRIPTION: \(error.localizedDescription)")
                         print("🚨 ERROR USER INFO: \(nsError.userInfo)")
                         
-                        // Check if this is a user cancellation - DON'T show dialog for these
+                        // Enhanced user cancellation detection - DON'T show dialog for these
                         let isUserCancellation = (nsError.domain == "SKErrorDomain" && nsError.code == 2) ||
                                                 (nsError.domain == "RevenueCat.ErrorDomain" && nsError.code == 1) ||
-                                                (nsError.domain == "SKErrorDomain" && nsError.code == 19) // Overlay cancelled
+                                                (nsError.domain == "SKErrorDomain" && nsError.code == 19) ||
+                                                error.localizedDescription.lowercased().contains("cancel") ||
+                                                error.localizedDescription.lowercased().contains("user cancel")
                         
                         if isUserCancellation {
                             print("👤 PAYWALL: User cancelled subscription - no dialog needed")
@@ -747,9 +749,9 @@ struct CustomPaywallSheet: View {
                         subscriptionErrorMessage = errorMessage
                         showingSubscriptionError = true
                     } else {
-                        print("🚨 NO ERROR OBJECT PROVIDED")
-                        subscriptionErrorMessage = "Unable to process subscription. Please try again."
-                        showingSubscriptionError = true
+                        print("🚨 NO ERROR OBJECT PROVIDED - treating as potential user cancellation")
+                        print("👤 PAYWALL: No error object, likely user cancellation - no dialog needed")
+                        return // Exit early, don't show any dialog for unknown errors (likely cancellations)
                     }
                     
                     print("🔄 PAYWALL: Keeping paywall open for user retry")
