@@ -1,0 +1,34 @@
+# Dependencies
+node_modules/
+npm-debug.log*
+
+# Build output
+lib/
+
+# Environment files
+.env
+.env.local
+.env.production
+
+# TypeScript
+*.tsbuildinfo
+
+# Firebase
+.firebase/
+.firebaserc
+
+# Logs
+logs/
+*.log
+
+# Runtime data
+pids/
+*.pid
+*.seed
+*.pid.lock
+
+# Coverage directory used by tools like istanbul
+coverage/
+
+# Mac
+.DS_Store
