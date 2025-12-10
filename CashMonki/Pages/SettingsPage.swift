@@ -59,6 +59,10 @@ struct SettingsPage: View {
     @State private var isTestingAPI = false
     @State private var apiTestResult: String?
     
+    // Environment testing state
+    @State private var isTestingEnvironment = false
+    @State private var environmentTestResult: String?
+    
     // Firebase pull data state
     @State private var isPullingData = false
     @State private var pullDataResult: String?
@@ -1139,6 +1143,17 @@ struct SettingsPage: View {
                 icon: "🧪"
             ) {
                 testOpenRouterAPI()
+            }
+            
+            Divider()
+                .padding(.leading, 52)
+            
+            settingsRow(
+                title: "Test Environment & API Keys",
+                subtitle: environmentTestResult ?? "Check environment variables and API key loading",
+                icon: "🔑"
+            ) {
+                testEnvironmentAndAPIKeys()
             }
         }
     }
@@ -2463,6 +2478,40 @@ struct SettingsPage: View {
                 case .failure(let error):
                     self.apiTestResult = "❌ OpenRouter API test failed: \(error.localizedDescription)"
                     print("❌ OpenRouter API test failed: \(error)")
+                }
+            }
+        }
+    }
+    
+    /// Test environment variable loading and API key configuration
+    private func testEnvironmentAndAPIKeys() {
+        isTestingEnvironment = true
+        environmentTestResult = "Testing..."
+        
+        DispatchQueue.global(qos: .userInitiated).async {
+            // Run the comprehensive environment test
+            let testResult = EnvironmentTester.testProductionReadiness()
+            let securityResult = EnvironmentTester.testInfoPlistSecurity()
+            
+            DispatchQueue.main.async {
+                self.isTestingEnvironment = false
+                
+                if testResult.isReady && securityResult.isSecure {
+                    self.environmentTestResult = "✅ All systems secure and working"
+                    print("🧪 Environment Test: ✅ PASSED - Ready for production")
+                } else {
+                    self.environmentTestResult = "❌ Some issues found"
+                    print("🧪 Environment Test: ❌ FAILED")
+                }
+                
+                // Print detailed report to console
+                EnvironmentTester.printDiagnosticReport()
+                
+                // Show toast with result
+                if testResult.isReady {
+                    self.toastManager.showSuccess("✅ Environment Test Passed")
+                } else {
+                    self.toastManager.showError("❌ Environment Test Failed")
                 }
             }
         }

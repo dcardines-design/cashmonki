@@ -1,0 +1,38 @@
+{
+  "functions": {
+    "source": "firebase-functions",
+    "codebase": "default",
+    "runtime": "nodejs20"
+  },
+  "hosting": [
+    {
+      "site": "cashmonki-api",
+      "public": "firebase-functions/lib",
+      "rewrites": [
+        {
+          "source": "/api/**",
+          "function": "api"
+        }
+      ],
+      "headers": [
+        {
+          "source": "/api/**",
+          "headers": [
+            {
+              "key": "Access-Control-Allow-Origin",
+              "value": "https://cashmonki.app"
+            },
+            {
+              "key": "Access-Control-Allow-Methods",
+              "value": "GET, POST, PUT, DELETE, OPTIONS"
+            },
+            {
+              "key": "Access-Control-Allow-Headers",
+              "value": "Content-Type, Authorization"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

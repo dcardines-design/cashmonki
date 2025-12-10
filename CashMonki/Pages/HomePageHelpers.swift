@@ -161,11 +161,12 @@ extension HomePage {
         
         switch rangeSelection {
         case .day:
-            // Start of today to current time
+            // For day view, use start of day to end of day (full 24-hour period)
             let startOfToday = cal.startOfDay(for: now)
+            let endOfToday = cal.dateInterval(of: .day, for: now)?.end ?? now
             let timePoints = (0..<7).compactMap { i in
                 let timePoint = startOfToday.addingTimeInterval(TimeInterval(i * 4 * 3600))
-                return timePoint <= now ? timePoint : nil
+                return timePoint <= endOfToday ? timePoint : nil
             }
             // Always ensure current time is included
             let finalPoints = timePoints + [now]
@@ -773,15 +774,14 @@ extension HomePage {
         receiptAnalysisError = nil
         
         let creationTime = Date()
-        AIReceiptAnalyzer.shared.analyzeReceipt(image: image, creationTime: creationTime) { result in
-            DispatchQueue.main.async {
-                print("🔄📸 ==== RECEIPT ANALYSIS COMPLETED ====")
-                isAnalyzingReceipt = false
-                analyzingSource = nil
-                originalTileClicked = nil
-                
-                switch result {
-                case .success(let analysis):
+        Task {
+            do {
+                let analysis = try await AIReceiptAnalyzer.shared.analyzeReceiptSecure(image: image, creationTime: creationTime)
+                await MainActor.run {
+                    print("🔄📸 ==== RECEIPT ANALYSIS COMPLETED (SECURE) ====")
+                    isAnalyzingReceipt = false
+                    analyzingSource = nil
+                    originalTileClicked = nil
                     print("✅ Receipt analysis SUCCESS!")
                     print("🏪 Merchant: \(analysis.merchantName)")
                     print("💰 Amount: \(analysis.totalAmount) \(analysis.currency.rawValue)")
@@ -804,14 +804,19 @@ extension HomePage {
                         pendingReceiptAnalysis = analysis
                         showingReceiptConfirmation = true
                     }
-                    
-                case .failure(let error):
-                    print("❌📸 ==== RECEIPT ANALYSIS FAILED ====")
+                }
+            } catch {
+                await MainActor.run {
+                    print("❌📸 ==== RECEIPT ANALYSIS FAILED (SECURE) ====")
                     print("❌ Error: \(error.localizedDescription)")
                     print("❌ Error type: \(type(of: error))")
                     if let receiptError = error as? ReceiptAIError {
                         print("❌ Specific receipt error: \(receiptError)")
                     }
+                    
+                    isAnalyzingReceipt = false
+                    analyzingSource = nil
+                    originalTileClicked = nil
                     
                     // Use smart error handling that automatically detects network vs regular errors
                     toastManager.failReceiptAnalysis(error: error) {

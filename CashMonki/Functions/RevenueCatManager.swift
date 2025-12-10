@@ -29,9 +29,33 @@ class RevenueCatManager: NSObject, ObservableObject {
     @Published var offerings: Offerings?
     @Published var isSubscriptionActive: Bool = false
     
+    // MARK: - Test Mode
+    @Published var debugTestProEnabled: Bool = false  // Disable by default
+    
+    /// Enable test pro features for debugging (DEBUG builds only)
+    func enableTestPro() {
+        #if DEBUG
+        debugTestProEnabled = true
+        print("🧪 Test Pro mode enabled")
+        #endif
+    }
+    
+    /// Disable test pro features (DEBUG builds only)
+    func disableTestPro() {
+        #if DEBUG
+        debugTestProEnabled = false
+        print("🧪 Test Pro mode disabled")
+        #endif
+    }
+    
     /// Convenience property to check if user has Pro subscription
     var isProUser: Bool {
+        #if DEBUG
+        // For testing without RevenueCat dashboard setup
+        return debugTestProEnabled
+        #else
         return isSubscriptionActive
+        #endif
     }
     
     // MARK: - Debug Testing
@@ -145,6 +169,14 @@ class RevenueCatManager: NSObject, ObservableObject {
     // MARK: - Configuration
     
     nonisolated func configure() {
+        // Initialize API keys if not already in keychain
+        #if DEBUG
+        // Force use test API key in debug builds
+        Config.useTestAPIKey()
+        #else
+        Config.initializeRevenueCatKey()
+        #endif
+        
         // Get RevenueCat API key from secure storage
         guard let apiKey = Config.revenueCatAPIKey else {
             print("❌ RevenueCat: No API key found in secure storage")
@@ -153,33 +185,22 @@ class RevenueCatManager: NSObject, ObservableObject {
             return
         }
         
-        print("✅ RevenueCat: Configuring with API key from secure storage")
-        Purchases.logLevel = .debug
+        print("✅ RevenueCat: Configuring...")
         
         #if DEBUG
-        // Force pure sandbox mode for testing with incomplete App Store Connect products
+        Purchases.logLevel = .debug
         Purchases.simulatesAskToBuyInSandbox = true
-        print("🧪 RevenueCat: Enabled sandbox simulation for testing")
-        print("🔧 RevenueCat: Forcing local testing mode - bypassing App Store Connect validation")
+        print("🧪 RevenueCat: Debug mode enabled")
+        #else
+        Purchases.logLevel = .warn
         #endif
         
-        // Configure RevenueCat with the most recent API
-        print("🔧 RevenueCat: Configuring with modern API...")
-        
         #if DEBUG
-        print("🧪 RevenueCat: Debug build - enabling StoreKit Configuration file testing")
-        print("🔧 RevenueCat: StoreKit Configuration File: CashMonki/StoreKit/Configuration.storekit")
-        print("⚠️ RevenueCat: Scheme configured with storeKitConfigurationFileReference")
-        print("📱 RevenueCat: Products in config: cashmonki_pro_monthly, cashmonki_pro_yearly")
-        print("🧪 RevenueCat: Using StoreKit 1 with configuration file override")
-        
-        // For StoreKit Configuration file testing, use StoreKit 1 with observer mode disabled
         let config = Configuration.Builder(withAPIKey: apiKey)
             .with(purchasesAreCompletedBy: .revenueCat, storeKitVersion: .storeKit1)
-            .with(storeKit1Timeout: 30)  // Longer timeout for configuration file
+            .with(storeKit1Timeout: 30)
             .build()
         #else
-        print("📱 RevenueCat: Production build - standard configuration")
         let config = Configuration.Builder(withAPIKey: apiKey)
             .with(purchasesAreCompletedBy: .revenueCat, storeKitVersion: .storeKit1)
             .build()
@@ -191,12 +212,10 @@ class RevenueCatManager: NSObject, ObservableObject {
         // Set up delegate (must be set after configure)
         Purchases.shared.delegate = self
         
-        // Load initial customer info (async calls from nonisolated context)
-        print("🔄 RevenueCat: Starting initial data load...")
+        // Load initial data
         Task { @MainActor in
             await loadCustomerInfo()
             await loadOfferings()
-            print("✅ RevenueCat: Initial data load completed")
         }
     }
     
@@ -316,7 +335,7 @@ class RevenueCatManager: NSObject, ObservableObject {
     
     // MARK: - Paywall Presentation
     
-    func presentPaywall() {
+    func presentPaywall() async {
         print("🎯 RevenueCat: ======== PRESENT PAYWALL REQUESTED ========")
         print("💰 RevenueCat: Triggering native PaywallView presentation...")
         
@@ -327,14 +346,14 @@ class RevenueCatManager: NSObject, ObservableObject {
             
             #if DEBUG
             print("🧪 RevenueCat: DEBUG MODE - Presenting StoreKit test paywall")
-            DispatchQueue.main.async {
+            await MainActor.run {
                 NotificationCenter.default.post(
                     name: NSNotification.Name("ShowRevenueCatError"), 
                     object: "Premium features require RevenueCat API key. In production, this would show the subscription paywall."
                 )
             }
             #else
-            DispatchQueue.main.async {
+            await MainActor.run {
                 NotificationCenter.default.post(
                     name: NSNotification.Name("ShowRevenueCatError"), 
                     object: "RevenueCat not configured. Please add API key."
@@ -344,50 +363,32 @@ class RevenueCatManager: NSObject, ObservableObject {
             return
         }
         
-        DispatchQueue.main.async { [weak self] in
-            print("🔍 RevenueCat: Checking offerings state...")
-            print("💰 RevenueCat: offerings == nil: \(self?.offerings == nil)")
-            
-            // Check if offerings are already loaded
-            if self?.offerings != nil {
-                print("✅ RevenueCat: Offerings already loaded, presenting paywall")
-                print("🎯 RevenueCat: targetOffering available: \(self?.targetOffering != nil)")
+        // Ensure offerings are loaded before presenting paywall
+        print("🔍 RevenueCat: Checking offerings state...")
+        print("💰 RevenueCat: offerings == nil: \(offerings == nil)")
+        
+        if offerings == nil {
+            print("🔄 RevenueCat: No cached offerings, loading from server first...")
+            await loadOfferings()
+        }
+        
+        // Verify we have valid offerings before proceeding
+        await MainActor.run {
+            if let targetOffering = self.targetOffering {
+                print("✅ RevenueCat: Valid target offering found, presenting paywall")
+                print("🎯 RevenueCat: Offering ID: \(targetOffering.identifier)")
+                print("📦 RevenueCat: Available packages: \(targetOffering.availablePackages.count)")
                 NotificationCenter.default.post(
                     name: NSNotification.Name("PresentNativePaywall"), 
-                    object: self?.offeringID
+                    object: targetOffering.identifier
                 )
             } else {
-                print("🔄 RevenueCat: No cached offerings, loading from server...")
-                // Load offerings first, then present paywall
-                Purchases.shared.getOfferings { @Sendable [weak self] offerings, error in
-                    DispatchQueue.main.async {
-                        if let offerings = offerings {
-                            print("✅ RevenueCat: Offerings loaded successfully")
-                            self?.offerings = offerings
-                            print("📊 RevenueCat: Loaded \(offerings.all.count) total offerings")
-                            print("📋 RevenueCat: Available offering IDs: \(offerings.all.keys.joined(separator: ", "))")
-                            
-                            // Check if we have a valid target offering
-                            if self?.targetOffering != nil {
-                                print("🎯 RevenueCat: Valid target offering found, presenting paywall")
-                                NotificationCenter.default.post(
-                                    name: NSNotification.Name("PresentNativePaywall"), 
-                                    object: self?.offeringID
-                                )
-                            } else {
-                                print("❌ RevenueCat: No valid offering available for paywall")
-                            }
-                        } else if let error = error {
-                            print("❌ RevenueCat: Failed to load offerings: \(error.localizedDescription)")
-                            print("🔍 RevenueCat: Error details: \(error)")
-                            // Show error to user
-                            NotificationCenter.default.post(
-                                name: NSNotification.Name("ShowRevenueCatError"), 
-                                object: "Failed to load subscription options: \(error.localizedDescription)"
-                            )
-                        }
-                    }
-                }
+                print("❌ RevenueCat: No valid offering available for paywall")
+                print("💡 RevenueCat: Check RevenueCat dashboard configuration")
+                NotificationCenter.default.post(
+                    name: NSNotification.Name("ShowRevenueCatError"), 
+                    object: "No subscription plans available. Please try again later."
+                )
             }
         }
     }
@@ -555,11 +556,8 @@ class RevenueCatManager: NSObject, ObservableObject {
     
     func hasFeature(_ feature: PremiumFeature) -> Bool {
         #if DEBUG
-        // For testing, you can temporarily enable premium features
-        // by setting this to true during development
-        let debugPremiumEnabled = false  // Testing with RevenueCat test API key
-        if debugPremiumEnabled {
-            print("🧪 RevenueCat: DEBUG MODE - Premium feature '\(feature)' enabled for testing")
+        // For testing without RevenueCat dashboard setup
+        if debugTestProEnabled {
             return true
         }
         #endif

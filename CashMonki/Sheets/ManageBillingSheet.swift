@@ -476,7 +476,7 @@ struct ManageBillingSheet: View {
                     .font(Font.custom("Overused Grotesk", size: 14).weight(.medium))
                     .foregroundColor(AppColors.foregroundSecondary)
                 
-                Text("Rosebud Studio")
+                Text("Dante Studio")
                     .font(Font.custom("Overused Grotesk", size: 14).weight(.semibold))
                     .foregroundColor(AppColors.foregroundPrimary)
             }

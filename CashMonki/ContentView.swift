@@ -42,6 +42,7 @@ struct ContentView: View {
             // Custom navigation bar
             customNavigationBar
         }
+        .preferredColorScheme(.light) // Force light mode - never change colors for dark mode
         .onAppear {
             Config.initializeAPIKey()
             

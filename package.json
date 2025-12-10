@@ -1,0 +1,6 @@
+{
+  "dependencies": {
+    "firebase-tools": "^14.27.0",
+    "untitledui": "^0.1.44"
+  }
+}

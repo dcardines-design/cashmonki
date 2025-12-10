@@ -254,8 +254,8 @@ struct ReceiptConfirmationSheet: View {
                     // Merchant field
                     AppInputField.merchant(text: $merchant, size: .md)
                     
-                    // Date field
-                    AppInputField.date(title: "Date added", dateValue: $selectedDate, size: .md)
+                    // Date field with time
+                    AppInputField.date(title: "Date", dateValue: $selectedDate, components: [.date, .hourAndMinute], size: .md)
                     
                     // Category field
                     AppInputField.categoryById(selectedCategoryId: $selectedCategoryId, size: .md)

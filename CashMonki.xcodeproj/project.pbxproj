@@ -52,6 +52,7 @@
 				"File Assets/paywall bg.jpg",
 				"File Assets/receipt-check.svg",
 				"File Assets/user-02.svg",
+				"GoogleService-Info.plist",
 			);
 			target = CB02A6422E69FAE300B15F44 /* CashMonkiTests */;
 		};
@@ -66,6 +67,7 @@
 				"File Assets/paywall bg.jpg",
 				"File Assets/receipt-check.svg",
 				"File Assets/user-02.svg",
+				"GoogleService-Info.plist",
 			);
 			target = CB02A64C2E69FAE300B15F44 /* CashMonkiUITests */;
 		};
@@ -175,7 +177,7 @@
 				CB8D47302EBB475A00760A39 /* Lottie */,
 				CBEAE1422ECE30C70044BD60 /* RevenueCatUI */,
 			);
-			productName = "Cashmonki";
+			productName = Cashmonki;
 			productReference = CB02A6302E69FAE000B15F44 /* CashMonki.app */;
 			productType = "com.apple.product-type.application";
 		};
@@ -484,7 +486,7 @@
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				MARKETING_VERSION = 1.0.0;
-				PRODUCT_BUNDLE_IDENTIFIER = Rosebud.Cashooya-Playground;
+				PRODUCT_BUNDLE_IDENTIFIER = com.dante.cashmonki;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = auto;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx xros xrsimulator";
@@ -526,7 +528,7 @@
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				MARKETING_VERSION = 1.0.0;
-				PRODUCT_BUNDLE_IDENTIFIER = Rosebud.Cashooya-Playground;
+				PRODUCT_BUNDLE_IDENTIFIER = com.dante.cashmonki;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = auto;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx xros xrsimulator";
@@ -549,7 +551,7 @@
 				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				MACOSX_DEPLOYMENT_TARGET = 15.0;
 				MARKETING_VERSION = 1.0.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.dante.cashmonkiTests;
+				PRODUCT_BUNDLE_IDENTIFIER = com.dante.cashmonki.tests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = auto;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx xros xrsimulator";
@@ -573,7 +575,7 @@
 				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				MACOSX_DEPLOYMENT_TARGET = 15.0;
 				MARKETING_VERSION = 1.0.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.dante.cashmonkiTests;
+				PRODUCT_BUNDLE_IDENTIFIER = com.dante.cashmonki.tests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = auto;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx xros xrsimulator";
@@ -596,14 +598,14 @@
 				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				MACOSX_DEPLOYMENT_TARGET = 15.0;
 				MARKETING_VERSION = 1.0.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.dante.cashmonkiUITests;
+				PRODUCT_BUNDLE_IDENTIFIER = com.dante.cashmonki.uitests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = auto;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx xros xrsimulator";
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2,7";
-				TEST_TARGET_NAME = "Cashmonki";
+				TEST_TARGET_NAME = Cashmonki;
 				XROS_DEPLOYMENT_TARGET = 2.0;
 			};
 			name = Debug;
@@ -619,14 +621,14 @@
 				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				MACOSX_DEPLOYMENT_TARGET = 15.0;
 				MARKETING_VERSION = 1.0.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.dante.cashmonkiUITests;
+				PRODUCT_BUNDLE_IDENTIFIER = com.dante.cashmonki.uitests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = auto;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx xros xrsimulator";
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2,7";
-				TEST_TARGET_NAME = "Cashmonki";
+				TEST_TARGET_NAME = Cashmonki;
 				XROS_DEPLOYMENT_TARGET = 2.0;
 			};
 			name = Release;

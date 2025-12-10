@@ -278,14 +278,13 @@ struct OnboardingTransactionSheet: View {
         // Show scanning toast
         toastManager.startReceiptAnalysis()
         
-        // Process with AIReceiptAnalyzer (same as HomePage)
+        // Process with AIReceiptAnalyzer (SECURE BACKEND)
         let creationTime = Date()
-        AIReceiptAnalyzer.shared.analyzeReceipt(image: image, creationTime: creationTime) { result in
-            DispatchQueue.main.async {
-                isAnalyzingReceipt = false
-                
-                switch result {
-                case .success(let analysisResult):
+        Task {
+            do {
+                let analysisResult = try await AIReceiptAnalyzer.shared.analyzeReceiptSecure(image: image, creationTime: creationTime)
+                await MainActor.run {
+                    isAnalyzingReceipt = false
                     print("✅ OnboardingTransaction: Receipt analysis successful - \(analysisResult)")
                     
                     // Record usage for receipt analysis (onboarding = free, doesn't count towards daily limit)
@@ -298,9 +297,11 @@ struct OnboardingTransactionSheet: View {
                         // For now, just complete the action
                         print("🎉 OnboardingTransaction: Receipt processed successfully")
                     }
-                    
-                case .failure(let error):
-                    print("❌ OnboardingTransaction: Receipt analysis failed: \(error)")
+                }
+            } catch {
+                await MainActor.run {
+                    isAnalyzingReceipt = false
+                    print("❌ OnboardingTransaction: Receipt analysis failed (SECURE): \(error)")
                     toastManager.failReceiptAnalysis(error: error) {
                         print("⚠️ OnboardingTransaction: Receipt analysis failed")
                     }

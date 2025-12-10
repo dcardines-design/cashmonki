@@ -60,8 +60,8 @@ fileprivate func normalizeDateForChart(_ date: Date, rangeSelection: HomePage.Ra
     
     switch rangeSelection {
     case .day:
-        // For day view, strip time components and use only date
-        return calendar.startOfDay(for: date)
+        // For day view, KEEP time components for hourly granularity like other filters
+        return date
     case .week, .month, .quarter:
         // For other views, keep the full timestamp for granular plotting
         return date
@@ -91,28 +91,24 @@ fileprivate func createStepwiseRunningTotals(
         // Normalize the transaction date for chart plotting
         let normalizedDate = normalizeDateForChart(transaction.date, rangeSelection: rangeSelection)
         
-        // Add a point just before the transaction (at previous amount) - only for non-day views
-        if rangeSelection != .day {
-            let preTransactionTime = normalizedDate.addingTimeInterval(-60) // 1 minute before
-            dataPoints.append((date: preTransactionTime, amount: previousTotal))
-        }
+        // Add a point just before the transaction (at previous amount) for all views
+        let preTransactionTime = normalizedDate.addingTimeInterval(-60) // 1 minute before
+        dataPoints.append((date: preTransactionTime, amount: previousTotal))
         
         // Add the transaction point (creates diagonal line to new amount)
         dataPoints.append((date: normalizedDate, amount: runningTotal))
         
-        // Create additional "hold" points for smooth dragging - skip for day view to avoid time-based wonky lines
-        if rangeSelection != .day {
-            // This ensures the previous value is maintained until the next transaction
-            let nextTransactionDate = getNextTransactionDate(after: transaction.date, in: transactions)
-            if let nextDate = nextTransactionDate, nextDate <= endDate {
-                let timeInterval = nextDate.timeIntervalSince(transaction.date)
-                let steps = min(20, max(2, Int(timeInterval / 3600))) // More points for longer gaps
-                
-                for i in 1..<steps {
-                    let interpolatedDate = transaction.date.addingTimeInterval(timeInterval * Double(i) / Double(steps))
-                    if interpolatedDate <= endDate {
-                        dataPoints.append((date: interpolatedDate, amount: runningTotal)) // Previous value maintained
-                    }
+        // Create additional "hold" points for smooth dragging for all views
+        // This ensures the previous value is maintained until the next transaction
+        let nextTransactionDate = getNextTransactionDate(after: transaction.date, in: transactions)
+        if let nextDate = nextTransactionDate, nextDate <= endDate {
+            let timeInterval = nextDate.timeIntervalSince(transaction.date)
+            let steps = min(20, max(2, Int(timeInterval / 3600))) // More points for longer gaps
+            
+            for i in 1..<steps {
+                let interpolatedDate = transaction.date.addingTimeInterval(timeInterval * Double(i) / Double(steps))
+                if interpolatedDate <= endDate {
+                    dataPoints.append((date: interpolatedDate, amount: runningTotal)) // Previous value maintained
                 }
             }
         }
@@ -173,13 +169,8 @@ fileprivate func calculateRunningTotalAtTime(
     for transaction in transactions {
         let normalizedTransactionDate = normalizeDateForChart(transaction.date, rangeSelection: rangeSelection)
         
-        // For days view, ignore time components completely in comparison
-        let shouldIncludeTransaction: Bool
-        if rangeSelection == .day {
-            shouldIncludeTransaction = normalizedTransactionDate <= normalizedTargetTime
-        } else {
-            shouldIncludeTransaction = normalizedTransactionDate <= normalizedTargetTime
-        }
+        // Include transactions up to the target time for all views (including day view for hourly granularity)
+        let shouldIncludeTransaction = normalizedTransactionDate <= normalizedTargetTime
         
         if shouldIncludeTransaction {
             let impact = getTransactionImpact(transaction, chartFilter: chartFilter)
@@ -432,11 +423,12 @@ extension HomePage {
                 txn.date >= periodStartDate && txn.date <= min(now, periodEndDate)
             }.sorted { $0.date < $1.date }
             
+            
             // Create step-wise running total data points for smooth dragging
             let enhancedDataPoints = createStepwiseRunningTotals(
                 transactions: currentPeriodTransactions,
                 startDate: periodStartDate,
-                endDate: min(now, periodEndDate),
+                endDate: periodEndDate, // Use full period for chart structure
                 chartFilter: chartFilter,
                 rangeSelection: rangeSelection
             )
@@ -710,9 +702,8 @@ extension HomePage {
                             for dataPoint in previousPeriodData {
                                 let periodDuration = periodEndDate.timeIntervalSince(periodStartDate)
                                 
-                                // For days view, use normalized date (no time component) for X positioning
-                                let dateForPositioning = rangeSelection == .day ? 
-                                    normalizeDateForChart(dataPoint.date, rangeSelection: rangeSelection) : dataPoint.date
+                                // Use full date/time for all views to show time-based progressions
+                                let dateForPositioning = dataPoint.date
                                 
                                 let timeOffset = dateForPositioning.timeIntervalSince(periodStartDate)
                                 let normalizedTime: Double = periodDuration > 0 ? timeOffset / periodDuration : 0
@@ -734,7 +725,7 @@ extension HomePage {
                     }
                     
                     // Crosshairs (behind the lines)
-                    // Enhanced crosshairs for smooth dragging
+                    // Enhanced crosshairs for smooth dragging - show crosshairs throughout period, data points only for current data
                     if let dragPos = selectedDragPosition, let dragValue = selectedDragValue {
                         // Smooth drag crosshairs
                         let pointX = chartWidth * CGFloat(dragPos)
@@ -798,9 +789,8 @@ extension HomePage {
                         // Calculate position for the selected data point (fallback)
                         let periodDuration = periodEndDate.timeIntervalSince(periodStartDate)
                         
-                        // For days view, use normalized date (no time component) for X positioning
-                        let dateForPositioning = rangeSelection == .day ? 
-                            normalizeDateForChart(selectedData.date, rangeSelection: rangeSelection) : selectedData.date
+                        // Use full date/time for all views to show time-based progressions  
+                        let dateForPositioning = selectedData.date
                         
                         let timeOffset = dateForPositioning.timeIntervalSince(periodStartDate)
                         let normalizedTime: Double = periodDuration > 0 ? timeOffset / periodDuration : 0
@@ -875,9 +865,8 @@ extension HomePage {
                                 if dataPoint.date <= currentTime {
                                     let periodDuration = periodEndDate.timeIntervalSince(periodStartDate)
                                     
-                                    // For days view, use normalized date (no time component) for X positioning
-                                    let dateForPositioning = rangeSelection == .day ? 
-                                        normalizeDateForChart(dataPoint.date, rangeSelection: rangeSelection) : dataPoint.date
+                                    // Use full date/time for all views to show time-based progressions
+                                    let dateForPositioning = dataPoint.date
                                     
                                     let timeOffset = dateForPositioning.timeIntervalSince(periodStartDate)
                                     let normalizedTime: Double = periodDuration > 0 ? timeOffset / periodDuration : 0
@@ -904,9 +893,8 @@ extension HomePage {
                                 if dataPoint.date > currentTime {
                                     let periodDuration = periodEndDate.timeIntervalSince(periodStartDate)
                                     
-                                    // For days view, use normalized date (no time component) for X positioning
-                                    let dateForPositioning = rangeSelection == .day ? 
-                                        normalizeDateForChart(dataPoint.date, rangeSelection: rangeSelection) : dataPoint.date
+                                    // Use full date/time for all views to show time-based progressions
+                                    let dateForPositioning = dataPoint.date
                                     
                                     let timeOffset = dateForPositioning.timeIntervalSince(periodStartDate)
                                     let normalizedTime: Double = periodDuration > 0 ? timeOffset / periodDuration : 0
@@ -952,6 +940,7 @@ extension HomePage {
                                             chartFilter: chartFilter,
                                             rangeSelection: rangeSelection
                                         )
+                                        
                                         
                                         // Check if this position has actual current period data (not future)
                                         let currentTime = Date()

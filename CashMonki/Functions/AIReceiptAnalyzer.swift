@@ -19,7 +19,11 @@ struct ReceiptAnalysis {
 class AIReceiptAnalyzer {
     static let shared = AIReceiptAnalyzer()
     
+    // Legacy direct API (deprecated)
     private let baseURL = "https://openrouter.ai/api/v1/chat/completions"
+    
+    // New secure backend service
+    private let backendService = BackendAPIService.shared
     
     private init() {}
     
@@ -102,7 +106,40 @@ class AIReceiptAnalyzer {
         return Config.openRouterAPIKey
     }
     
+    /// Analyze receipt using secure backend (recommended for production)
+    func analyzeReceiptSecure(image: UIImage, creationTime: Date = Date()) async throws -> ReceiptAnalysis {
+        print("🔒 Starting secure receipt analysis via backend...")
+        print("📸 Image dimensions: \(image.size.width) x \(image.size.height)")
+        
+        // Resize image to reduce memory usage and API payload size
+        let resizedImage = resizeImageForAPI(image)
+        
+        guard let imageData = resizedImage.jpegData(compressionQuality: 0.8) else {
+            throw ReceiptAIError.imageProcessingFailed
+        }
+        
+        // Use secure backend service
+        let backendResult = try await backendService.analyzeReceipt(imageData: imageData)
+        
+        // Convert backend result to ReceiptAnalysis
+        let analysis = ReceiptAnalysis(
+            merchantName: backendResult.merchantName,
+            totalAmount: backendResult.amount,
+            date: backendResult.date,
+            category: backendResult.category,
+            paymentMethod: "Unknown", // Backend doesn't provide this yet
+            currency: CurrencyPreferences.shared.primaryCurrency,
+            items: backendResult.items.map { ReceiptItem(description: $0.name, quantity: $0.quantity, unitPrice: $0.price, totalPrice: $0.price * Double($0.quantity)) },
+            rawText: "Processed via secure backend"
+        )
+        
+        print("✅ Secure receipt analysis completed: \(analysis.merchantName) - \(analysis.totalAmount)")
+        return analysis
+    }
+    
+    /// Legacy direct API method (deprecated - use analyzeReceiptSecure instead)
     func analyzeReceipt(image: UIImage, creationTime: Date = Date(), completion: @escaping (Result<ReceiptAnalysis, Error>) -> Void) {
+        print("⚠️ Using legacy direct API - consider switching to analyzeReceiptSecure()")
         print("🚀 Starting receipt analysis...")
         print("📸 Image dimensions: \(image.size.width) x \(image.size.height)")
         
@@ -149,12 +186,16 @@ class AIReceiptAnalyzer {
             ]
         }
 
+        If no date is visible on receipt, use:
+        "date": "TODAY"
+
         IMPORTANT:
         - Return ONLY the JSON object, no other text
         - Use numbers for amounts, not strings
         - Date and time format: YYYY-MM-DD HH:MM (24-hour format) if time is available on receipt, or just YYYY-MM-DD if only date is shown
         - Extract the EXACT timestamp from the receipt when available (e.g., "2024-11-16 14:30" for 2:30 PM)
         - If only date is visible, use format: YYYY-MM-DD
+        - CRITICAL: If NO DATE is found on the receipt, return "TODAY" as the date value
         - IMPORTANT: Always prioritize extracting time when visible on receipt. If no time found, the app will use creation time automatically.
         - Currency should be the 3-letter ISO code (USD, EUR, GBP, PHP, VND, etc.)
         - Detect the currency from currency symbols, text, or context on the receipt
@@ -392,12 +433,20 @@ class AIReceiptAnalyzer {
             throw ReceiptAIError.missingRequiredFields
         }
         
-        // Smart date parsing that handles both date+time and date-only formats
-        let parsedDate = Self.parseReceiptDate(dateString, fallbackTime: creationTime)
-        let date = parsedDate ?? creationTime
-        print("📅 AIReceiptAnalyzer: Parsed date from '\(dateString)' as: \(date)")
-        if parsedDate == nil {
-            print("📅 AIReceiptAnalyzer: No valid date found on receipt, using creation time: \(creationTime)")
+        // Enhanced date parsing that handles "TODAY" keyword and date+time formats
+        let date: Date
+        if dateString.uppercased() == "TODAY" {
+            // AI detected no date on receipt, use today at current time
+            date = Date()
+            print("📅 AIReceiptAnalyzer: AI found no date on receipt, using TODAY: \(date)")
+        } else {
+            // Try to parse the actual date from receipt
+            let parsedDate = Self.parseReceiptDate(dateString, fallbackTime: creationTime)
+            date = parsedDate ?? Date()
+            print("📅 AIReceiptAnalyzer: Parsed date from '\(dateString)' as: \(date)")
+            if parsedDate == nil {
+                print("📅 AIReceiptAnalyzer: Failed to parse date '\(dateString)', defaulting to TODAY: \(date)")
+            }
         }
         
         // Parse currency from string with debugging

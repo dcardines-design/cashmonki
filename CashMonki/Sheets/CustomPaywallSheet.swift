@@ -549,7 +549,9 @@ struct CustomPaywallSheet: View {
             ManageBillingSheet(isPresented: $showingManageBilling)
         }
         .onAppear {
-            print("🍞 PAYWALL: CustomPaywallSheet appeared")
+            Task {
+                await ensureOfferingsLoaded()
+            }
         }
         .alert("Subscription Error", isPresented: $showingSubscriptionError) {
             Button("Try Again") {
@@ -565,23 +567,27 @@ struct CustomPaywallSheet: View {
         }
     }
     
+    // MARK: - Offerings Management
+    private func ensureOfferingsLoaded() async {
+        if revenueCatManager.offerings == nil {
+            await revenueCatManager.loadOfferings()
+        }
+    }
+    
     // MARK: - Purchase Handling
     private func handleStartFreeTrial() {
-        print("🎯 === PAYWALL PURCHASE START ===")
-        print("🎯 PAYWALL: handleStartFreeTrial() called")
-        print("🎯 PAYWALL: Selected plan: \(selectedPlan)")
-        print("🎯 PAYWALL: Yearly package: \(yearlyPackage?.storeProduct.productIdentifier ?? "nil")")
-        print("🎯 PAYWALL: Monthly package: \(monthlyPackage?.storeProduct.productIdentifier ?? "nil")")
-        
-        guard let package = selectedPackage else {
-            print("❌ PAYWALL: No package selected for plan: \(selectedPlan)")
-            return
-        }
-        
-        print("🎯 PAYWALL: Starting purchase for \(package.storeProduct.productIdentifier) - \(package.storeProduct.localizedTitle)")
-        print("🎯 PAYWALL: About to start async Task...")
-        
         Task {
+            await ensureOfferingsLoaded()
+            
+            guard let package = selectedPackage else {
+                await MainActor.run {
+                    subscriptionErrorMessage = "Subscription plans are not available. Please try again later."
+                    showingSubscriptionError = true
+                }
+                return
+            }
+            
+            print("🎯 PAYWALL: Starting purchase for \(selectedPlan)")
             let result = await revenueCatManager.purchase(package: package)
             
             await MainActor.run {
@@ -598,148 +604,24 @@ struct CustomPaywallSheet: View {
                         NotificationCenter.default.post(name: .subscriptionSucceeded, object: nil)
                     }
                 } else {
-                    print("❌ PAYWALL: Purchase failed: \(result.error?.localizedDescription ?? "Unknown error")")
-                    print("🚨 SUBSCRIPTION ERROR DEBUG: CustomPaywall failure triggered")
-                    print("🚨 ERROR DETAILS: \(result.error?.localizedDescription ?? "Unknown error")")
+                    print("❌ PAYWALL: Purchase failed")
                     
-                    // Enhanced error debugging
                     if let error = result.error {
                         let nsError = error as NSError
-                        print("🚨 === DETAILED ERROR BREAKDOWN ===")
-                        print("🚨 ERROR CODE: \(nsError.code)")
-                        print("🚨 ERROR DOMAIN: \(nsError.domain)")
-                        print("🚨 ERROR DESCRIPTION: \(error.localizedDescription)")
-                        print("🚨 ERROR USER INFO: \(nsError.userInfo)")
                         
-                        // Enhanced user cancellation detection - DON'T show dialog for these
+                        // Check for user cancellation - don't show error dialog
                         let isUserCancellation = (nsError.domain == "SKErrorDomain" && nsError.code == 2) ||
                                                 (nsError.domain == "RevenueCat.ErrorDomain" && nsError.code == 1) ||
                                                 (nsError.domain == "SKErrorDomain" && nsError.code == 19) ||
-                                                error.localizedDescription.lowercased().contains("cancel") ||
-                                                error.localizedDescription.lowercased().contains("user cancel")
+                                                error.localizedDescription.lowercased().contains("cancel")
                         
                         if isUserCancellation {
-                            print("👤 PAYWALL: User cancelled subscription - no dialog needed")
-                            return // Exit early, don't show any dialog
+                            print("👤 PAYWALL: User cancelled")
+                            return
                         }
                         
-                        // Check for specific RevenueCat error types
-                        if nsError.domain == "RevenueCat.ErrorDomain" {
-                            print("🚨 REVENUECAT ERROR DETECTED")
-                            switch nsError.code {
-                            case 0:
-                                print("🚨 RevenueCat Error: Unknown error")
-                            case 1:
-                                print("🚨 RevenueCat Error: Purchase cancelled by user")
-                            case 2:
-                                print("🚨 RevenueCat Error: Store problem")
-                            case 3:
-                                print("🚨 RevenueCat Error: Purchase not allowed")
-                            case 4:
-                                print("🚨 RevenueCat Error: Purchase invalid")
-                            case 5:
-                                print("🚨 RevenueCat Error: Product not available for purchase")
-                            case 6:
-                                print("🚨 RevenueCat Error: Product already purchased")
-                            case 7:
-                                print("🚨 RevenueCat Error: Receipt already in use")
-                            case 8:
-                                print("🚨 RevenueCat Error: Invalid receipt")
-                            case 9:
-                                print("🚨 RevenueCat Error: Missing receipt file")
-                            case 10:
-                                print("🚨 RevenueCat Error: Network error")
-                            case 11:
-                                print("🚨 RevenueCat Error: Invalid credentials")
-                            case 12:
-                                print("🚨 RevenueCat Error: Unexpected backend response error")
-                            case 13:
-                                print("🚨 RevenueCat Error: Receipt in use by other subscriber")
-                            case 14:
-                                print("🚨 RevenueCat Error: Invalid subscriber")
-                            case 15:
-                                print("🚨 RevenueCat Error: Operation already in progress")
-                            case 16:
-                                print("🚨 RevenueCat Error: Unknown backend error")
-                            case 17:
-                                print("🚨 RevenueCat Error: Invalid Apple subscription key")
-                            case 18:
-                                print("🚨 RevenueCat Error: Ineligible error")
-                            case 19:
-                                print("🚨 RevenueCat Error: Insufficient permissions")
-                            case 20:
-                                print("🚨 RevenueCat Error: Payment pending")
-                            case 21:
-                                print("🚨 RevenueCat Error: Invalid subscriber attributes")
-                            case 22:
-                                print("🚨 RevenueCat Error: Logout called")
-                            case 23:
-                                print("🚨 RevenueCat Error: Configuration error")
-                            case 24:
-                                print("🚨 RevenueCat Error: Unsupported error")
-                            case 25:
-                                print("🚨 RevenueCat Error: Empty subscriber attributes")
-                            case 26:
-                                print("🚨 RevenueCat Error: Product request timeout")
-                            default:
-                                print("🚨 RevenueCat Error: Unknown error code \(nsError.code)")
-                            }
-                        }
-                        
-                        // Check for StoreKit error types
-                        if nsError.domain == "SKErrorDomain" {
-                            print("🚨 STOREKIT ERROR DETECTED")
-                            switch nsError.code {
-                            case 0:
-                                print("🚨 StoreKit Error: Unknown error")
-                            case 1:
-                                print("🚨 StoreKit Error: Client invalid")
-                            case 2:
-                                print("🚨 StoreKit Error: Payment cancelled")
-                            case 3:
-                                print("🚨 StoreKit Error: Payment invalid")
-                            case 4:
-                                print("🚨 StoreKit Error: Payment not allowed")
-                            case 5:
-                                print("🚨 StoreKit Error: Store product not available")
-                            case 6:
-                                print("🚨 StoreKit Error: Cloud service permission denied")
-                            case 7:
-                                print("🚨 StoreKit Error: Cloud service network connection failed")
-                            case 8:
-                                print("🚨 StoreKit Error: Cloud service revoked")
-                            case 9:
-                                print("🚨 StoreKit Error: Privacy acknowledgement required")
-                            case 10:
-                                print("🚨 StoreKit Error: Unauthorized request")
-                            case 11:
-                                print("🚨 StoreKit Error: Invalid offer identifier")
-                            case 12:
-                                print("🚨 StoreKit Error: Invalid signature")
-                            case 13:
-                                print("🚨 StoreKit Error: Missing offer params")
-                            case 14:
-                                print("🚨 StoreKit Error: Invalid offer price")
-                            case 15:
-                                print("🚨 StoreKit Error: Overlay dismissed")
-                            case 16:
-                                print("🚨 StoreKit Error: Overlay timeout")
-                            case 17:
-                                print("🚨 StoreKit Error: Ineligible for offer")
-                            case 18:
-                                print("🚨 StoreKit Error: Unsupported platform")
-                            case 19:
-                                print("🚨 StoreKit Error: Overlay cancelled")
-                            default:
-                                print("🚨 StoreKit Error: Unknown error code \(nsError.code)")
-                            }
-                        }
-                        print("🚨 ==============================")
-                        
-                        // Show iOS native alert for non-cancellation errors only
-                        print("🚨 PAYWALL: Showing native iOS alert for subscription error")
+                        // Show user-friendly error message
                         let errorMessage: String
-                        
                         if nsError.domain == "RevenueCat.ErrorDomain" && nsError.code == 10 {
                             errorMessage = "Network error. Please check your connection and try again."
                         } else {
@@ -749,12 +631,8 @@ struct CustomPaywallSheet: View {
                         subscriptionErrorMessage = errorMessage
                         showingSubscriptionError = true
                     } else {
-                        print("🚨 NO ERROR OBJECT PROVIDED - treating as potential user cancellation")
-                        print("👤 PAYWALL: No error object, likely user cancellation - no dialog needed")
-                        return // Exit early, don't show any dialog for unknown errors (likely cancellations)
+                        return // No error object, likely user cancellation
                     }
-                    
-                    print("🔄 PAYWALL: Keeping paywall open for user retry")
                 }
             }
         }

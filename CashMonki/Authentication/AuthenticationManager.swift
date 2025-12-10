@@ -524,6 +524,50 @@ class AuthenticationManager: ObservableObject {
             authError = nil
         }
         
+        // ENHANCED DEBUG: Verify environment before proceeding
+        print("🔍 GOOGLE AUTH DEBUG: ======= ENVIRONMENT CHECK =======")
+        print("🔍 GOOGLE AUTH DEBUG: Bundle ID: \(Bundle.main.bundleIdentifier ?? "UNKNOWN")")
+        print("🔍 GOOGLE AUTH DEBUG: GoogleSignIn SDK available: \(true)")
+        
+        #if canImport(FirebaseAuth)
+        print("🔍 GOOGLE AUTH DEBUG: Firebase Auth available: true")
+        if let currentFirebaseUser = Auth.auth().currentUser {
+            print("🔍 GOOGLE AUTH DEBUG: Current Firebase user: \(currentFirebaseUser.email ?? "unknown")")
+        } else {
+            print("🔍 GOOGLE AUTH DEBUG: No current Firebase user")
+        }
+        #else
+        print("🔍 GOOGLE AUTH DEBUG: Firebase Auth available: false")
+        #endif
+        
+        // Check GoogleService-Info.plist configuration
+        if let url = Bundle.main.url(forResource: "GoogleService-Info", withExtension: "plist") {
+            print("🔍 GOOGLE AUTH DEBUG: GoogleService-Info.plist found at: \(url.path)")
+            if let plistData = try? Data(contentsOf: url),
+               let plist = try? PropertyListSerialization.propertyList(from: plistData, options: [], format: nil) as? [String: Any] {
+                print("🔍 GOOGLE AUTH DEBUG: PROJECT_ID: \(plist["PROJECT_ID"] as? String ?? "MISSING")")
+                print("🔍 GOOGLE AUTH DEBUG: BUNDLE_ID: \(plist["BUNDLE_ID"] as? String ?? "MISSING")")
+                print("🔍 GOOGLE AUTH DEBUG: CLIENT_ID: \(plist["CLIENT_ID"] as? String ?? "MISSING")")
+                print("🔍 GOOGLE AUTH DEBUG: GOOGLE_APP_ID: \(plist["GOOGLE_APP_ID"] as? String ?? "MISSING")")
+                print("🔍 GOOGLE AUTH DEBUG: REVERSED_CLIENT_ID: \(plist["REVERSED_CLIENT_ID"] as? String ?? "MISSING")")
+            }
+        } else {
+            print("❌ GOOGLE AUTH DEBUG: GoogleService-Info.plist NOT FOUND")
+        }
+        
+        // Check Info.plist URL schemes
+        if let urlTypes = Bundle.main.object(forInfoDictionaryKey: "CFBundleURLTypes") as? [[String: Any]] {
+            print("🔍 GOOGLE AUTH DEBUG: Found \(urlTypes.count) URL scheme(s)")
+            for (index, urlType) in urlTypes.enumerated() {
+                if let schemes = urlType["CFBundleURLSchemes"] as? [String] {
+                    print("🔍 GOOGLE AUTH DEBUG: URL Type \(index): \(schemes)")
+                }
+            }
+        } else {
+            print("❌ GOOGLE AUTH DEBUG: No URL schemes found in Info.plist")
+        }
+        print("🔍 GOOGLE AUTH DEBUG: =====================================")
+        
         // Ensure we always reset loading state on exit
         defer {
             Task { @MainActor in
@@ -539,48 +583,105 @@ class AuthenticationManager: ObservableObject {
         
         do {
             // Get the client ID from Firebase configuration
+            print("🔍 GOOGLE AUTH DEBUG: ======= CLIENT ID RETRIEVAL =======")
             guard let clientID = getGoogleClientID() else {
+                print("❌ GOOGLE AUTH DEBUG: Failed to get CLIENT_ID")
+                print("❌ GOOGLE AUTH DEBUG: Checked sources:")
+                print("   - GoogleService-Info.plist CLIENT_ID key")
+                print("   - Info.plist GOOGLE_CLIENT_ID key")
+                print("❌ GOOGLE AUTH DEBUG: This is why you're getting Error 401: invalid_client")
                 await MainActor.run {
-                    self.authError = "Google Sign-In configuration error. Please contact support."
+                    self.authError = "Google Sign-In configuration error: CLIENT_ID not found. Please contact support."
                     self.isLoading = false
                 }
                 return
             }
+            print("✅ GOOGLE AUTH DEBUG: CLIENT_ID found: \(clientID.prefix(20))...")
+            print("🔍 GOOGLE AUTH DEBUG: Full CLIENT_ID: \(clientID)")
+            print("🔍 GOOGLE AUTH DEBUG: =====================================")
             
             // Configure Google Sign-In
+            print("🔍 GOOGLE AUTH DEBUG: ======= UI CONTEXT SETUP =======")
             guard let windowScene = await MainActor.run(body: {
-                UIApplication.shared.connectedScenes.first as? UIWindowScene
+                let scenes = UIApplication.shared.connectedScenes
+                print("🔍 GOOGLE AUTH DEBUG: Found \(scenes.count) connected scene(s)")
+                let windowScene = scenes.first as? UIWindowScene
+                print("🔍 GOOGLE AUTH DEBUG: WindowScene found: \(windowScene != nil)")
+                return windowScene
             }),
             let window = await MainActor.run(body: {
-                windowScene.windows.first
+                let windows = windowScene.windows
+                print("🔍 GOOGLE AUTH DEBUG: Found \(windows.count) window(s)")
+                let window = windows.first
+                print("🔍 GOOGLE AUTH DEBUG: Window found: \(window != nil)")
+                return window
             }),
             let presentingViewController = await MainActor.run(body: {
-                window.rootViewController
+                let rootVC = window.rootViewController
+                print("🔍 GOOGLE AUTH DEBUG: Root view controller found: \(rootVC != nil)")
+                print("🔍 GOOGLE AUTH DEBUG: Root VC type: \(String(describing: type(of: rootVC)))")
+                return rootVC
             }) else {
+                print("❌ GOOGLE AUTH DEBUG: Failed to get UI context for Google Sign-In")
                 await MainActor.run {
                     self.authError = "Unable to present Google Sign-In. Please try again."
                     self.isLoading = false
                 }
                 return
             }
+            print("✅ GOOGLE AUTH DEBUG: UI context ready for presentation")
+            print("🔍 GOOGLE AUTH DEBUG: ==================================")
             
+            print("🔍 GOOGLE AUTH DEBUG: ======= GOOGLE SDK SETUP =======")
+            print("🔍 GOOGLE AUTH DEBUG: Configuring GIDSignIn with CLIENT_ID...")
             GIDSignIn.sharedInstance.configuration = GIDConfiguration(clientID: clientID)
+            print("✅ GOOGLE AUTH DEBUG: GIDSignIn configuration complete")
+            print("🔍 GOOGLE AUTH DEBUG: Starting sign-in presentation...")
+            print("🔍 GOOGLE AUTH DEBUG: ===================================")
             
             // Perform Google Sign-In
             let result = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<GIDSignInResult, Error>) in
                 DispatchQueue.main.async {
+                    print("🔍 GOOGLE AUTH DEBUG: ======= SIGN-IN ATTEMPT =======")
+                    print("🔍 GOOGLE AUTH DEBUG: Calling GIDSignIn.signIn...")
                     GIDSignIn.sharedInstance.signIn(withPresenting: presentingViewController) { result, error in
+                        print("🔍 GOOGLE AUTH DEBUG: Google Sign-In callback received")
+                        
                         if let error = error {
-                            print("❌ AuthenticationManager: Google Sign-In error: \(error.localizedDescription)")
+                            print("❌ GOOGLE AUTH DEBUG: Error received from Google SDK:")
+                            print("   - Error: \(error.localizedDescription)")
+                            print("   - Code: \((error as NSError).code)")
+                            print("   - Domain: \((error as NSError).domain)")
+                            print("   - UserInfo: \((error as NSError).userInfo)")
+                            
+                            // Enhanced error analysis
+                            if error.localizedDescription.contains("invalid_client") {
+                                print("❌ GOOGLE AUTH DEBUG: INVALID CLIENT ERROR DETECTED!")
+                                print("   This means your OAuth client is not properly configured")
+                                print("   Check: Google Cloud Console → APIs & Services → Credentials")
+                                print("   Ensure: Bundle ID matches OAuth client configuration")
+                                print("   Ensure: OAuth consent screen is published")
+                            }
+                            if error.localizedDescription.contains("canceled") || error.localizedDescription.contains("cancelled") {
+                                print("ℹ️ GOOGLE AUTH DEBUG: User cancelled sign-in (normal behavior)")
+                            }
+                            if (error as NSError).domain.contains("GoogleSignIn") {
+                                print("⚠️ GOOGLE AUTH DEBUG: This is a GoogleSignIn SDK error")
+                            }
+                            
                             continuation.resume(throwing: error)
                         } else if let result = result {
-                            print("✅ AuthenticationManager: Google Sign-In result received")
+                            print("✅ GOOGLE AUTH DEBUG: Sign-in result received successfully")
+                            print("   - User ID: \(result.user.userID ?? "unknown")")
+                            print("   - Email: \(result.user.profile?.email ?? "unknown")")
+                            print("   - Name: \(result.user.profile?.name ?? "unknown")")
                             continuation.resume(returning: result)
                         } else {
-                            print("❌ AuthenticationManager: Google Sign-In returned nil result and nil error")
+                            print("❌ GOOGLE AUTH DEBUG: Nil result and nil error (unexpected)")
                             let unknownError = NSError(domain: "GoogleSignIn", code: -1, userInfo: [NSLocalizedDescriptionKey: "Unknown error - no result or error returned"])
                             continuation.resume(throwing: unknownError)
                         }
+                        print("🔍 GOOGLE AUTH DEBUG: ==============================")
                     }
                 }
             }
@@ -678,11 +779,29 @@ class AuthenticationManager: ObservableObject {
             #endif
             
         } catch {
+            print("🔍 GOOGLE AUTH DEBUG: ======= CATCH BLOCK ERROR =======")
+            print("❌ GOOGLE AUTH DEBUG: Exception caught in signInWithGoogle:")
+            print("   - Error: \(error.localizedDescription)")
+            print("   - Code: \((error as NSError).code)")
+            print("   - Domain: \((error as NSError).domain)")
+            print("   - UserInfo: \((error as NSError).userInfo)")
+            
+            // Provide specific guidance based on error
+            let userFriendlyMessage: String
+            if error.localizedDescription.contains("invalid_client") {
+                userFriendlyMessage = "Google Sign-In setup incomplete. Please check OAuth client configuration in Google Cloud Console."
+            } else if error.localizedDescription.contains("canceled") || error.localizedDescription.contains("cancelled") {
+                userFriendlyMessage = "" // Silent for cancellation
+            } else {
+                userFriendlyMessage = "Google Sign-In failed: \(error.localizedDescription)"
+            }
+            
             await MainActor.run {
-                self.authError = "Google Sign-In failed: \(error.localizedDescription)"
+                self.authError = userFriendlyMessage.isEmpty ? nil : userFriendlyMessage
                 self.isLoading = false
                 print("❌ AuthenticationManager: Google Sign-In failed: \(error.localizedDescription)")
             }
+            print("🔍 GOOGLE AUTH DEBUG: ===================================")
         }
         #else
         // GoogleSignIn SDK not available - show helpful message
@@ -697,8 +816,9 @@ class AuthenticationManager: ObservableObject {
     private func getGoogleClientID() -> String? {
         #if canImport(FirebaseAuth)
         // Try to get client ID from Firebase configuration
-        if let path = Bundle.main.path(forResource: "GoogleService-Info", ofType: "plist"),
-           let plist = NSDictionary(contentsOfFile: path),
+        if let url = Bundle.main.url(forResource: "GoogleService-Info", withExtension: "plist"),
+           let plistData = try? Data(contentsOf: url),
+           let plist = try? PropertyListSerialization.propertyList(from: plistData, options: [], format: nil) as? [String: Any],
            let clientID = plist["CLIENT_ID"] as? String {
             return clientID
         }

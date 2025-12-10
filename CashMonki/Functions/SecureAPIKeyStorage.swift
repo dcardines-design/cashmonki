@@ -36,7 +36,7 @@ struct SecureAPIKeyStorage {
             
             // RevenueCat API Key - store once then remove from code
             if !hasRevenueCatKey {
-                let revenueCatKey = "appl_fDIJnBlvjEbTMquNGkbjPATlooQ"
+                let revenueCatKey = "placeholder_key_for_initial_setup"
                 if KeychainManager.shared.store(revenueCatKey, for: .revenueCatAPIKey) {
                     print("✅ RevenueCat API key securely stored in keychain")
                 } else {

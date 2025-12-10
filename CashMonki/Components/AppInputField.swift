@@ -581,6 +581,7 @@ struct AppInputField: View {
         DatePicker("", selection: $dateValue, displayedComponents: datePickerComponents)
             .datePickerStyle(.graphical)
             .labelsHidden()
+            .tint(Color(hex: "542EFF") ?? .purple) // Consistent purple brand color for all date picker arrows
             .presentationDetents([.fraction(0.5)])
     }
     

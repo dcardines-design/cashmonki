@@ -3,60 +3,14 @@ import Foundation
 /// Configuration manager for app settings and API keys
 struct Config {
     
-    /// Get OpenRouter API key from most secure source available
+    /// Get OpenRouter API key securely
     static var openRouterAPIKey: String? {
-        // Priority 1: Check keychain (most secure)
-        if let keychainKey = KeychainManager.shared.retrieve(for: .openRouterAPIKey) {
-            return keychainKey
-        }
-        
-        // Priority 2: Check environment variable (for development)
-        if let envKey = ProcessInfo.processInfo.environment["OPENROUTER_API_KEY"] {
-            return envKey
-        }
-        
-        // Priority 3: Check Info.plist (better than hardcoded)
-        if let plistKey = Bundle.main.object(forInfoDictionaryKey: "OpenRouterAPIKey") as? String,
-           !plistKey.isEmpty && plistKey != "YOUR_API_KEY_HERE" {
-            return plistKey
-        }
-        
-        return nil
+        return SecureAPIProvider.getOpenRouterAPIKey()
     }
     
-    /// Get RevenueCat API key from most secure source available
-    /// Automatically uses test key in debug builds and production key in release builds
+    /// Get RevenueCat API key securely
     static var revenueCatAPIKey: String? {
-        #if DEBUG
-        // Debug builds: Use test API key for sandbox testing
-        if let testKey = Bundle.main.object(forInfoDictionaryKey: "RevenueCatTestAPIKey") as? String,
-           !testKey.isEmpty {
-            print("🧪 CONFIG: Using RevenueCat test API key for debug build")
-            return testKey
-        }
-        #endif
-        
-        // Priority 1: Check keychain (most secure) - Production key
-        if let keychainKey = KeychainManager.shared.retrieve(for: .revenueCatAPIKey) {
-            print("🔐 CONFIG: Using RevenueCat production key from keychain")
-            return keychainKey
-        }
-        
-        // Priority 2: Check environment variable (for development)
-        if let envKey = ProcessInfo.processInfo.environment["REVENUECAT_API_KEY"] {
-            print("🌍 CONFIG: Using RevenueCat key from environment")
-            return envKey
-        }
-        
-        // Priority 3: Check Info.plist production key (better than hardcoded)
-        if let plistKey = Bundle.main.object(forInfoDictionaryKey: "RevenueCatAPIKey") as? String,
-           !plistKey.isEmpty && plistKey != "YOUR_REVENUECAT_API_KEY_HERE" {
-            print("📄 CONFIG: Using RevenueCat production key from Info.plist")
-            return plistKey
-        }
-        
-        print("❌ CONFIG: No RevenueCat API key found")
-        return nil
+        return SecureAPIProvider.getRevenueCatAPIKey()
     }
     
     /// Initialize API keys on first app launch
@@ -94,29 +48,35 @@ struct Config {
     
     /// Initialize RevenueCat API key on first app launch
     static func initializeRevenueCatKey() {
-        // Only store if not already in keychain
         guard !KeychainManager.shared.exists(for: .revenueCatAPIKey) else {
-            print("✅ RevenueCat API key already exists in keychain")
             return
         }
         
-        // Try to get API key from environment or plist first
+        // Try environment variable first
+        #if DEBUG
+        // In debug builds, prefer test API key
+        if let testEnvKey = ProcessInfo.processInfo.environment["REVENUECAT_TEST_API_KEY"] {
+            if KeychainManager.shared.store(testEnvKey, for: .revenueCatAPIKey) {
+                print("✅ RevenueCat TEST API key stored from environment")
+            }
+            return
+        }
+        #endif
+        
         if let envKey = ProcessInfo.processInfo.environment["REVENUECAT_API_KEY"] {
             if KeychainManager.shared.store(envKey, for: .revenueCatAPIKey) {
-                print("✅ RevenueCat API key from environment stored in keychain")
-            } else {
-                print("❌ Failed to store RevenueCat API key from environment")
+                print("✅ RevenueCat API key stored from environment")
             }
-        } else if let plistKey = Bundle.main.object(forInfoDictionaryKey: "RevenueCatAPIKey") as? String,
-                  !plistKey.isEmpty && plistKey != "YOUR_REVENUECAT_API_KEY_HERE" {
-            if KeychainManager.shared.store(plistKey, for: .revenueCatAPIKey) {
-                print("✅ RevenueCat API key from Info.plist stored in keychain")
-            } else {
-                print("❌ Failed to store RevenueCat API key from Info.plist")
-            }
-        } else {
-            print("⚠️ No RevenueCat API key found in environment or Info.plist")
+            return
         }
+        
+        // DEBUG: Use test fallback key for development
+        #if DEBUG
+        let fallbackKey = "test_placeholder_key_for_debug"
+        if KeychainManager.shared.store(fallbackKey, for: .revenueCatAPIKey) {
+            print("✅ RevenueCat TEST API key initialized (DEBUG)")
+        }
+        #endif
     }
     
     /// Legacy method for backward compatibility
@@ -151,7 +111,7 @@ struct Config {
         let removed = KeychainManager.shared.delete(for: .revenueCatAPIKey)
         print("🗑️ CONFIG: Removed old RevenueCat key from keychain: \(removed)")
         
-        // Re-initialize from Info.plist
+        // Re-initialize from environment/Info.plist
         initializeRevenueCatKey()
         
         // Verify new key
@@ -160,6 +120,17 @@ struct Config {
         } else {
             print("❌ CONFIG: Failed to load new RevenueCat API key")
         }
+    }
+    
+    /// Switch to test API key (DEBUG builds only)
+    static func useTestAPIKey() {
+        #if DEBUG
+        print("🧪 CONFIG: Switching to test API key...")
+        let removed = KeychainManager.shared.delete(for: .revenueCatAPIKey)
+        print("🗑️ CONFIG: Removed production key: \(removed)")
+        initializeRevenueCatKey()
+        print("✅ CONFIG: Now using: \(revenueCatAPIKey?.prefix(10) ?? "none")...")
+        #endif
     }
 }
 

@@ -17,7 +17,7 @@
 	<key>IS_ADS_ENABLED</key>
 	<false></false>
 	<key>IS_ANALYTICS_ENABLED</key>
-	<false></false>
+	<true></true>
 	<key>IS_APPINVITE_ENABLED</key>
 	<true></true>
 	<key>IS_GCM_ENABLED</key>
@@ -26,5 +26,9 @@
 	<true></true>
 	<key>GOOGLE_APP_ID</key>
 	<string>1:817492386994:ios:458ac9b231c9f8631095ab</string>
+	<key>CLIENT_ID</key>
+	<string>817492386994-9sev7s5qd08bnjtpstkoqptf37cki8gd.apps.googleusercontent.com</string>
+	<key>REVERSED_CLIENT_ID</key>
+	<string>com.googleusercontent.apps.817492386994-9sev7s5qd08bnjtpstkoqptf37cki8gd</string>
 </dict>
 </plist>

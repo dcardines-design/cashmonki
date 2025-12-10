@@ -123,9 +123,11 @@ struct CashMonkiApp: App {
                             } else {
                                 ContentView()
                                     .withToast()
+                                    .preferredColorScheme(.light) // Force light mode - never change colors for dark mode
                             }
                         } else {
                             AuthenticationView()
+                                .preferredColorScheme(.light) // Force light mode - never change colors for dark mode
                                 .onAppear {
                                     print("🔐 CashMonkiApp: Showing AuthenticationView - login first approach")
                                     print("🔐 CashMonkiApp: User authenticated: \(authManager.isAuthenticated)")
@@ -143,28 +145,48 @@ struct CashMonkiApp: App {
                         .transition(.opacity)
                 }
             }
+                .preferredColorScheme(.light) // Force light mode globally - never change colors for dark mode
                 .onAppear {
                     print("🚀 CashMonkiApp: APP STARTUP")
                     print("🎬 CashMonkiApp: Welcome screen showing: \(showingWelcome)")
                     
-                    // Initialize secure API key storage on first launch
-                    print("🔐 CashMonkiApp: Initializing secure API key storage...")
-                    SecureAPIKeyStorage.initializeSecureKeys()
-                    Config.initializeAPIKeys()
-                    
-                    // Force refresh API keys to ensure new keys are loaded
-                    print("🔄 CashMonkiApp: Force refreshing OpenRouter API key...")
-                    Config.forceRefreshOpenRouterKey()
-                    
-                    // Also refresh RevenueCat API key
-                    print("🔄 CashMonkiApp: Force refreshing RevenueCat API key...")
-                    Config.forceRefreshRevenueCatKey()
-                    
-                    // Reinitialize RevenueCat with new key
-                    print("🔄 CashMonkiApp: Reinitializing RevenueCat with new API key...")
-                    #if canImport(RevenueCat)
-                    RevenueCatManager.shared.configure()
-                    #endif
+                    do {
+                        // Security check for production builds
+                        SecureAPIProvider.clearInfoPlistKeysForProduction()
+                        
+                        // Load environment variables first
+                        print("🌍 CashMonkiApp: Loading environment variables...")
+                        EnvironmentLoader.initialize()
+                        print("✅ Environment variables loaded")
+                        
+                        // Initialize secure API key storage on first launch
+                        print("🔐 CashMonkiApp: Initializing secure API key storage...")
+                        SecureAPIKeyStorage.initializeSecureKeys()
+                        print("✅ Secure API key storage initialized")
+                        
+                        Config.initializeAPIKeys()
+                        print("✅ API keys initialized")
+                        
+                        // Force refresh API keys to ensure new keys are loaded
+                        print("🔄 CashMonkiApp: Force refreshing OpenRouter API key...")
+                        Config.forceRefreshOpenRouterKey()
+                        print("✅ OpenRouter API key refreshed")
+                        
+                        // Also refresh RevenueCat API key
+                        print("🔄 CashMonkiApp: Force refreshing RevenueCat API key...")
+                        Config.forceRefreshRevenueCatKey()
+                        print("✅ RevenueCat API key refreshed")
+                        
+                        // Reinitialize RevenueCat with new key
+                        print("🔄 CashMonkiApp: Reinitializing RevenueCat with new API key...")
+                        #if canImport(RevenueCat)
+                        RevenueCatManager.shared.configure()
+                        print("✅ RevenueCat configured")
+                        #endif
+                    } catch {
+                        print("💥 CashMonkiApp: CRASH during initialization: \(error)")
+                        print("💥 CashMonkiApp: Error details: \(error.localizedDescription)")
+                    }
                     
                     // Switch to persistent storage asynchronously after startup
                     DispatchQueue.global(qos: .background).async {
@@ -325,15 +347,16 @@ struct CashMonkiApp: App {
         }
         
         // Verify GoogleService-Info.plist exists
-        if let path = Bundle.main.path(forResource: "GoogleService-Info", ofType: "plist") {
-            print("✅ GoogleService-Info.plist found at: \(path)")
+        if let url = Bundle.main.url(forResource: "GoogleService-Info", withExtension: "plist") {
+            print("✅ GoogleService-Info.plist found at: \(url.path)")
             
             // Debug: Print Firebase project configuration
-            if let plistData = NSDictionary(contentsOfFile: path) as? [String: Any] {
-                if let projectId = plistData["PROJECT_ID"] as? String {
+            if let plistData = try? Data(contentsOf: url),
+               let plist = try? PropertyListSerialization.propertyList(from: plistData, options: [], format: nil) as? [String: Any] {
+                if let projectId = plist["PROJECT_ID"] as? String {
                     print("🔥 Firebase Project ID: \(projectId)")
                 }
-                if let appId = plistData["GOOGLE_APP_ID"] as? String {
+                if let appId = plist["GOOGLE_APP_ID"] as? String {
                     print("🔥 Firebase App ID: \(appId.prefix(20))...")
                 }
             }

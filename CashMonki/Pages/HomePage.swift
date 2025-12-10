@@ -601,9 +601,11 @@ struct HomePage: View {
                 // Previous period: calculate the same way as line chart would for previous period
                 switch rangeSelection {
                 case .day:
+                    // For 24H comparison: previous 24 hours vs current 24 hours
                     let currentStart = cal.startOfDay(for: now)
                     let previousStart = cal.date(byAdding: .day, value: -1, to: currentStart) ?? currentStart
-                    return (previousStart, currentStart)
+                    let previousEnd = currentStart
+                    return (previousStart, previousEnd)
                 case .week:
                     let currentStart = cal.dateInterval(of: .weekOfYear, for: now)?.start ?? now
                     let previousStart = cal.date(byAdding: .weekOfYear, value: -1, to: currentStart) ?? currentStart
