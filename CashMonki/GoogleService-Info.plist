@@ -3,9 +3,9 @@
 <plist version="1.0">
 <dict>
 	<key>API_KEY</key>
-	<string>AIzaSyB0vry1b0VAS36Z5jR9hBCE0xrH8FOM-sE</string>
+	<string>YOUR_FIREBASE_API_KEY_HERE</string>
 	<key>GCM_SENDER_ID</key>
-	<string>817492386994</string>
+	<string>YOUR_GCM_SENDER_ID</string>
 	<key>PLIST_VERSION</key>
 	<string>1</string>
 	<key>BUNDLE_ID</key>
@@ -25,10 +25,10 @@
 	<key>IS_SIGNIN_ENABLED</key>
 	<true></true>
 	<key>GOOGLE_APP_ID</key>
-	<string>1:817492386994:ios:458ac9b231c9f8631095ab</string>
+	<string>1:YOUR_PROJECT_NUMBER:ios:YOUR_APP_ID</string>
 	<key>CLIENT_ID</key>
-	<string>817492386994-9sev7s5qd08bnjtpstkoqptf37cki8gd.apps.googleusercontent.com</string>
+	<string>YOUR_PROJECT_NUMBER-YOUR_CLIENT_SUFFIX.apps.googleusercontent.com</string>
 	<key>REVERSED_CLIENT_ID</key>
-	<string>com.googleusercontent.apps.817492386994-9sev7s5qd08bnjtpstkoqptf37cki8gd</string>
+	<string>com.googleusercontent.apps.YOUR_PROJECT_NUMBER-YOUR_CLIENT_SUFFIX</string>
 </dict>
 </plist>

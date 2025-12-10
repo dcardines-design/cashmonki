@@ -6,7 +6,7 @@ The receipt scanning is failing with **401 "User not found"** error because the 
 ## 🛠️ **Solution Applied**
 
 ### 1. **Updated API Key**
-- ✅ **Info.plist**: Updated with your provided key: `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`
+- ✅ **Info.plist**: Updated with your provided key: `[REDACTED_OPENROUTER_KEY]`
 - ✅ **SecureAPIKeyStorage.swift**: Already had the correct key
 - ✅ **Added refresh function**: `Config.forceRefreshOpenRouterKey()`
 
@@ -61,7 +61,7 @@ The enhanced debug system will now show:
 ```
 🔑 API key check:
    - Keychain: ✅ EXISTS
-   - Config returns: sk-or-v1-f21...
+   - Config returns: [REDACTED]...
 ```
 
 ### 5. **Files Modified**

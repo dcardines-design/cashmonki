@@ -26,7 +26,7 @@ struct SecureAPIKeyStorage {
             
             // OpenRouter API Key - store once then remove from code
             if !hasOpenRouterKey {
-                let openRouterKey = "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"
+                let openRouterKey = "placeholder_key_for_initial_setup"
                 if KeychainManager.shared.store(openRouterKey, for: .openRouterAPIKey) {
                     print("✅ OpenRouter API key securely stored in keychain")
                 } else {
