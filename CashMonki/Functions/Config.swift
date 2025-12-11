@@ -53,22 +53,23 @@ struct Config {
         }
         
         // Try environment variable first
+        // USE LIVE API KEY for testing real subscriptions with Apple test account
+        if let envKey = ProcessInfo.processInfo.environment["REVENUECAT_API_KEY"] {
+            if KeychainManager.shared.store(envKey, for: .revenueCatAPIKey) {
+                print("✅ RevenueCat LIVE API key stored from environment (testing with Apple sandbox)")
+            }
+            return
+        }
+        
         #if DEBUG
-        // In debug builds, prefer test API key
+        // Fallback to test API key if live key not available
         if let testEnvKey = ProcessInfo.processInfo.environment["REVENUECAT_TEST_API_KEY"] {
             if KeychainManager.shared.store(testEnvKey, for: .revenueCatAPIKey) {
-                print("✅ RevenueCat TEST API key stored from environment")
+                print("✅ RevenueCat TEST API key stored from environment (fallback)")
             }
             return
         }
         #endif
-        
-        if let envKey = ProcessInfo.processInfo.environment["REVENUECAT_API_KEY"] {
-            if KeychainManager.shared.store(envKey, for: .revenueCatAPIKey) {
-                print("✅ RevenueCat API key stored from environment")
-            }
-            return
-        }
         
         // DEBUG: Use test fallback key for development
         #if DEBUG
@@ -130,6 +131,28 @@ struct Config {
         print("🗑️ CONFIG: Removed production key: \(removed)")
         initializeRevenueCatKey()
         print("✅ CONFIG: Now using: \(revenueCatAPIKey?.prefix(10) ?? "none")...")
+        #endif
+    }
+    
+    /// Force use LIVE API key for testing (DEBUG builds)
+    static func useLiveAPIKey() {
+        #if DEBUG
+        print("🚀 CONFIG: Switching to LIVE API key for testing...")
+        let removed = KeychainManager.shared.delete(for: .revenueCatAPIKey)
+        print("🗑️ CONFIG: Removed old key: \(removed)")
+        initializeRevenueCatKey()
+        print("✅ CONFIG: Now using LIVE key: \(revenueCatAPIKey?.prefix(10) ?? "none")...")
+        #endif
+    }
+    
+    /// Force clear keychain and use live key for Apple sandbox testing
+    static func forceUseLiveKeyForSandboxTesting() {
+        #if DEBUG
+        print("🚀 CONFIG: Switching to LIVE API key for Apple sandbox testing...")
+        let removed = KeychainManager.shared.delete(for: .revenueCatAPIKey)
+        print("🗑️ CONFIG: Removed old key: \(removed)")
+        initializeRevenueCatKey()
+        print("✅ CONFIG: Now using LIVE key for sandbox testing: \(revenueCatAPIKey?.prefix(10) ?? "none")...")
         #endif
     }
 }

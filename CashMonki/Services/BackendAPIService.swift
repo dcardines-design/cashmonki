@@ -5,6 +5,10 @@ import UIKit
 import FirebaseAuth
 #endif
 
+#if canImport(FirebaseCore)
+import FirebaseCore
+#endif
+
 /// Secure backend API service for all external API calls
 class BackendAPIService: ObservableObject {
     static let shared = BackendAPIService()
@@ -165,9 +169,15 @@ class BackendAPIService: ObservableObject {
     }
     
     private func getCurrentFirebaseIDToken() async -> String? {
-        // Get Firebase ID token for backend authentication
+        // Get Firebase ID token for backend authentication (safe for TestFlight)
         #if canImport(FirebaseAuth)
         do {
+            // Check if Firebase is configured before accessing Auth
+            guard FirebaseApp.app() != nil else {
+                print("🔒 BACKEND: Firebase not configured - skipping auth token for security")
+                return nil
+            }
+            
             if let currentUser = Auth.auth().currentUser {
                 let idTokenResult = try await currentUser.getIDTokenResult()
                 print("🔑 BACKEND: Got Firebase ID token: \(idTokenResult.token.prefix(20))...")
@@ -178,7 +188,7 @@ class BackendAPIService: ObservableObject {
         }
         #endif
         
-        print("❌ BACKEND: No Firebase Auth or no current user")
+        print("❌ BACKEND: No Firebase Auth or no current user - continuing without auth")
         return nil
     }
     
@@ -209,6 +219,7 @@ private func createBackendDateFormatter(_ format: String) -> DateFormatter {
 struct BackendReceiptAnalysisResult: Codable {
     let merchantName: String
     let amount: Double
+    let currency: String?
     let date: Date
     let category: String
     let items: [BackendReceiptItem]
@@ -218,6 +229,7 @@ struct BackendReceiptAnalysisResult: Codable {
     enum CodingKeys: String, CodingKey {
         case merchantName = "merchant_name"
         case amount
+        case currency
         case date
         case category
         case items

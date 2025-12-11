@@ -449,21 +449,23 @@ struct ReceiptsPage: View {
                 HStack(spacing: 1) { // 1px spacing between segments
                     // Top categories segments
                     ForEach(Array(topCategories.enumerated()), id: \.offset) { index, categoryData in
-                        let percentage = categoryData.value / totalAmount
+                        let percentage = totalAmount > 0 ? abs(categoryData.value) / abs(totalAmount) : 0
+                        let frameWidth = max(0, min(geometry.size.width, geometry.size.width * percentage))
                         
-                        if percentage > 0 {
+                        if percentage > 0 && frameWidth > 0 {
                             Rectangle() // No individual radius
                                 .fill(colors.count > index ? colors[index] : AppColors.linePrimary)
-                                .frame(width: geometry.size.width * percentage)
+                                .frame(width: frameWidth)
                         }
                     }
                     
                     // All Others segment (if > 0)
-                    if allOthersAmount > 0 {
-                        let allOthersPercentage = allOthersAmount / totalAmount
+                    if allOthersAmount > 0 && totalAmount > 0 {
+                        let allOthersPercentage = abs(allOthersAmount) / abs(totalAmount)
+                        let frameWidth = max(0, min(geometry.size.width, geometry.size.width * allOthersPercentage))
                         Rectangle() // No individual radius
                             .fill(colors.count > 4 ? colors[4] : AppColors.linePrimary)
-                            .frame(width: geometry.size.width * allOthersPercentage)
+                            .frame(width: frameWidth)
                     }
                 }
             }

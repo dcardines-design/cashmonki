@@ -18,7 +18,7 @@ class EnvironmentLoader {
     /// Load environment variables from .env file
     static func loadEnvironment() {
         guard let envUrl = Bundle.main.url(forResource: ".env", withExtension: nil),
-              let envContent = try? String(contentsOf: envUrl) else {
+              let envContent = try? String(contentsOf: envUrl, encoding: .utf8) else {
             print("🌍 EnvironmentLoader: No .env file found - using system environment variables")
             return
         }

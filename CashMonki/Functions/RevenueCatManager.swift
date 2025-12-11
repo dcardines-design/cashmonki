@@ -29,6 +29,9 @@ class RevenueCatManager: NSObject, ObservableObject {
     @Published var offerings: Offerings?
     @Published var isSubscriptionActive: Bool = false
     
+    // MARK: - Configuration State
+    private var isConfigured: Bool = false
+    
     // MARK: - Test Mode
     @Published var debugTestProEnabled: Bool = false  // Disable by default
     
@@ -209,6 +212,11 @@ class RevenueCatManager: NSObject, ObservableObject {
         Purchases.configure(with: config)
         print("✅ RevenueCat: Successfully configured")
         
+        // CRITICAL FIX: Mark as configured to prevent crashes
+        Task { @MainActor in
+            self.isConfigured = true
+        }
+        
         // Set up delegate (must be set after configure)
         Purchases.shared.delegate = self
         
@@ -223,6 +231,12 @@ class RevenueCatManager: NSObject, ObservableObject {
     
     func loadCustomerInfo() async {
         print("👤 RevenueCat: Loading customer info...")
+        
+        // CRITICAL FIX: Ensure RevenueCat is configured before accessing Purchases.shared
+        guard isConfigured else {
+            print("❌ RevenueCat: Cannot load customer info - RevenueCat not configured")
+            return
+        }
         
         do {
             let customerInfo = try await Purchases.shared.customerInfo()
@@ -290,6 +304,12 @@ class RevenueCatManager: NSObject, ObservableObject {
     
     func loadOfferings() async {
         print("💰 RevenueCat: Loading offerings...")
+        
+        // CRITICAL FIX: Ensure RevenueCat is configured before accessing Purchases.shared
+        guard isConfigured else {
+            print("❌ RevenueCat: Cannot load offerings - RevenueCat not configured")
+            return
+        }
         
         do {
             let offerings = try await Purchases.shared.offerings()
@@ -404,6 +424,12 @@ class RevenueCatManager: NSObject, ObservableObject {
         print("💳 Current customer info before purchase: \(customerInfo?.description ?? "nil")")
         print("💳 Current subscription status: \(isSubscriptionActive)")
         
+        // CRITICAL FIX: Ensure RevenueCat is configured before accessing Purchases.shared
+        guard isConfigured else {
+            print("❌ RevenueCat: Cannot purchase - RevenueCat not configured")
+            return (false, NSError(domain: "RevenueCat", code: -1, userInfo: [NSLocalizedDescriptionKey: "RevenueCat not configured"]))
+        }
+        
         do {
             print("💳 RevenueCat: Calling Purchases.shared.purchase()...")
             let result = try await Purchases.shared.purchase(package: package)
@@ -471,6 +497,12 @@ class RevenueCatManager: NSObject, ObservableObject {
     func restorePurchases() async -> (success: Bool, error: Error?) {
         print("🔄 RevenueCat: Restoring purchases...")
         
+        // CRITICAL FIX: Ensure RevenueCat is configured before accessing Purchases.shared
+        guard isConfigured else {
+            print("❌ RevenueCat: Cannot restore purchases - RevenueCat not configured")
+            return (false, NSError(domain: "RevenueCat", code: -1, userInfo: [NSLocalizedDescriptionKey: "RevenueCat not configured"]))
+        }
+        
         do {
             let customerInfo = try await Purchases.shared.restorePurchases()
             await MainActor.run {
@@ -502,6 +534,13 @@ class RevenueCatManager: NSObject, ObservableObject {
     func identifyUser(userId: String) async {
         print("👤 RevenueCat: Identifying user: \(userId.prefix(8))...")
         
+        // CRITICAL FIX: Ensure RevenueCat is configured before accessing Purchases.shared
+        guard isConfigured else {
+            print("❌ RevenueCat: Cannot identify user - RevenueCat not configured")
+            print("🔧 RevenueCat: Call configure() first before identifying users")
+            return
+        }
+        
         do {
             let result = try await Purchases.shared.logIn(userId)
             await MainActor.run {
@@ -518,6 +557,12 @@ class RevenueCatManager: NSObject, ObservableObject {
     
     func logoutUser() async {
         print("👋 RevenueCat: Logging out user...")
+        
+        // CRITICAL FIX: Ensure RevenueCat is configured before accessing Purchases.shared
+        guard isConfigured else {
+            print("❌ RevenueCat: Cannot logout user - RevenueCat not configured")
+            return
+        }
         
         do {
             let customerInfo = try await Purchases.shared.logOut()

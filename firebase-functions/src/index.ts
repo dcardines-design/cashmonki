@@ -345,21 +345,85 @@ app.post('/api/analyze-receipt', verifyAuth, async (req: AuthenticatedRequest, r
             content: [
               {
                 type: 'text',
-                text: `Analyze this receipt image and extract the following information in JSON format:
+                text: `Analyze this receipt image and return ONLY valid JSON in this exact format:
                 {
-                  "merchant_name": "business name",
-                  "amount": 0.00,
+                  "merchant_name": "exact business name from receipt",
+                  "amount": 20.50,
+                  "currency": "USD",
                   "date": "YYYY-MM-DD",
                   "category": "category name",
                   "items": [
-                    {"name": "item name", "price": 0.00, "quantity": 1}
+                    {"name": "item or service name", "price": 20.50, "quantity": 1}
                   ],
                   "confidence": 0.95
                 }
                 
+                If no date is visible on receipt, use:
+                "date": "TODAY"
+                
+                IMPORTANT:
+                - Return ONLY the JSON object, no other text
+                - Use numbers for amounts, not strings
+                - Date and time format: YYYY-MM-DD HH:MM (24-hour format) if time is available on receipt, or just YYYY-MM-DD if only date is shown
+                - Extract the EXACT timestamp from the receipt when available (e.g., "2024-11-16 14:30" for 2:30 PM)
+                - If only date is visible, use format: YYYY-MM-DD
+                - CRITICAL: If NO DATE is found on the receipt, return "TODAY" as the date value
+                - IMPORTANT: Always prioritize extracting time when visible on receipt. If no time found, the app will use creation time automatically.
+                
+                IMPORTANT CURRENCY DETECTION:
+                - Look for currency symbols: $, €, £, ¥, ₹, ₦, R, ₩, ₡, ₴, ₫, ₱, etc.
+                - Look for currency codes: USD, EUR, GBP, JPY, INR, NGN, ZAR, KRW, CRC, UAH, VND, PHP, etc.
+                - Look for currency names: "Dollar", "Euro", "Pound", "Yen", "Rupee", "Naira", "Dong", "Peso", etc.
+                - Common currencies: USD, EUR, GBP, CAD, AUD, JPY, CNY, INR, MXN, BRL, ZAR, NGN, KES, GHS, VND, PHP, THB, SGD, MYR, IDR, etc.
+                - Return the 3-letter ISO currency code (e.g., "USD" not "$", "EUR" not "€", "VND" not "₫")
+                - If no currency is visible, analyze the merchant/location context to guess currency
+                
+                CURRENCY-SPECIFIC NUMBER FORMATTING:
+                - For Vietnamese Dong (VND) receipts: Convert period-separated numbers to standard format
+                  Examples: "60.000" → 60000, "1.234.567" → 1234567, "23.450.000" → 23450000
+                - For VND amounts, periods are thousands separators, NOT decimal points
+                - Return clean numbers without formatting: 60000 instead of "60.000"
+                - If you see ₫ symbol or Vietnamese text, use VND currency code
+                - Vietnamese examples: "60.000 ₫" = 60000, "1.234.567 VND" = 1234567
+                
+                - Available categories (ONLY use these exact categories, do NOT create new ones):
+                  * Home: "Home", "Rent/Mortgage", "Property Tax", "Repairs"
+                  * Utilities: "Utilities", "Electricity", "Water", "Internet"
+                  * Food: "Food", "Groceries", "Snacks", "Meal Prep"
+                  * Dining: "Dining", "Restaurants", "Cafes", "Takeout"
+                  * Transport: "Transport", "Fuel", "Car Payments", "Rideshare"
+                  * Insurance: "Insurance", "Auto Insurance", "Home Insurance", "Life Insurance"
+                  * Health: "Health", "Doctor Visits", "Medications", "Therapy"
+                  * Debt: "Debt", "Credit Cards", "Loans", "Interest"
+                  * Fun: "Fun", "Movies", "Concerts", "Games"
+                  * Clothes: "Clothes", "Work Attire", "Casual Wear", "Shoes"
+                  * Personal: "Personal", "Haircuts", "Skincare", "Hygiene"
+                  * Learning: "Learning", "Tuition", "Books", "Courses"
+                  * Kids: "Kids", "Childcare", "Toys", "Activities"
+                  * Pets: "Pets", "Vet Care", "Pet Food", "Grooming"
+                  * Gifts: "Gifts", "Presents", "Donations", "Cards"
+                  * Travel: "Travel", "Flights", "Hotels", "Rental Cars"
+                  * Subscriptions: "Subscriptions", "Streaming", "Software", "Memberships"
+                  * Household: "Household", "Cleaning", "Furniture", "Decor"
+                  * Services: "Services", "Legal", "Accounting", "Consulting"
+                  * Supplies: "Supplies", "Office", "Crafts", "Packaging"
+                  * Fitness: "Fitness", "Gym", "Equipment", "Classes"
+                  * Tech: "Tech", "Devices", "Accessories", "Repairs"
+                  * Business: "Business", "Marketing", "Inventory", "Workspace"
+                  * Taxes: "Taxes", "Income Tax", "Sales Tax", "Filing Fees"
+                  * Savings: "Savings", "Emergency Fund", "Retirement", "Investments"
+                  * Auto: "Auto", "Maintenance", "Registration", "Parking"
+                  * Drinks: "Drinks", "Coffee", "Alcohol", "Beverages"
+                  * Hobbies: "Hobbies", "Supplies", "Equipment", "Events"
+                  * Events: "Events", "Parties", "Tickets", "Ceremonies"
+                  * Other: "Other", "Fees", "Miscellaneous", "Uncategorized"
+                - IMPORTANT: ONLY use categories from the list above. Do NOT create or suggest new categories.
+                - Choose the MOST SPECIFIC subcategory that matches the receipt (e.g., "Groceries" instead of "Food")
+                - If uncertain, use the closest matching category or "Other"
+                
                 ${userCategoriesText}
                 
-                Be accurate with numbers and dates. If unclear, use your best judgment and lower the confidence score.`
+                Be accurate with numbers, dates, and especially CURRENCY detection. If unclear, use your best judgment and lower the confidence score.`
               },
               {
                 type: 'image_url',
@@ -403,10 +467,18 @@ app.post('/api/analyze-receipt', verifyAuth, async (req: AuthenticatedRequest, r
       return res.status(500).json({ error: 'Invalid analysis result format' });
     }
 
+    // Enhanced date parsing that handles "TODAY" keyword (exact logic from iOS AIReceiptAnalyzer.swift lines 436-450)
+    if (analysisResult.date && analysisResult.date.toUpperCase() === 'TODAY') {
+      // AI detected no date on receipt, use current date and time
+      analysisResult.date = new Date().toISOString().split('T')[0]; // Current date in YYYY-MM-DD format
+      logger.info('AI found no date on receipt, using TODAY:', analysisResult.date);
+    }
+
     // Validate and format the response
     const result = {
       merchant_name: analysisResult.merchant_name || 'Unknown Merchant',
       amount: Number(analysisResult.amount) || 0,
+      currency: analysisResult.currency || 'USD',
       date: analysisResult.date || new Date().toISOString().split('T')[0],
       category: analysisResult.category || 'Other',
       items: Array.isArray(analysisResult.items) ? analysisResult.items : [],

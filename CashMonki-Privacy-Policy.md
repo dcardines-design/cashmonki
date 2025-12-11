@@ -129,13 +129,28 @@ CashMonki ("we," "our," or "us") is committed to protecting your privacy and per
 ### Data Access and Control
 - **View Data** - Access all your stored transaction data within the app
 - **Edit Data** - Modify or update transaction details, categories, and notes
-- **Delete Data** - Remove individual transactions or clear all data
+- **Delete Individual Data** - Remove specific transactions, receipts, or categories
+- **Delete All Data** - Clear all transaction history and personal data from the app
 - **Export Data** - Generate reports of your financial data (premium feature)
 
-### Account Management
-- **Account Deletion** - Permanently delete your account and all associated data
-- **Data Download** - Request a copy of your data
-- **Sync Control** - Enable/disable cloud backup and sync features
+### Account Management and Data Deletion Rights
+- **Complete Account Deletion** - Permanently delete your account and ALL associated data including:
+  - All transaction records and receipt images
+  - Personal categories and wallet configurations  
+  - Usage analytics and preferences
+  - Cloud backup data (if enabled)
+  - Authentication data from Firebase
+- **Immediate Local Deletion** - Delete data instantly from your device through app settings
+- **Cloud Data Removal** - Request complete removal of cloud backup data within 30 days
+- **Data Download** - Request a complete copy of your data before deletion
+- **Sync Control** - Enable/disable cloud backup and sync features anytime
+
+### Self-Service Data Deletion
+**You can delete your own data without contacting us:**
+1. **Individual Items** - Swipe to delete transactions, receipts, or categories within the app
+2. **Bulk Deletion** - Use "Clear All Data" in Settings → Privacy & Data
+3. **Account Deletion** - Use "Delete Account" in Settings → Account → Delete Account
+4. **Cloud Data** - Disable cloud sync and request cloud data deletion in app settings
 
 ### Privacy Preferences
 - **Disable Analytics** - Opt out of usage analytics in app settings
@@ -195,11 +210,11 @@ This Privacy Policy complies with:
 
 | Data Type | Storage Location | Third-Party Sharing | User Control |
 |-----------|------------------|-------------------|--------------|
-| Transactions | Local Device + Optional Cloud | Never shared | Full control |
-| Receipt Images | Local Device | Temporary AI processing only | Full control |
-| Authentication | Firebase (Google) | Only for login | Account deletion |
-| Subscription | RevenueCat + Apple | Anonymous status only | Cancellation anytime |
-| Usage Analytics | Local Device | Anonymized patterns only | Opt-out available |
+| Transactions | Local Device + Optional Cloud | Never shared | **Delete anytime** - Individual or bulk deletion |
+| Receipt Images | Local Device | Temporary AI processing only | **Delete anytime** - Remove with transactions |
+| Authentication | Firebase (Google) | Only for login | **Delete anytime** - Full account deletion |
+| Subscription | RevenueCat + Apple | Anonymous status only | **Cancel anytime** - Through App Store |
+| Usage Analytics | Local Device | Anonymized patterns only | **Opt-out anytime** - Disable in settings |
 
 ---
 

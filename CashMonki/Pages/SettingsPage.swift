@@ -1081,7 +1081,7 @@ struct SettingsPage: View {
                 settingsRow(
                     title: "Delete Account",
                     subtitle: "Permanently delete your account and all data",
-                    icon: "🔥"
+                    icon: "🗑️"
                 ) {
                     showingDeleteAccountConfirmation = true
                 }
@@ -1166,7 +1166,7 @@ struct SettingsPage: View {
             settingsRow(
                 title: "Delete All Transactions",
                 subtitle: "Remove all transactions from Firebase",
-                icon: "🔥"
+                icon: "🗑️"
             ) {
                 showingDeleteAllConfirmation = true
             }

@@ -22,13 +22,10 @@ struct SecureAPIProvider {
             return testEnvKey
         }
         
-        // Priority 3: TestFlight fallback (only when necessary)
+        // TestFlight builds: Use graceful fallback - no keys in Info.plist for security
         if isTestFlightBuild() {
-            if let testKey = Bundle.main.object(forInfoDictionaryKey: "RevenueCatTestAPIKey") as? String,
-               !testKey.isEmpty && testKey.hasPrefix("test_") {
-                print("✅ SECURE: Using RevenueCat TEST key for TestFlight")
-                return testKey
-            }
+            print("🔒 SECURE: TestFlight build detected - no API keys in Info.plist for security")
+            return nil
         }
         
         // Priority 4: Debug builds only
@@ -64,13 +61,10 @@ struct SecureAPIProvider {
             return envKey
         }
         
-        // Priority 3: TestFlight fallback (only when necessary)
+        // TestFlight builds: Use graceful fallback - no keys in Info.plist for security  
         if isTestFlightBuild() {
-            if let plistKey = Bundle.main.object(forInfoDictionaryKey: "OpenRouterAPIKey") as? String,
-               !plistKey.isEmpty && plistKey.hasPrefix("sk-or-") {
-                print("✅ SECURE: Using OpenRouter key for TestFlight")
-                return plistKey
-            }
+            print("🔒 SECURE: TestFlight build detected - no API keys in Info.plist for security")
+            return nil
         }
         
         // Priority 4: Debug builds only

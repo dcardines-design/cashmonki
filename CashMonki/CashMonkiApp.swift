@@ -150,42 +150,64 @@ struct CashMonkiApp: App {
                     print("🚀 CashMonkiApp: APP STARTUP")
                     print("🎬 CashMonkiApp: Welcome screen showing: \(showingWelcome)")
                     
+                    // Add crash breadcrumbs for TestFlight debugging
+                    print("🔍 TESTFLIGHT DEBUG: App launch started")
+                    print("🔍 TESTFLIGHT DEBUG: Bundle ID: \(Bundle.main.bundleIdentifier ?? "unknown")")
+                    print("🔍 TESTFLIGHT DEBUG: App Version: \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown")")
+                    print("🔍 TESTFLIGHT DEBUG: Build: \(Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "unknown")")
+                    print("🔍 TESTFLIGHT DEBUG: Device: \(UIDevice.current.model) \(UIDevice.current.systemVersion)")
+                    
                     do {
                         // Security check for production builds
+                        print("🔐 CashMonkiApp: Running security check...")
+                        print("🔍 TESTFLIGHT DEBUG: About to call SecureAPIProvider.clearInfoPlistKeysForProduction()")
                         SecureAPIProvider.clearInfoPlistKeysForProduction()
+                        print("✅ Security check completed")
+                        print("🔍 TESTFLIGHT DEBUG: SecureAPIProvider completed successfully")
                         
-                        // Load environment variables first
+                        // Load environment variables first (safe for TestFlight)
                         print("🌍 CashMonkiApp: Loading environment variables...")
+                        print("🔍 TESTFLIGHT DEBUG: About to call EnvironmentLoader.initialize()")
                         EnvironmentLoader.initialize()
                         print("✅ Environment variables loaded")
+                        print("🔍 TESTFLIGHT DEBUG: EnvironmentLoader completed successfully")
                         
-                        // Initialize secure API key storage on first launch
-                        print("🔐 CashMonkiApp: Initializing secure API key storage...")
-                        SecureAPIKeyStorage.initializeSecureKeys()
-                        print("✅ Secure API key storage initialized")
-                        
+                        // Initialize API keys with error handling
+                        print("🔐 CashMonkiApp: Initializing API keys...")
+                        print("🔍 TESTFLIGHT DEBUG: About to call Config.initializeAPIKeys()")
                         Config.initializeAPIKeys()
                         print("✅ API keys initialized")
+                        print("🔍 TESTFLIGHT DEBUG: Config.initializeAPIKeys() completed successfully")
                         
-                        // Force refresh API keys to ensure new keys are loaded
-                        print("🔄 CashMonkiApp: Force refreshing OpenRouter API key...")
-                        Config.forceRefreshOpenRouterKey()
-                        print("✅ OpenRouter API key refreshed")
+                        // Skip force refresh for TestFlight to prevent crashes
+                        if !isTestFlightBuild() {
+                            print("🔄 CashMonkiApp: Force refreshing API keys (Debug mode)...")
+                            print("🔍 TESTFLIGHT DEBUG: Not TestFlight - refreshing API keys")
+                            Config.forceRefreshOpenRouterKey()
+                            Config.forceRefreshRevenueCatKey()
+                            print("✅ API keys refreshed")
+                        } else {
+                            print("✅ TestFlight build detected - skipping API key refresh")
+                            print("🔍 TESTFLIGHT DEBUG: TestFlight build - skipping dangerous operations")
+                        }
                         
-                        // Also refresh RevenueCat API key
-                        print("🔄 CashMonkiApp: Force refreshing RevenueCat API key...")
-                        Config.forceRefreshRevenueCatKey()
-                        print("✅ RevenueCat API key refreshed")
-                        
-                        // Reinitialize RevenueCat with new key
-                        print("🔄 CashMonkiApp: Reinitializing RevenueCat with new API key...")
+                        // Initialize RevenueCat with error handling
+                        print("🔄 CashMonkiApp: Configuring RevenueCat...")
+                        print("🔍 TESTFLIGHT DEBUG: About to configure RevenueCat")
                         #if canImport(RevenueCat)
                         RevenueCatManager.shared.configure()
                         print("✅ RevenueCat configured")
+                        print("🔍 TESTFLIGHT DEBUG: RevenueCat configured successfully")
                         #endif
+                        print("🔍 TESTFLIGHT DEBUG: All initialization steps completed successfully!")
                     } catch {
-                        print("💥 CashMonkiApp: CRASH during initialization: \(error)")
+                        print("💥 CashMonkiApp: CRASH PREVENTED during initialization: \(error)")
                         print("💥 CashMonkiApp: Error details: \(error.localizedDescription)")
+                        print("💥 TESTFLIGHT DEBUG: Caught error during initialization - app will continue")
+                        print("💥 TESTFLIGHT DEBUG: Error type: \(type(of: error))")
+                        print("💥 TESTFLIGHT DEBUG: Error: \(String(describing: error))")
+                        print("🔄 CashMonkiApp: Continuing with app launch...")
+                        // Don't crash the app - continue with partial initialization
                     }
                     
                     // Switch to persistent storage asynchronously after startup
@@ -448,5 +470,13 @@ struct CashMonkiApp: App {
         print("   ✅ Currency preferences reset to USD")
         print("   ✅ Firebase sync settings cleared")
         print("   🎯 User will now go through complete onboarding flow")
+    }
+    
+    // MARK: - TestFlight Detection
+    
+    /// Detect if this is a TestFlight build
+    private func isTestFlightBuild() -> Bool {
+        guard let receiptURL = Bundle.main.appStoreReceiptURL else { return false }
+        return receiptURL.path.contains("sandboxReceipt")
     }
 }

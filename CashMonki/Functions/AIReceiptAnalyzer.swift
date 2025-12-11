@@ -22,8 +22,8 @@ class AIReceiptAnalyzer {
     // Legacy direct API (deprecated)
     private let baseURL = "https://openrouter.ai/api/v1/chat/completions"
     
-    // New secure backend service
-    private let backendService = BackendAPIService.shared
+    // New secure backend service (lazy to prevent early Firebase access)
+    private lazy var backendService = BackendAPIService.shared
     
     private init() {}
     
@@ -122,13 +122,19 @@ class AIReceiptAnalyzer {
         let backendResult = try await backendService.analyzeReceipt(imageData: imageData)
         
         // Convert backend result to ReceiptAnalysis
+        // Parse detected currency from backend or fallback to user's primary currency
+        let detectedCurrency = Currency.allCases.first { $0.rawValue.uppercased() == (backendResult.currency?.uppercased() ?? "") } ?? CurrencyPreferences.shared.primaryCurrency
+        
+        print("💱 AIReceiptAnalyzer: Backend detected currency: '\(backendResult.currency ?? "none")'")
+        print("💱 AIReceiptAnalyzer: Mapped to Currency enum: \(detectedCurrency.rawValue)")
+        
         let analysis = ReceiptAnalysis(
             merchantName: backendResult.merchantName,
             totalAmount: backendResult.amount,
             date: backendResult.date,
             category: backendResult.category,
             paymentMethod: "Unknown", // Backend doesn't provide this yet
-            currency: CurrencyPreferences.shared.primaryCurrency,
+            currency: detectedCurrency,
             items: backendResult.items.map { ReceiptItem(description: $0.name, quantity: $0.quantity, unitPrice: $0.price, totalPrice: $0.price * Double($0.quantity)) },
             rawText: "Processed via secure backend"
         )
