@@ -10,12 +10,14 @@ import SwiftUI
 // MARK: - Chart Helper Functions
 
 fileprivate func formatLineChartValue(_ value: Double) -> String {
-    let rounded = roundToNearestFiveOrTen(abs(value))
+    let absValue = abs(value)
+    let rounded = roundToNearestFiveOrTen(absValue)
+    let sign = value < 0 ? "-" : ""
     if rounded >= 1000 {
         let roundedThousand = roundToNearestFiveOrTen(rounded / 1000)
-        return "\(Int(roundedThousand))k"
+        return "\(sign)\(Int(roundedThousand))k"
     } else {
-        return "\(Int(rounded))"
+        return "\(sign)\(Int(rounded))"
     }
 }
 
@@ -383,7 +385,18 @@ extension HomePage {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    
+    /// Line color based on chart filter: expense=red, income=green, balance=purple
+    var chartLineColor: Color {
+        switch chartFilter {
+        case .expense:
+            return AppColors.chartExpense1
+        case .income:
+            return AppColors.chartIncome2
+        case .balance:
+            return AppColors.primary
+        }
+    }
+
     var lineChart: some View {
         VStack(spacing: 16) {
             let _ = refreshTrigger // Force re-evaluation when refreshTrigger changes
@@ -515,7 +528,7 @@ extension HomePage {
                     Rectangle()
                         .foregroundColor(.clear)
                         .frame(width: 20, height: 6)
-                        .background(chartFilter == .income ? (AppColors.chartIncome2) : (AppColors.chartExpense1))
+                        .background(chartLineColor)
                         .cornerRadius(200)
                         .animation(.easeInOut(duration: 0.6), value: chartFilter)
                     
@@ -657,40 +670,55 @@ extension HomePage {
                 let chartWidth = width - 36 // Reserve 36pt gap for Y-axis labels
                 
                 
-                let maxValue = max(
+                // For balance mode, allow negative values; for income/expense keep min at 0
+                let dataMin = min(
+                    currentPeriodData.map { $0.amount }.min() ?? 0,
+                    previousPeriodData.map { $0.amount }.min() ?? 0
+                )
+                let dataMax = max(
                     currentPeriodData.map { $0.amount }.max() ?? 1,
                     previousPeriodData.map { $0.amount }.max() ?? 1,
                     1
                 )
-                let minValue: Double = 0
-                
+
+                // For balance mode, use actual data range; for income/expense, min is 0
+                let minValue: Double = chartFilter == .balance ? min(dataMin, 0) : 0
+                let maxValue: Double = max(dataMax, chartFilter == .balance ? 0 : 1)
+
+                // Calculate Y-axis label values based on range
+                let range = maxValue - minValue
+                let yLabel1 = maxValue
+                let yLabel2 = minValue + range * 0.67
+                let yLabel3 = minValue + range * 0.33
+                let yLabel4 = minValue
+
                 ZStack {
                     // Y-axis labels
                     VStack {
                         HStack {
                             Spacer()
-                            Text(formatLineChartValue(maxValue))
+                            Text(formatLineChartValue(yLabel1))
                                 .font(AppFonts.overusedGroteskMedium(size: 12))
                                 .foregroundColor(AppColors.foregroundSecondary)
                         }
                         Spacer()
                         HStack {
                             Spacer()
-                            Text(formatLineChartValue(maxValue * 0.67))
+                            Text(formatLineChartValue(yLabel2))
                                 .font(AppFonts.overusedGroteskMedium(size: 12))
                                 .foregroundColor(AppColors.foregroundSecondary)
                         }
                         Spacer()
                         HStack {
                             Spacer()
-                            Text(formatLineChartValue(maxValue * 0.33))
+                            Text(formatLineChartValue(yLabel3))
                                 .font(AppFonts.overusedGroteskMedium(size: 12))
                                 .foregroundColor(AppColors.foregroundSecondary)
                         }
                         Spacer()
                         HStack {
                             Spacer()
-                            Text("0")
+                            Text(formatLineChartValue(yLabel4))
                                 .font(AppFonts.overusedGroteskMedium(size: 12))
                                 .foregroundColor(AppColors.foregroundSecondary)
                         }
@@ -749,7 +777,7 @@ extension HomePage {
                         // Data point indicator at drag point (current period) - only show if there's current data
                         if selectedDragHasCurrentData {
                             Circle()
-                                .fill(chartFilter == .income ? AppColors.successForeground : AppColors.destructiveForeground)
+                                .fill(chartLineColor)
                                 .frame(width: 8, height: 8)
                                 .overlay(
                                     Circle()
@@ -815,7 +843,7 @@ extension HomePage {
                         let currentTime = Date()
                         if selectedData.date <= currentTime {
                             Circle()
-                                .fill(chartFilter == .income ? AppColors.successForeground : AppColors.destructiveForeground)
+                                .fill(chartLineColor)
                                 .frame(width: 8, height: 8)
                                 .overlay(
                                     Circle()
@@ -882,26 +910,26 @@ extension HomePage {
                                 }
                             }
                         }
-                        .stroke(chartFilter == .income ? (AppColors.chartIncome2) : (AppColors.chartExpense1), lineWidth: 2)
+                        .stroke(chartLineColor, lineWidth: 2)
                         .animation(.easeInOut(duration: 0.6), value: chartFilter)
                         .animation(.easeInOut(duration: 0.6), value: rangeSelection)
-                        
+
                         // Future data (beyond now) - transparent (0% opacity)
                         Path { path in
                             for dataPoint in currentPeriodData {
                                 // Only show data points beyond current time
                                 if dataPoint.date > currentTime {
                                     let periodDuration = periodEndDate.timeIntervalSince(periodStartDate)
-                                    
+
                                     // Use full date/time for all views to show time-based progressions
                                     let dateForPositioning = dataPoint.date
-                                    
+
                                     let timeOffset = dateForPositioning.timeIntervalSince(periodStartDate)
                                     let normalizedTime: Double = periodDuration > 0 ? timeOffset / periodDuration : 0
-                                    
+
                                     let x = chartWidth * CGFloat(max(0, min(1, normalizedTime)))
                                     let y = height - (height * CGFloat((dataPoint.amount - minValue) / (maxValue - minValue)))
-                                    
+
                                     if path.isEmpty {
                                         path.move(to: CGPoint(x: x, y: y))
                                     } else {
@@ -910,7 +938,7 @@ extension HomePage {
                                 }
                             }
                         }
-                        .stroke((chartFilter == .income ? (AppColors.chartIncome2) : (AppColors.chartExpense1)).opacity(0), lineWidth: 2) // 0% opacity for future data
+                        .stroke(chartLineColor.opacity(0), lineWidth: 2) // 0% opacity for future data
                         .animation(.easeInOut(duration: 0.6), value: chartFilter)
                         .animation(.easeInOut(duration: 0.6), value: rangeSelection)
                     }

@@ -224,8 +224,8 @@ extension HomePage {
     
     internal var chartFilterTabs: some View {
         HStack(spacing: 8) {
-            // Only show Income and Expense tabs, hide Balance
-            ForEach([ChartFilter.expense, ChartFilter.income], id: \.id) { filter in
+            // Show Expense, Income, and Balance tabs
+            ForEach([ChartFilter.expense, ChartFilter.income, ChartFilter.balance], id: \.id) { filter in
                 TabChip.basic(
                     title: filter.rawValue,
                     isSelected: chartFilter == filter
