@@ -98,9 +98,9 @@ struct RoastReceiptSheet: View {
             }
             
             // Main roast message content
-            VStack(spacing: 20) {
+            VStack(spacing: 0) {
                 Spacer()
-                
+
                 // Roast text
                 Text(roastMessage)
                     .font(
@@ -109,16 +109,16 @@ struct RoastReceiptSheet: View {
                     )
                     .multilineTextAlignment(.center)
                     .foregroundColor(.white)
-                    .padding(.horizontal, 50)
-                
-                // Lottie animation
-                SimpleRoastLottie()
-                    .frame(width: 150, height: 120)
-                
+                    .padding(.horizontal, 40)
+
                 Spacer()
+
+                // Lottie animation - flush at bottom
+                SimpleRoastLottie()
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 220)
             }
-            .padding(.top, 80)
-            .padding(.bottom, 0)
+            .padding(.top, 60)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .ignoresSafeArea(.all)
