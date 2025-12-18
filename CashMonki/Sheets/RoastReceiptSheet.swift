@@ -113,10 +113,11 @@ struct RoastReceiptSheet: View {
 
                 Spacer()
 
-                // Lottie animation - flush at bottom, scaled as designed
+                // Lottie animation - flush at bottom, scaled as designed (440x246)
                 SimpleRoastLottie()
-                    .aspectRatio(contentMode: .fit)
+                    .aspectRatio(440/246, contentMode: .fill)
                     .frame(maxWidth: .infinity)
+                    .clipped()
             }
             .padding(.top, 60)
         }

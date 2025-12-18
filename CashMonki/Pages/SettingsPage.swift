@@ -143,7 +143,7 @@ struct SettingsPage: View {
                 .ignoresSafeArea()
                 .allowsHitTesting(false)
                 .opacity(showingRoastReceiptSheet ? 1 : 0)
-                .animation(.easeOut(duration: 0.1), value: showingRoastReceiptSheet)
+                .animation(.easeOut(duration: 0.3), value: showingRoastReceiptSheet)
         }
     }
     
