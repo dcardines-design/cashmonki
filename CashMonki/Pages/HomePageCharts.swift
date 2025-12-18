@@ -71,19 +71,41 @@ fileprivate func normalizeDateForChart(_ date: Date, rangeSelection: HomePage.Ra
     }
 }
 
+// Calculate cumulative balance up to (but not including) a specific date
+fileprivate func calculateCumulativeBalance(
+    allTransactions: [Txn],
+    beforeDate: Date
+) -> Double {
+    let primaryCurrency = CurrencyPreferences.shared.primaryCurrency
+    let rateManager = CurrencyRateManager.shared
+
+    return allTransactions
+        .filter { $0.date < beforeDate }
+        .reduce(0.0) { sum, txn in
+            let convertedAmount: Double
+            if txn.primaryCurrency == primaryCurrency {
+                convertedAmount = txn.amount
+            } else {
+                convertedAmount = rateManager.convertAmount(txn.amount, from: txn.primaryCurrency, to: primaryCurrency)
+            }
+            return sum + convertedAmount
+        }
+}
+
 // Enhanced data processing for smooth dragging
 fileprivate func createStepwiseRunningTotals(
     transactions: [Txn],
     startDate: Date,
     endDate: Date,
     chartFilter: HomePage.ChartFilter,
-    rangeSelection: HomePage.RangeSelection
+    rangeSelection: HomePage.RangeSelection,
+    startingBalance: Double = 0
 ) -> [(date: Date, amount: Double)] {
     var dataPoints: [(date: Date, amount: Double)] = []
-    var runningTotal: Double = 0
-    
-    // Add starting point with zero
-    dataPoints.append((date: startDate, amount: 0))
+    var runningTotal: Double = startingBalance
+
+    // Add starting point with starting balance (0 for expense/income, cumulative for balance)
+    dataPoints.append((date: startDate, amount: startingBalance))
     
     // Process each transaction and create diagonal transitions
     for (_, transaction) in transactions.enumerated() {
@@ -162,19 +184,20 @@ fileprivate func calculateRunningTotalAtTime(
     transactions: [Txn],
     startDate: Date,
     chartFilter: HomePage.ChartFilter,
-    rangeSelection: HomePage.RangeSelection
+    rangeSelection: HomePage.RangeSelection,
+    startingBalance: Double = 0
 ) -> Double {
-    var runningTotal: Double = 0
-    
+    var runningTotal: Double = startingBalance
+
     // Process all transactions up to and including the target time
     let normalizedTargetTime = normalizeDateForChart(targetTime, rangeSelection: rangeSelection)
-    
+
     for transaction in transactions {
         let normalizedTransactionDate = normalizeDateForChart(transaction.date, rangeSelection: rangeSelection)
-        
+
         // Include transactions up to the target time for all views (including day view for hourly granularity)
         let shouldIncludeTransaction = normalizedTransactionDate <= normalizedTargetTime
-        
+
         if shouldIncludeTransaction {
             let impact = getTransactionImpact(transaction, chartFilter: chartFilter)
             runningTotal += impact
@@ -182,7 +205,7 @@ fileprivate func calculateRunningTotalAtTime(
             break // Transactions are sorted, so we can stop here
         }
     }
-    
+
     return runningTotal
 }
 
@@ -252,13 +275,14 @@ fileprivate func findPreviousPeriodValue(
 fileprivate func createStepwiseRunningTotalsFromMapped(
     mappedData: [MappedTransactionData],
     startDate: Date,
-    endDate: Date
+    endDate: Date,
+    startingBalance: Double = 0
 ) -> [(date: Date, amount: Double)] {
     var dataPoints: [(date: Date, amount: Double)] = []
-    var runningTotal: Double = 0
-    
-    // Add starting point with zero
-    dataPoints.append((date: startDate, amount: 0))
+    var runningTotal: Double = startingBalance
+
+    // Add starting point with starting balance
+    dataPoints.append((date: startDate, amount: startingBalance))
     
     // Sort mapped data by mapped date
     let sortedData = mappedData.sorted { $0.mappedDate < $1.mappedDate }
@@ -436,21 +460,26 @@ extension HomePage {
             let currentPeriodTransactions = transactions.filter { txn in
                 txn.date >= periodStartDate && txn.date <= min(now, periodEndDate)
             }.sorted { $0.date < $1.date }
-            
-            
+
+            // For balance mode, calculate cumulative balance before period start
+            let startingBalance: Double = chartFilter == .balance
+                ? calculateCumulativeBalance(allTransactions: transactions, beforeDate: periodStartDate)
+                : 0
+
             // Create step-wise running total data points for smooth dragging
             let enhancedDataPoints = createStepwiseRunningTotals(
                 transactions: currentPeriodTransactions,
                 startDate: periodStartDate,
                 endDate: periodEndDate, // Use full period for chart structure
                 chartFilter: chartFilter,
-                rangeSelection: rangeSelection
+                rangeSelection: rangeSelection,
+                startingBalance: startingBalance
             )
-            
+
             let currentPeriodData = enhancedDataPoints
             
             // Calculate previous period data for comparison
-            let (_, mappedPreviousData) = {
+            let (previousPeriodStartDate, mappedPreviousData) = {
                 switch rangeSelection {
                 case .day:
                     let prevStart = cal.date(byAdding: .day, value: -1, to: periodStartDate) ?? periodStartDate
@@ -466,7 +495,7 @@ extension HomePage {
                         currentPeriodEnd: periodEndDate,
                         chartFilter: chartFilter
                     )
-                    return (prevTransactions, mapped)
+                    return (prevStart, mapped)
                 case .week:
                     let prevStart = cal.date(byAdding: .weekOfYear, value: -1, to: periodStartDate) ?? periodStartDate
                     let prevEnd = cal.date(byAdding: .weekOfYear, value: -1, to: periodEndDate) ?? periodEndDate
@@ -481,7 +510,7 @@ extension HomePage {
                         currentPeriodEnd: periodEndDate,
                         chartFilter: chartFilter
                     )
-                    return (prevTransactions, mapped)
+                    return (prevStart, mapped)
                 case .month:
                     let prevStart = cal.date(byAdding: .month, value: -1, to: periodStartDate) ?? periodStartDate
                     let prevEnd = cal.date(byAdding: .month, value: -1, to: periodEndDate) ?? periodEndDate
@@ -496,7 +525,7 @@ extension HomePage {
                         currentPeriodEnd: periodEndDate,
                         chartFilter: chartFilter
                     )
-                    return (prevTransactions, mapped)
+                    return (prevStart, mapped)
                 case .quarter:
                     let prevStart = cal.date(byAdding: .month, value: -3, to: periodStartDate) ?? periodStartDate
                     let prevEnd = cal.date(byAdding: .month, value: -3, to: periodEndDate) ?? periodEndDate
@@ -511,15 +540,21 @@ extension HomePage {
                         currentPeriodEnd: periodEndDate,
                         chartFilter: chartFilter
                     )
-                    return (prevTransactions, mapped)
+                    return (prevStart, mapped)
                 }
             }()
-            
+
+            // For balance mode, calculate cumulative balance before previous period start
+            let previousStartingBalance: Double = chartFilter == .balance
+                ? calculateCumulativeBalance(allTransactions: transactions, beforeDate: previousPeriodStartDate)
+                : 0
+
             // Create step-wise running total data points for previous period
             let previousPeriodData = createStepwiseRunningTotalsFromMapped(
                 mappedData: mappedPreviousData,
                 startDate: periodStartDate,
-                endDate: periodEndDate
+                endDate: periodEndDate,
+                startingBalance: previousStartingBalance
             )
             
             // Legend - Dynamic based on hover or current filter
@@ -967,7 +1002,8 @@ extension HomePage {
                                             transactions: currentPeriodTransactions,
                                             startDate: periodStartDate,
                                             chartFilter: chartFilter,
-                                            rangeSelection: rangeSelection
+                                            rangeSelection: rangeSelection,
+                                            startingBalance: startingBalance
                                         )
                                         
                                         
@@ -1053,13 +1089,19 @@ extension HomePage {
             }
         }()
 
-        // Filter transactions for current period
-        let periodTransactions = transactions.filter { txn in
-            txn.date >= periodStartDate && txn.date <= min(now, periodEndDate)
+        // For balance mode, use ALL transactions up to now (cumulative)
+        // For income/expense, use only current period transactions
+        let relevantTransactions: [Txn]
+        if chartFilter == .balance {
+            relevantTransactions = transactions.filter { $0.date <= now }
+        } else {
+            relevantTransactions = transactions.filter { txn in
+                txn.date >= periodStartDate && txn.date <= min(now, periodEndDate)
+            }
         }
 
         // Calculate total based on chart filter (with currency conversion)
-        let total = periodTransactions.reduce(0.0) { sum, txn in
+        let total = relevantTransactions.reduce(0.0) { sum, txn in
             // Convert to primary currency
             let convertedAmount: Double
             if txn.primaryCurrency == primaryCurrency {
