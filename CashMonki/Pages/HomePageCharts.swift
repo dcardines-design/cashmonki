@@ -1025,7 +1025,9 @@ extension HomePage {
         let transactions = accountManager.filteredTransactions
         let cal = Calendar.current
         let now = Date()
-        
+        let primaryCurrency = CurrencyPreferences.shared.primaryCurrency
+        let rateManager = CurrencyRateManager.shared
+
         // Get current period boundaries
         let (periodStartDate, periodEndDate) = {
             switch rangeSelection {
@@ -1050,24 +1052,32 @@ extension HomePage {
                 return (start, end)
             }
         }()
-        
+
         // Filter transactions for current period
         let periodTransactions = transactions.filter { txn in
             txn.date >= periodStartDate && txn.date <= min(now, periodEndDate)
         }
-        
-        // Calculate total based on chart filter
+
+        // Calculate total based on chart filter (with currency conversion)
         let total = periodTransactions.reduce(0.0) { sum, txn in
+            // Convert to primary currency
+            let convertedAmount: Double
+            if txn.primaryCurrency == primaryCurrency {
+                convertedAmount = txn.amount
+            } else {
+                convertedAmount = rateManager.convertAmount(txn.amount, from: txn.primaryCurrency, to: primaryCurrency)
+            }
+
             switch chartFilter {
             case .balance:
-                return sum + txn.amount
+                return sum + convertedAmount
             case .income:
-                return sum + (txn.amount > 0 ? txn.amount : 0)
+                return sum + (convertedAmount > 0 ? convertedAmount : 0)
             case .expense:
-                return sum + (txn.amount < 0 ? abs(txn.amount) : 0)
+                return sum + (convertedAmount < 0 ? abs(convertedAmount) : 0)
             }
         }
-        
+
         return formatExactAmount(total)
     }
     
