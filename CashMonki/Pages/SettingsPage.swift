@@ -821,46 +821,39 @@ struct SettingsPage: View {
                 // Divider()
                 //     .padding(.leading, 52)
 
-                // COMMENTED OUT: Roast My Receipt toggle
-                // Button(action: {
-                //     showingRoastReceiptSheet = true
-                // }) {
-                //     HStack {
-                //         HStack(spacing: 12) {
-                //             Text("🔥")
-                //                 .font(.system(size: 20))
-                //
-                //             VStack(alignment: .leading, spacing: 2) {
-                //                 Text("Roast My Receipt")
-                //                     .font(AppFonts.overusedGroteskMedium(size: 16))
-                //                     .foregroundColor(AppColors.foregroundPrimary)
-                //                 Text("Scan a receipt... try it out...")
-                //                     .font(AppFonts.overusedGroteskMedium(size: 14))
-                //                     .foregroundColor(AppColors.foregroundSecondary)
-                //                     .lineLimit(1)
-                //             }
-                //         }
-                //
-                //         Spacer()
-                //
-                //         Toggle("", isOn: $isRoastReceiptEnabled)
-                //             .toggleStyle(SwitchToggleStyle(tint: AppColors.primary))
-                //             .onChange(of: isRoastReceiptEnabled) { oldValue, newValue in
-                //                 if newValue {
-                //                     showingRoastReceiptSheet = true
-                //                 }
-                //             }
-                //             .onTapGesture {
-                //                 // Prevent toggle from triggering button action
-                //             }
-                //     }
-                //     .padding(.horizontal, 16)
-                //     .padding(.vertical, 12)
-                // }
-                // .buttonStyle(PlainButtonStyle())
-                //
-                // Divider()
-                //     .padding(.leading, 52)
+                // Roast My Receipt
+                Button(action: {
+                    showingRoastReceiptSheet = true
+                }) {
+                    HStack {
+                        HStack(spacing: 12) {
+                            Text("🔥")
+                                .font(.system(size: 20))
+
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Roast My Receipt")
+                                    .font(AppFonts.overusedGroteskMedium(size: 16))
+                                    .foregroundColor(AppColors.foregroundPrimary)
+                                Text("Get roasted for your spending")
+                                    .font(AppFonts.overusedGroteskMedium(size: 14))
+                                    .foregroundColor(AppColors.foregroundSecondary)
+                                    .lineLimit(1)
+                            }
+                        }
+
+                        Spacer()
+
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundColor(AppColors.foregroundSecondary)
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
+                }
+                .buttonStyle(PlainButtonStyle())
+
+                Divider()
+                    .padding(.leading, 52)
 
                 settingsRow(
                     title: "Categories",
