@@ -29,9 +29,10 @@ fileprivate func formatExactAmount(_ value: Double) -> String {
     formatter.minimumFractionDigits = 0
     formatter.maximumFractionDigits = 2
     formatter.groupingSeparator = ","
-    
+
     let formattedAmount = formatter.string(from: NSNumber(value: abs(value))) ?? String(format: "%.2f", abs(value))
-    return "\(primaryCurrency.symbol)\(formattedAmount)"
+    let sign = value < 0 ? "-" : ""
+    return "\(sign)\(primaryCurrency.symbol)\(formattedAmount)"
 }
 
 // Format date for legend (like "Nov 11" or "3PM" for day view)
