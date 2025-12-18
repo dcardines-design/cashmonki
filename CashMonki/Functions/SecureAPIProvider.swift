@@ -81,8 +81,11 @@ struct SecureAPIProvider {
     }
     
     /// Detect if this is a TestFlight build
+    @available(iOS, deprecated: 18.0, message: "Uses legacy receipt URL check")
     private static func isTestFlightBuild() -> Bool {
         // TestFlight builds have a specific receipt format
+        // Note: appStoreReceiptURL is deprecated in iOS 18 but still functional
+        // Using it for backward compatibility with older iOS versions
         guard let receiptURL = Bundle.main.appStoreReceiptURL else { return false }
         return receiptURL.path.contains("sandboxReceipt")
     }

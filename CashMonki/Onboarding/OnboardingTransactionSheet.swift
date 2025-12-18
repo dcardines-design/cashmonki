@@ -101,13 +101,10 @@ struct OnboardingTransactionSheet: View {
                         handleSkipAction()
                     }
                     .padding(.top, 12)
-                    
-                    Spacer()
-                        .frame(height: 100)
                 }
                 .padding(.horizontal, 20)
                 .padding(.top, 40)
-                .padding(.bottom, 120) // Space for fixed bottom button
+                .padding(.bottom, 40)
             }
             
             // Progress Bar - Step 4 of 4 (Transaction Addition - Final Step)

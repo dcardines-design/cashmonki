@@ -29,6 +29,7 @@ struct RoundedCorner: Shape {
 
 struct EditTransactionSheet: View {
     @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject var toastManager: ToastManager
     @State private var transaction: Txn
     let onTransactionUpdate: ((Txn) -> Void)?
     let onTransactionDelete: ((Txn) -> Void)?
@@ -454,7 +455,10 @@ struct EditTransactionSheet: View {
         print("🔥 SAVE TRANSACTION - Transaction ID: \(updatedTransaction.id)")
         onTransactionUpdate?(updatedTransaction)
         print("🔥 SAVE TRANSACTION - Callback called, about to dismiss")
-        
+
+        // Show changes saved toast
+        toastManager.showChangesSaved()
+
         if let onDismiss = onDismiss {
             onDismiss()
         } else {

@@ -29,6 +29,8 @@ struct ToastView: View {
             return "" // No subtitle for regular success toasts
         case .subscriptionSuccess:
             return "Your future self says thanks 😉"
+        case .subscriptionError:
+            return "No worries, try again in a bit 💫"
         case .deleted:
             return "" // No subtitle for deleted toast
         case .welcome:
@@ -45,6 +47,7 @@ struct ToastView: View {
         case error
         case success
         case subscriptionSuccess
+        case subscriptionError
         case deleted
         case welcome
         case noConnection
@@ -63,6 +66,8 @@ struct ToastView: View {
                 return "toast-done" // Use same animation as done state
             case .subscriptionSuccess:
                 return "toast-done" // Use same animation as success state
+            case .subscriptionError:
+                return "toast-failed" // Use failed animation for error state
             case .deleted:
                 return "toast-deleted" // Use deleted Lottie animation
             case .welcome:
@@ -86,6 +91,8 @@ struct ToastView: View {
                 return "toast-done" // Use same Lottie as done state
             case .subscriptionSuccess:
                 return "toast-done" // Use same Lottie as success state
+            case .subscriptionError:
+                return "toast-failed" // Use failed Lottie for error state
             case .deleted:
                 return "toast-deleted" // Use deleted Lottie animation
             case .welcome:
@@ -123,6 +130,8 @@ struct ToastView: View {
                 return "success"
             case .subscriptionSuccess:
                 return "subscriptionSuccess"
+            case .subscriptionError:
+                return "subscriptionError"
             case .deleted:
                 return "deleted"
             case .welcome:
@@ -205,23 +214,17 @@ struct ToastView: View {
             .padding(.leading, 0)
             .padding(.trailing, 14)
             .padding(.vertical, 14)
-            .frame(width: 311, alignment: .topLeading)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
             
             Spacer()
         }
         }
-        .frame(width: 410, height: 68)
+        .frame(maxWidth: .infinity, maxHeight: 68)
         .background(.black.opacity(1.0))
         .cornerRadius(10)
         .shadow(color: Color(red: 0.06, green: 0.09, blue: 0.16).opacity(0.18), radius: 24, x: 0, y: 24)
         .padding(.horizontal, 15)
-        .transition(.asymmetric(
-            insertion: .move(edge: .bottom)
-                .animation(.bouncy(duration: 0.3)),
-            removal: .move(edge: .bottom)
-                .combined(with: .offset(y: 100))
-                .animation(.bouncy(duration: 0.3))
-        ))
+        .transition(.move(edge: .top))
         .onAppear {
             // Auto-dismiss is now handled by ToastManager only
             // Remove conflicting auto-dismiss logic
@@ -232,7 +235,27 @@ struct ToastView: View {
 // MARK: - Toast Manager
 
 class ToastManager: ObservableObject {
-    @Published var currentToast: ToastData?
+    @Published var currentToast: ToastData? {
+        didSet {
+            // Only manage window when transitioning between nil and non-nil states
+            // This allows seamless content updates without recreating the window
+            let wasNil = oldValue == nil
+            let isNil = currentToast == nil
+
+            if wasNil && !isNil {
+                // nil → non-nil: Create window for new toast
+                WindowToastController.shared.showToast(toastManager: self)
+            } else if !wasNil && isNil {
+                // non-nil → nil: Hide window after slide-out animation completes
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                    if self.currentToast == nil {
+                        WindowToastController.shared.hideToast()
+                    }
+                }
+            }
+            // non-nil → non-nil: Do nothing - view updates via @Published/onReceive
+        }
+    }
     private var isCompletingAnalysis: Bool = false
     
     struct ToastData: Identifiable {
@@ -316,13 +339,22 @@ class ToastManager: ObservableObject {
     
     func showSuccess(_ message: String = "Transaction added!") {
         show(message, type: .success)
-        
+
         // Auto-dismiss after 1.5 seconds
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
             self.dismiss()
         }
     }
-    
+
+    func showChangesSaved(_ message: String = "Changes saved!") {
+        show(message, type: .success)
+
+        // Auto-dismiss after 1.5 seconds
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+            self.dismiss()
+        }
+    }
+
     func showDeleted(_ message: String = "Transaction deleted") {
         // Delay showing the toast by 0.3 seconds
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
@@ -368,6 +400,18 @@ class ToastManager: ObservableObject {
         // Auto-dismiss after 4 seconds (longer to allow reading)
         DispatchQueue.main.asyncAfter(deadline: .now() + 4.0) {
             print("🎯 ToastManager: Auto-dismissing subscription success toast")
+            self.dismiss()
+        }
+    }
+    
+    func showSubscriptionError(message: String = "Subscription failed") {
+        print("🎯 ToastManager: ======= SUBSCRIPTION ERROR TOAST =======")
+        print("🎯 ToastManager: Error message: \(message)")
+        show(message, type: .subscriptionError)
+        
+        // Auto-dismiss after 4 seconds (same as success for consistency)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 4.0) {
+            print("🎯 ToastManager: Auto-dismissing subscription error toast")
             self.dismiss()
         }
     }
@@ -458,20 +502,28 @@ class ToastManager: ObservableObject {
         }
     }
     
-    /// Show no connection toast
+    /// Show no connection toast - modifies existing toast in place for seamless transition
     func showNoConnectionToast() {
         print("🍞 DEBUG: showNoConnectionToast called")
-        
+
         withAnimation(.bouncy(duration: 0.3)) {
-            currentToast = ToastData(
-                message: "Uh oh... No Wi-Fi, no magic.",
-                type: .noConnection,
-                isShowing: true,
-                showFailedOverlay: false
-            )
+            if currentToast != nil {
+                // Modify existing toast in place for seamless transition from scanning
+                currentToast?.message = "Uh oh... No Wi-Fi, no magic."
+                currentToast?.type = .noConnection
+                currentToast?.showFailedOverlay = false
+            } else {
+                // Create new toast if none exists
+                currentToast = ToastData(
+                    message: "Uh oh... No Wi-Fi, no magic.",
+                    type: .noConnection,
+                    isShowing: true,
+                    showFailedOverlay: false
+                )
+            }
             print("🍞 DEBUG: No connection toast shown")
         }
-        
+
         // Auto-dismiss after 3 seconds
         DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
             self.dismiss()
@@ -565,50 +617,203 @@ class ToastManager: ObservableObject {
     }
 }
 
-// MARK: - Toast Overlay Modifier
+// MARK: - Navigation Constants
 
-struct ToastOverlay: ViewModifier {
-    @StateObject private var toastManager = ToastManager()
-    
-    func body(content: Content) -> some View {
-        content
-            .overlay(alignment: .bottom) {
-                Group {
-                    if let toast = toastManager.currentToast {
-                        ToastView(
-                            message: toast.message,
-                            type: toast.type,
-                            isShowing: Binding(
-                                get: { toast.isShowing },
-                                set: { _ in toastManager.dismiss() }
-                            ),
-                            showFailedOverlay: toast.showFailedOverlay
-                        )
-                        .padding(.bottom, 65) // 65px above navbar
-                        .zIndex(1000)
-                        .onAppear {
-                            print("🍞 UI: ToastView appeared on screen!")
-                        }
-                        .onDisappear {
-                            print("🍞 UI: ToastView disappeared from screen!")
-                        }
+struct NavigationConstants {
+    static let navbarTopPadding: CGFloat = 8
+    static let navbarBottomPadding: CGFloat = 30
+    static let toastSpacingFromNavbar: CGFloat = 0
+
+    /// Simplified calculation: actual navbar content height is much smaller
+    /// The navbar is really just: content (~40px) + top padding (8px) + bottom padding (30px) = ~78px
+    static var totalNavbarHeight: CGFloat {
+        return 48 + navbarTopPadding + navbarBottomPadding
+        // 48 + 8 + 30 = 86px (more accurate)
+    }
+
+    /// Distance from bottom of screen to position toast 15px above navbar
+    static var toastBottomPadding: CGFloat {
+        // Simplified: navbar height is roughly 80px + 15px spacing = 95px
+        return 80
+    }
+}
+
+// MARK: - Window-Level Toast (Appears Above All Sheets)
+
+/// A UIWindow-based toast system that appears above all presentations including fullScreenCover
+class WindowToastController {
+    static let shared = WindowToastController()
+
+    private var toastWindow: UIWindow?
+    private var hostingController: UIHostingController<AnyView>?
+
+    private init() {}
+
+    /// Show toast in a window above all other content
+    func showToast(toastManager: ToastManager) {
+        // Remove existing window if any
+        hideToast()
+
+        guard let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene else {
+            print("🍞 WindowToast: No window scene available")
+            return
+        }
+
+        // Create a new window at alert level (above sheets)
+        let window = UIWindow(windowScene: scene)
+        window.windowLevel = .alert + 1  // Above alerts and sheets
+        window.backgroundColor = .clear
+
+        // Create the toast view wrapped in a view that ignores safe area
+        let toastView = WindowToastView(toastManager: toastManager)
+            .ignoresSafeArea(.all)
+        let hostingController = UIHostingController(rootView: AnyView(toastView))
+        hostingController.view.backgroundColor = .clear
+
+        // Disable safe area on the hosting controller
+        hostingController._disableSafeArea = true
+
+        window.rootViewController = hostingController
+        window.isHidden = false
+        window.isUserInteractionEnabled = false  // Allow touches to pass through
+
+        self.toastWindow = window
+        self.hostingController = hostingController
+
+        print("🍞 WindowToast: Toast window created and shown")
+    }
+
+    /// Hide the toast window
+    func hideToast() {
+        toastWindow?.isHidden = true
+        toastWindow = nil
+        hostingController = nil
+    }
+}
+
+/// SwiftUI view for window-level toast
+struct WindowToastView: View {
+    @ObservedObject var toastManager: ToastManager
+
+    // Local state to control animation independently from toast data
+    @State private var isVisible: Bool = false
+    @State private var localToast: ToastManager.ToastData?
+
+    // Get safe area top from the key window
+    private var safeAreaTop: CGFloat {
+        if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+           let window = windowScene.windows.first {
+            return window.safeAreaInsets.top
+        }
+        return 59 // Default for Dynamic Island devices
+    }
+
+    var body: some View {
+        ZStack(alignment: .top) {
+            Color.clear
+
+            if isVisible, let toast = localToast {
+                ToastView(
+                    message: toast.message,
+                    type: toast.type,
+                    isShowing: Binding(
+                        get: { toast.isShowing },
+                        set: { _ in toastManager.dismiss() }
+                    ),
+                    showFailedOverlay: toast.showFailedOverlay
+                )
+                .allowsHitTesting(true)
+                .padding(.top, safeAreaTop + 8)
+                .transition(.asymmetric(
+                    insertion: .move(edge: .top),
+                    removal: .move(edge: .top)
+                ))
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .animation(.bouncy(duration: 0.3), value: isVisible)
+        .onAppear {
+            // Copy toast data and animate in after a tiny delay
+            if let toast = toastManager.currentToast {
+                localToast = toast
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.02) {
+                    isVisible = true
+                }
+            }
+        }
+        .onReceive(toastManager.$currentToast) { newToast in
+            if newToast == nil && isVisible {
+                // Animate out - keep localToast for the animation duration
+                // Animation is handled by .animation() modifier
+                isVisible = false
+            } else if let toast = newToast {
+                // Update local toast data (for message/type changes during animation)
+                localToast = toast
+                if !isVisible {
+                    // Animate in if not already visible
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.02) {
+                        isVisible = true
                     }
                 }
             }
-            .environmentObject(toastManager)
-            .onReceive(toastManager.$currentToast) { newToast in
-                if let toast = newToast {
-                    print("🍞 UI: ToastOverlay received new toast: '\(toast.message)', type: \(toast.type.description)")
-                } else {
-                    print("🍞 UI: ToastOverlay received nil toast (dismissal)")
+        }
+    }
+}
+
+// MARK: - Toast Overlay Modifier
+
+struct ToastOverlay: ViewModifier {
+    @ObservedObject var toastManager: ToastManager
+
+    func body(content: Content) -> some View {
+        let _ = print("🍞 DEBUG OVERLAY: body called, currentToast = \(toastManager.currentToast?.message ?? "nil")")
+
+        ZStack {
+            content
+
+            if let toast = toastManager.currentToast {
+                let _ = print("🍞 DEBUG OVERLAY: Rendering toast with message: \(toast.message)")
+
+                VStack {
+                    ToastView(
+                        message: toast.message,
+                        type: toast.type,
+                        isShowing: Binding(
+                            get: { toast.isShowing },
+                            set: { _ in toastManager.dismiss() }
+                        ),
+                        showFailedOverlay: toast.showFailedOverlay
+                    )
+                    .onAppear {
+                        print("🍞 UI: ToastView appeared on screen!")
+                    }
+                    .onDisappear {
+                        print("🍞 UI: ToastView disappeared from screen!")
+                    }
+
+                    Spacer()
                 }
+                .padding(.top, 15)
+                .transition(.move(edge: .top))
+                .zIndex(1000)
+            } else {
+                let _ = print("🍞 DEBUG OVERLAY: No toast to render (currentToast is nil)")
             }
+        }
+        .animation(.bouncy(duration: 0.3), value: toastManager.currentToast?.id)
+        .onReceive(toastManager.$currentToast) { newToast in
+            if let toast = newToast {
+                print("🍞 UI: ToastOverlay received new toast: '\(toast.message)', type: \(toast.type.description)")
+            } else {
+                print("🍞 UI: ToastOverlay received nil toast (dismissal)")
+            }
+        }
     }
 }
 
 extension View {
-    func withToast() -> some View {
-        modifier(ToastOverlay())
+    func withToast(toastManager: ToastManager) -> some View {
+        modifier(ToastOverlay(toastManager: toastManager))
     }
 }
 

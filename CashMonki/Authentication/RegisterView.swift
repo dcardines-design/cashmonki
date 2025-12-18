@@ -24,7 +24,7 @@ struct RegisterView: View {
     }
     
     var body: some View {
-        GeometryReader { geometry in
+        ScrollView(.vertical, showsIndicators: false) {
             VStack(spacing: 0) {
                 // Header Section
                 headerSection
@@ -40,13 +40,11 @@ struct RegisterView: View {
                 
                 // Terms and Privacy Policy
                 termsAndPrivacySection
-                
-                Spacer()
             }
             .padding(.horizontal, 20)
             .padding(.top, 60)
             .padding(.bottom, 80)
-            .frame(width: geometry.size.width, height: geometry.size.height)
+            .frame(maxWidth: .infinity)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(AppColors.backgroundWhite)
@@ -56,12 +54,6 @@ struct RegisterView: View {
     
     private var headerSection: some View {
         VStack(spacing: 40) {
-            // App Logo/Title
-            Image("CashMonki Logo")
-                .resizable()
-                .scaledToFit()
-                .frame(width: 300)
-            
             // Welcome Message
             Text("Create an account")
                 .font(
@@ -88,25 +80,26 @@ struct RegisterView: View {
                 isSecure: false
             )
             
-            // Password Input
-            CashMonkiDS.Input.text(
-                title: "",
-                text: $password,
-                placeholder: "Create Password",
-                isRequired: false,
-                isSecure: true
-            )
-            
-            // Password Requirements
-            if !password.isEmpty {
-                Text("Choose a password with at least 8 characters.")
-                    .font(
-                        Font.custom("Overused Grotesk", size: 16)
-                            .weight(.medium)
-                    )
-                    .foregroundColor(password.count >= 8 ? (AppColors.successForeground) : AppColors.foregroundSecondary)
-                    .frame(width: 400, alignment: .topLeading)
-                    .padding(.top, -12)
+            // Password Input Group
+            VStack(spacing: 6) {
+                CashMonkiDS.Input.text(
+                    title: "",
+                    text: $password,
+                    placeholder: "Create Password",
+                    isRequired: false,
+                    isSecure: true
+                )
+
+                // Password Requirements
+                if !password.isEmpty {
+                    Text("Choose a password with at least 8 characters.")
+                        .font(
+                            Font.custom("Overused Grotesk", size: 16)
+                                .weight(.medium)
+                        )
+                        .foregroundColor(password.count >= 8 ? (AppColors.successForeground) : AppColors.foregroundSecondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
             }
             
             // Continue Button
@@ -211,36 +204,36 @@ struct RegisterView: View {
     }
     
     // MARK: - Terms and Privacy Section
-    
+
     private var termsAndPrivacySection: some View {
         VStack(spacing: 4) {
+            Text("By continuing, you agree and consent to our")
+                .font(AppFonts.overusedGroteskMedium(size: 14))
+                .foregroundColor(AppColors.foregroundSecondary)
+
             HStack(spacing: 4) {
-                Text("By continuing, you agree and consent to our")
-                    .font(AppFonts.overusedGroteskMedium(size: 14))
-                    .foregroundColor(AppColors.foregroundSecondary)
-                
                 Button("Terms of Use") {
-                    // TODO: Show Terms of Use
-                    print("Terms of Use tapped")
+                    if let url = URL(string: "https://cashmonki.app/terms") {
+                        UIApplication.shared.open(url)
+                    }
                 }
                 .font(AppFonts.overusedGroteskSemiBold(size: 14))
                 .foregroundColor(AppColors.foregroundPrimary)
                 .underline()
-            }
-            
-            HStack(spacing: 4) {
+
                 Text("and")
                     .font(AppFonts.overusedGroteskMedium(size: 14))
                     .foregroundColor(AppColors.foregroundSecondary)
-                
+
                 Button("Privacy Policy") {
-                    // TODO: Show Privacy Policy
-                    print("Privacy Policy tapped")
+                    if let url = URL(string: "https://cashmonki.app/privacy") {
+                        UIApplication.shared.open(url)
+                    }
                 }
                 .font(AppFonts.overusedGroteskSemiBold(size: 14))
                 .foregroundColor(AppColors.foregroundPrimary)
                 .underline()
-                
+
                 Text(".")
                     .font(AppFonts.overusedGroteskMedium(size: 14))
                     .foregroundColor(AppColors.foregroundSecondary)

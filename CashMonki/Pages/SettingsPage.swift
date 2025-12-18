@@ -20,10 +20,11 @@ import RevenueCatUI
 
 struct SettingsPage: View {
     @Binding var primaryCurrency: Currency
-    @State private var selectedLanguage: Language = .english
+    // COMMENTED OUT: Language picker (localization not yet implemented)
+    // @State private var selectedLanguage: Language = .english
+    // @State private var showingLanguagePicker = false
     @State private var showingCurrencyPicker = false
     @State private var showingSecondaryCurrencyPicker = false
-    @State private var showingLanguagePicker = false
     @State private var showingResetCategoriesConfirmation = false
     @State private var showingEditNameSheet = false
     @State private var showingEditCategoriesSheet = false
@@ -73,6 +74,9 @@ struct SettingsPage: View {
     @State private var showingDeleteAllConfirmation = false
     @State private var deleteAllResult: String?
     
+    // Logout confirmation state
+    @State private var showingLogoutConfirmation = false
+
     // Delete account state
     @State private var showingDeleteAccountConfirmation = false
     @State private var isDeletingAccount = false
@@ -91,6 +95,10 @@ struct SettingsPage: View {
     // Currency change confirmation state
     @State private var showingCurrencyChangeConfirmation = false
     @State private var pendingCurrencyChange: Currency?
+    
+    // Roast My Receipt feature toggle
+    @State private var isRoastReceiptEnabled = false
+    @State private var showingRoastReceiptSheet = false
     
     // Computed bindings to fix type checker issues
     private var primaryCurrencyBinding: Binding<Currency> {
@@ -123,7 +131,20 @@ struct SettingsPage: View {
     
 
     var body: some View {
-        contentWithSheets
+        ZStack {
+            contentWithSheets
+            
+            // Background blur with fade in/out animation
+            Rectangle()
+                .foregroundColor(.clear)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(.white.opacity(0.97))
+                .blur(radius: 25)
+                .ignoresSafeArea()
+                .allowsHitTesting(false)
+                .opacity(showingRoastReceiptSheet ? 1 : 0)
+                .animation(.easeInOut(duration: 0.2), value: showingRoastReceiptSheet)
+        }
     }
     
     private var baseViewWithSheets: some View {
@@ -144,14 +165,15 @@ struct SettingsPage: View {
                 .presentationDetents([.fraction(0.98)])
                 .presentationDragIndicator(.hidden)
             }
-            .sheet(isPresented: $showingLanguagePicker) {
-                LanguagePickerSheet(
-                    selectedLanguage: $selectedLanguage,
-                    isPresented: $showingLanguagePicker
-                )
-                .presentationDetents([.fraction(0.98)])
-                .presentationDragIndicator(.hidden)
-            }
+            // COMMENTED OUT: Language picker (localization not yet implemented)
+            // .sheet(isPresented: $showingLanguagePicker) {
+            //     LanguagePickerSheet(
+            //         selectedLanguage: $selectedLanguage,
+            //         isPresented: $showingLanguagePicker
+            //     )
+            //     .presentationDetents([.fraction(0.98)])
+            //     .presentationDragIndicator(.hidden)
+            // }
             .sheet(isPresented: $showingEditNameSheet) {
                 EditNameSheet(isPresented: $showingEditNameSheet)
                     .environmentObject(toastManager)
@@ -163,11 +185,27 @@ struct SettingsPage: View {
                 .presentationDetents([.fraction(0.98)])
                 .presentationDragIndicator(.hidden)
             }
+            .sheet(isPresented: $showingRoastReceiptSheet) {
+                RoastReceiptSheet(isPresented: $showingRoastReceiptSheet)
+                .presentationDetents([.fraction(0.7)])
+                .presentationDragIndicator(.hidden)
+                .presentationCornerRadius(50)
+                .presentationBackground(.clear)
+                .presentationBackgroundInteraction(.disabled)
+            }
+            .onChange(of: showingRoastReceiptSheet) { oldValue, newValue in
+                if !newValue && isRoastReceiptEnabled {
+                    // Turn off toggle when sheet is dismissed
+                    isRoastReceiptEnabled = false
+                }
+            }
             .fullScreenCover(isPresented: $showingCustomPaywall) {
                 CustomPaywallSheet(isPresented: $showingCustomPaywall)
+                    .environmentObject(toastManager)
             }
             .fullScreenCover(isPresented: $showingManageBilling) {
                 ManageBillingSheet(isPresented: $showingManageBilling)
+                    .environmentObject(toastManager)
             }
             .fullScreenCover(isPresented: $showingNativePaywall) {
                 #if canImport(RevenueCatUI)
@@ -413,14 +451,14 @@ struct SettingsPage: View {
             .onChange(of: showingEntitlementPaywall) { oldValue, newValue in
                 print("🔍 PAYWALL DEBUG: showingEntitlementPaywall changed to: \(newValue)")
                 if newValue {
-                    print("🔍 PAYWALL DEBUG: Checking if user has 'Pro' entitlement...")
+                    print("🔍 PAYWALL DEBUG: Checking if user has 'cashmonki-subs' entitlement...")
                     print("🔍 PAYWALL DEBUG: Current subscription status: \(revenueCatManager.isSubscriptionActive)")
                     if let customerInfo = revenueCatManager.customerInfo {
                         print("🔍 PAYWALL DEBUG: Available entitlements: \(customerInfo.entitlements.all.keys)")
-                        if let proEntitlement = customerInfo.entitlements["Pro"] {
-                            print("🔍 PAYWALL DEBUG: 'Pro' entitlement found - active: \(proEntitlement.isActive)")
+                        if let entitlement = customerInfo.entitlements["cashmonki-subs"] {
+                            print("🔍 PAYWALL DEBUG: 'cashmonki-subs' entitlement found - active: \(entitlement.isActive)")
                         } else {
-                            print("🔍 PAYWALL DEBUG: 'Pro' entitlement NOT found - paywall should appear")
+                            print("🔍 PAYWALL DEBUG: 'cashmonki-subs' entitlement NOT found - paywall should appear")
                         }
                     } else {
                         print("🔍 PAYWALL DEBUG: No customer info available")
@@ -546,6 +584,14 @@ struct SettingsPage: View {
                 }
             )
             .appAlert(
+                title: "Sign Out",
+                isPresented: $showingLogoutConfirmation,
+                message: "Are you sure you want to sign out?",
+                primaryAction: .destructive("Sign Out") {
+                    authManager.logout()
+                }
+            )
+            .appAlert(
                 title: "Change Primary Currency",
                 isPresented: $showingCurrencyChangeConfirmation,
                 message: {
@@ -592,6 +638,7 @@ struct SettingsPage: View {
             }
             .background(AppColors.surfacePrimary)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(AppColors.surfacePrimary)
         .onAppear {
             print("⚙️ SETTINGS: ========== SETTINGS PAGE APPEARED ==========")
@@ -657,7 +704,8 @@ struct SettingsPage: View {
             // COMMENTED OUT: Data section - might use in the future
             // dataSection
             supportSection
-            
+            legalSection
+
             // Footer
             VStack(spacing: 8) {
                 Text("Made with ☕️ & ♥️ by")
@@ -744,34 +792,76 @@ struct SettingsPage: View {
                     subtitle: "",
                     icon: "🚪"
                 ) {
-                    authManager.logout()
+                    showingLogoutConfirmation = true
                 }
             }
             .background(AppColors.backgroundWhite)
             .clipShape(RoundedRectangle(cornerRadius: 16))
         }
     }
-    
+
     private var preferencesSection: some View {
         VStack(spacing: 0) {
             sectionHeader("Preferences")
             
             VStack(spacing: 0) {
-                settingsRow(
-                    title: "Reset Daily Analysis",
-                    subtitle: "Reset your daily receipt scanning limit (3 scans)",
-                    icon: "🔄"
-                ) {
-                    // Reset daily usage for receipt analysis
-                    dailyUsageManager.resetDailyUsage()
-                    
-                    // Show success toast
-                    toastManager.showSuccess("Daily receipt analysis reset! 3 new scans available.")
-                }
-                
-                Divider()
-                    .padding(.leading, 52)
-                
+                // COMMENTED OUT: Reset Daily Analysis
+                // settingsRow(
+                //     title: "Reset Daily Analysis",
+                //     subtitle: "Reset your daily receipt scanning limit (3 scans)",
+                //     icon: "🔄"
+                // ) {
+                //     // Reset daily usage for receipt analysis
+                //     dailyUsageManager.resetDailyUsage()
+                //
+                //     // Show success toast
+                //     toastManager.showSuccess("Daily receipt analysis reset! 3 new scans available.")
+                // }
+                //
+                // Divider()
+                //     .padding(.leading, 52)
+
+                // COMMENTED OUT: Roast My Receipt toggle
+                // Button(action: {
+                //     showingRoastReceiptSheet = true
+                // }) {
+                //     HStack {
+                //         HStack(spacing: 12) {
+                //             Text("🔥")
+                //                 .font(.system(size: 20))
+                //
+                //             VStack(alignment: .leading, spacing: 2) {
+                //                 Text("Roast My Receipt")
+                //                     .font(AppFonts.overusedGroteskMedium(size: 16))
+                //                     .foregroundColor(AppColors.foregroundPrimary)
+                //                 Text("Scan a receipt... try it out...")
+                //                     .font(AppFonts.overusedGroteskMedium(size: 14))
+                //                     .foregroundColor(AppColors.foregroundSecondary)
+                //                     .lineLimit(1)
+                //             }
+                //         }
+                //
+                //         Spacer()
+                //
+                //         Toggle("", isOn: $isRoastReceiptEnabled)
+                //             .toggleStyle(SwitchToggleStyle(tint: AppColors.primary))
+                //             .onChange(of: isRoastReceiptEnabled) { oldValue, newValue in
+                //                 if newValue {
+                //                     showingRoastReceiptSheet = true
+                //                 }
+                //             }
+                //             .onTapGesture {
+                //                 // Prevent toggle from triggering button action
+                //             }
+                //     }
+                //     .padding(.horizontal, 16)
+                //     .padding(.vertical, 12)
+                // }
+                // .buttonStyle(PlainButtonStyle())
+                //
+                // Divider()
+                //     .padding(.leading, 52)
+
                 settingsRow(
                     title: "Categories",
                     subtitle: "Manage transaction categories",
@@ -810,11 +900,11 @@ struct SettingsPage: View {
                 //     .padding(.leading, 52)
                 
                 currencySettingsRows
-                
-                Divider()
-                    .padding(.leading, 52)
-                
+
                 // COMMENTED OUT: Add first transaction guide
+                // Divider()
+                //     .padding(.leading, 52)
+                //
                 // settingsRow(
                 //     title: "Add First Transaction",
                 //     subtitle: "Show transaction onboarding guide",
@@ -822,17 +912,18 @@ struct SettingsPage: View {
                 // ) {
                 //     showingTransactionOnboarding = true
                 // }
-                //
+
+                // COMMENTED OUT: Language picker (localization not yet implemented)
                 // Divider()
                 //     .padding(.leading, 52)
-                
-                settingsRow(
-                    title: "Language",
-                    subtitle: selectedLanguage.displayName,
-                    icon: selectedLanguage.flag
-                ) {
-                    showingLanguagePicker = true
-                }
+                //
+                // settingsRow(
+                //     title: "Language",
+                //     subtitle: selectedLanguage.displayName,
+                //     icon: selectedLanguage.flag
+                // ) {
+                //     showingLanguagePicker = true
+                // }
             }
             .background(AppColors.backgroundWhite)
             .clipShape(RoundedRectangle(cornerRadius: 16))
@@ -1101,8 +1192,40 @@ struct SettingsPage: View {
             .clipShape(RoundedRectangle(cornerRadius: 16))
         }
     }
-    
-    
+
+    private var legalSection: some View {
+        VStack(spacing: 0) {
+            sectionHeader("Legal")
+
+            VStack(spacing: 0) {
+                settingsRow(
+                    title: "Terms of Use",
+                    subtitle: "View our terms and conditions",
+                    icon: "📄"
+                ) {
+                    if let url = URL(string: "https://cashmonki.app/terms") {
+                        UIApplication.shared.open(url)
+                    }
+                }
+
+                Divider()
+                    .padding(.leading, 52)
+
+                settingsRow(
+                    title: "Privacy Policy",
+                    subtitle: "How we handle your data",
+                    icon: "🔒"
+                ) {
+                    if let url = URL(string: "https://cashmonki.app/privacy") {
+                        UIApplication.shared.open(url)
+                    }
+                }
+            }
+            .background(AppColors.backgroundWhite)
+            .clipShape(RoundedRectangle(cornerRadius: 16))
+        }
+    }
+
     private var debugSection: some View {
         VStack(spacing: 0) {
             sectionHeader("Debug & Testing")
@@ -1271,36 +1394,15 @@ struct SettingsPage: View {
             Divider()
                 .padding(.leading, 52)
             
-            settingsRow(
-                title: "Force Lapsed Trial State",
-                subtitle: "Test lapsed trial paywall variant",
-                icon: "⏰"
-            ) {
-                RevenueCatManager.shared.forceDebugLapsedTrial()
-                toastManager.showSuccess("Forced lapsed trial state")
-            }
-            
-            Divider()
-                .padding(.leading, 52)
-            
-            settingsRow(
-                title: "Force New User State", 
-                subtitle: "Test new user paywall variant",
-                icon: "✨"
-            ) {
-                RevenueCatManager.shared.forceDebugNewUser()
-                toastManager.showSuccess("Forced new user state")
-            }
-            
-            Divider()
-                .padding(.leading, 52)
             
             settingsRow(
                 title: "Reset Trial Debug State",
                 subtitle: "Return to normal RevenueCat data",
                 icon: "🔧"
             ) {
+                #if DEBUG
                 RevenueCatManager.shared.resetDebugTrialState()
+                #endif
                 toastManager.showSuccess("Trial debug state reset")
             }
         }
@@ -2180,7 +2282,7 @@ struct SettingsPage: View {
                     subtitle: "Return to login screen",
                     icon: "🚪"
                 ) {
-                    authManager.logout()
+                    showingLogoutConfirmation = true
                 }
                 
                 Divider()

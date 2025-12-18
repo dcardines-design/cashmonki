@@ -12,6 +12,8 @@
 	<string>6.0</string>
 	<key>CFBundleName</key>
 	<string>$(PRODUCT_NAME)</string>
+	<key>CFBundleDisplayName</key>
+	<string>Cashmonki</string>
 	<key>CFBundlePackageType</key>
 	<string>$(PRODUCT_BUNDLE_PACKAGE_TYPE)</string>
 	<key>CFBundleShortVersionString</key>
@@ -38,9 +40,9 @@
 	<key>OpenRouterAPIKey</key>
 	<string></string>
 	<key>RevenueCatAPIKey</key>
-	<string></string>
+	<string>appl_fDIJnBlvjEbTMquNGkbjPATlooQ</string>
 	<key>RevenueCatTestAPIKey</key>
-	<string></string>
+	<string>test_TabcYNGFstjztYsHpBccWsNbREw</string>
 	<key>UIAppFonts</key>
 	<array>
 		<string>OverusedGrotesk-Medium.ttf</string>
@@ -63,13 +65,6 @@
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>
-		<string>UIInterfaceOrientationLandscapeLeft</string>
-		<string>UIInterfaceOrientationLandscapeRight</string>
-	</array>
-	<key>UISupportedInterfaceOrientations~ipad</key>
-	<array>
-		<string>UIInterfaceOrientationPortrait</string>
-		<string>UIInterfaceOrientationPortraitUpsideDown</string>
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>

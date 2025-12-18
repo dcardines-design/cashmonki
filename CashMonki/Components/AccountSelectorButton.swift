@@ -77,7 +77,7 @@ struct AccountSelectorButton: View {
             .padding(.trailing, 18)
             .padding(.vertical, 8)
         }
-        .frame(width: 400, alignment: .center)
+        .frame(maxWidth: .infinity, alignment: .center)
         .background(isPressed ? AppColors.surfacePrimary : .white)
         .cornerRadius(200)
         .shadow(color: isPressed ? .clear : Color(red: 0.86, green: 0.89, blue: 0.96), radius: 0, x: 0, y: 3)

@@ -16,6 +16,13 @@ import FirebaseAuth
 
 enum Tab: Hashable { case home, transactions, settings }
 
+struct NavbarFramePreferenceKey: PreferenceKey {
+    static var defaultValue: CGRect = .zero
+    static func reduce(value: inout CGRect, nextValue: () -> CGRect) {
+        value = nextValue()
+    }
+}
+
 struct ContentView: View {
     @State private var selectedTab: Tab = .home
     @State private var primaryCurrency: Currency = .php
@@ -24,24 +31,30 @@ struct ContentView: View {
     @EnvironmentObject private var toastManager: ToastManager
     @Environment(\.scenePhase) private var scenePhase
     @State private var showingOnboarding = false
+    @State private var observersSetUp = false
 
     var body: some View {
-        VStack(spacing: 0) {
+        ZStack {
             // Main content area
-            ZStack {
-                switch selectedTab {
-                case .home:
-                    HomePage(selectedTab: $selectedTab, primaryCurrency: $primaryCurrency)
-                case .transactions:
-                    ReceiptsPage()
-                case .settings:
-                    SettingsPage(primaryCurrency: $primaryCurrency)
+            VStack(spacing: 0) {
+                // Main content area
+                ZStack {
+                    switch selectedTab {
+                    case .home:
+                        HomePage(selectedTab: $selectedTab, primaryCurrency: $primaryCurrency)
+                    case .transactions:
+                        ReceiptsPage()
+                    case .settings:
+                        SettingsPage(primaryCurrency: $primaryCurrency)
+                    }
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                
+                // Custom navigation bar
+                customNavigationBar
             }
-            
-            // Custom navigation bar
-            customNavigationBar
         }
+        .ignoresSafeArea(.container, edges: .bottom)
         .preferredColorScheme(.light) // Force light mode - never change colors for dark mode
         .onAppear {
             Config.initializeAPIKey()
@@ -53,44 +66,43 @@ struct ContentView: View {
             print("🔍 ContentView: onAppear - checking onboarding with state manager")
             checkOnboardingWithStateManager()
             
-            // Listen for welcome toast notification - Set up observer immediately
-            print("🎉 ContentView: ======= SETTING UP WELCOME TOAST OBSERVER =======")
-            print("🎉 ContentView: ToastManager initialized")
-            NotificationCenter.default.addObserver(
-                forName: NSNotification.Name("ShowWelcomeToast"),
-                object: nil,
-                queue: .main
-            ) { notification in
-                print("🎉 ContentView: ======= WELCOME TOAST NOTIFICATION RECEIVED =======")
-                print("🎉 ContentView: Notification observer triggered")
-                print("🎉 ContentView: Notification name: \(notification.name.rawValue)")
-                print("🎉 ContentView: Notification object type: \(type(of: notification.object))")
-                if let firstName = notification.object as? String {
-                    print("🎉 ContentView: ✅ Successfully extracted firstName: '\(firstName)'")
-                    print("🎉 ContentView: 🔧 FIXED: Using environment ToastManager: \(self.toastManager)")
-                    print("🎉 ContentView: 🔧 FIXED: ToastManager object ID: \(ObjectIdentifier(self.toastManager))")
-                    print("🎉 ContentView: About to call self.toastManager.showWelcome('\(firstName)')...")
-                    self.toastManager.showWelcome(firstName)
-                    print("🎉 ContentView: ✅ Called self.toastManager.showWelcome() successfully!")
-                } else {
-                    print("⚠️ ContentView: ❌ Failed to extract firstName from notification")
-                    print("⚠️ ContentView: notification.object: \(notification.object ?? "nil")")
+            // Set up notification observers only once to prevent duplicate toasts
+            if !observersSetUp {
+                observersSetUp = true
+
+                // Listen for welcome toast notification
+                print("🎉 ContentView: Setting up notification observers (first time only)")
+                NotificationCenter.default.addObserver(
+                    forName: NSNotification.Name("ShowWelcomeToast"),
+                    object: nil,
+                    queue: .main
+                ) { notification in
+                    if let firstName = notification.object as? String {
+                        self.toastManager.showWelcome(firstName)
+                    }
                 }
+
+                // Set up subscription success notification observer
+                NotificationCenter.default.addObserver(
+                    forName: .subscriptionSucceeded,
+                    object: nil,
+                    queue: .main
+                ) { notification in
+                    print("🎯 ContentView: Received subscription success notification")
+                    self.toastManager.showSubscriptionSuccess()
+                }
+
+                // Set up subscription error notification observer
+                NotificationCenter.default.addObserver(
+                    forName: .subscriptionFailed,
+                    object: nil,
+                    queue: .main
+                ) { notification in
+                    let errorMessage = notification.userInfo?["errorMessage"] as? String ?? "Subscription failed"
+                    self.toastManager.showSubscriptionError(message: errorMessage)
+                }
+                print("🎯 ContentView: ✅ All notification observers set up successfully!")
             }
-            print("🎉 ContentView: ✅ Welcome toast observer set up successfully!")
-            
-            // Set up subscription success notification observer
-            NotificationCenter.default.addObserver(
-                forName: .subscriptionSucceeded,
-                object: nil,
-                queue: .main
-            ) { notification in
-                print("🎯 ContentView: Received subscription success notification")
-                print("🎯 ContentView: About to show subscription success toast...")
-                self.toastManager.showSubscriptionSuccess()
-                print("🎯 ContentView: ✅ Subscription success toast triggered!")
-            }
-            print("🎯 ContentView: ✅ Subscription success observer set up successfully!")
             
 #if canImport(UIKit)
             UITabBar.appearance().backgroundColor = UIColor.systemBackground
@@ -100,6 +112,7 @@ struct ContentView: View {
             // Clean up notification observers
             NotificationCenter.default.removeObserver(self, name: NSNotification.Name("ShowWelcomeToast"), object: nil)
             NotificationCenter.default.removeObserver(self, name: .subscriptionSucceeded, object: nil)
+            NotificationCenter.default.removeObserver(self, name: .subscriptionFailed, object: nil)
         }
         .onChange(of: userManager.currentUser.accounts) { _, _ in
             // Update currency when user's accounts change (e.g., after onboarding)
@@ -265,9 +278,9 @@ struct ContentView: View {
             .animation(nil, value: selectedTab)
         }
         .padding(.horizontal, 14)
-        .padding(.top, 8)
-        .padding(.bottom, 0)
-        .frame(width: 440, alignment: .center)
+        .padding(.top, NavigationConstants.navbarTopPadding)
+        .padding(.bottom, NavigationConstants.navbarBottomPadding)
+        .frame(maxWidth: .infinity, alignment: .center)
         .background(Color(red: 0.95, green: 0.96, blue: 0.97))
         .overlay(
             Rectangle()

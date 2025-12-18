@@ -1017,7 +1017,34 @@ class CategoriesManager: ObservableObject {
         #endif
         return result
     }
-    
+
+    /// Get current category name for a transaction, using ID lookup with string fallback.
+    /// This ensures renamed categories display their current name.
+    func getCategoryDisplayName(for transaction: Txn) -> String {
+        // Try ID lookup first (gets current/renamed name)
+        if let categoryId = transaction.categoryId,
+           let category = findCategory(by: categoryId) {
+            return category.name
+        }
+        // Also check if it's a subcategory by ID
+        if let categoryId = transaction.categoryId,
+           let result = findSubcategoryById(categoryId) {
+            return result.subcategory.name
+        }
+        // Fallback to stored string for older transactions without IDs
+        return transaction.category
+    }
+
+    /// Find subcategory by ID
+    func findSubcategoryById(_ id: UUID) -> (subcategory: SubcategoryData, parent: UnifiedCategoryData)? {
+        for category in categories {
+            if let subcategory = category.subcategories.first(where: { $0.id == id }) {
+                return (subcategory: subcategory, parent: category)
+            }
+        }
+        return nil
+    }
+
     /// Find subcategory by name and return both the subcategory and its parent category
     /// For duplicates, returns the first match (income categories are processed first, so they take priority)
     func findSubcategory(by name: String) -> (subcategory: SubcategoryData, parent: UnifiedCategoryData)? {
@@ -1167,15 +1194,15 @@ class CategoriesManager: ObservableObject {
         // Get the current category being edited
         let currentResult = findCategoryOrSubcategory(by: originalName)
         
-        // Check for duplicate names - only fail if there's a DIFFERENT category with the same name
+        // Check for duplicate names - log but allow the update (matching subcategory behavior)
         if let existingCategory = findCategory(by: trimmedName) {
             if let currentCategory = currentResult.category {
-                // If the existing category has a different ID than the one we're editing, it's a true duplicate
                 if existingCategory.id != currentCategory.id {
-                    print("❌ updateCategory: A different category with name '\(trimmedName)' already exists (ID: \(existingCategory.id))")
-                    return false
+                    // Different category with same name exists - allow anyway (user's choice to overlap)
+                    print("🔍 updateCategory: Found existing category '\(trimmedName)' with ID \(existingCategory.id)")
+                    print("🔍 updateCategory: Allowing rename to '\(trimmedName)' - user's choice to use existing name")
                 } else {
-                    print("✅ updateCategory: Same category being updated, allowing duplicate name (just emoji change)")
+                    print("✅ updateCategory: Same category being updated (just emoji/name change)")
                 }
             }
         }
@@ -1206,12 +1233,18 @@ class CategoriesManager: ObservableObject {
         // Check if this category has subcategories and user is trying to make it a subcategory
         let hasBuiltInSubcategories = !categories[categoryIndex].subcategories.isEmpty
         let hasChildCategories = categories.contains { $0.parentCategoryId == categories[categoryIndex].id }
-        
-        if parentCategory != nil && (hasBuiltInSubcategories || hasChildCategories) {
+
+        // Only block if trying to set a REAL parent (not "No Parent" containers which keep it as top-level)
+        let isSettingRealParent = parentCategory != nil &&
+            parentCategory != "None" &&
+            !parentCategory!.isEmpty &&
+            !parentCategory!.hasPrefix("No Parent")
+
+        if isSettingRealParent && (hasBuiltInSubcategories || hasChildCategories) {
             let subcategoryNames = categories[categoryIndex].subcategories.map { $0.name }
             let childCategoryNames = categories.filter { $0.parentCategoryId == categories[categoryIndex].id }.map { $0.name }
             let allChildren = subcategoryNames + childCategoryNames
-            
+
             print("❌ updateCategory: Cannot move category '\(originalName)' - it has \(allChildren.count) subcategories: \(allChildren.joined(separator: ", "))")
             return false
         }

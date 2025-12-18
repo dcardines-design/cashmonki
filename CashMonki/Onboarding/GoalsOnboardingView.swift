@@ -73,11 +73,10 @@ struct GoalsOnboardingView: View {
                     // Goal Selection Options
                     goalSelectionSection
                     
-                    Spacer(minLength: 80) // Space for bottom button
                 }
                 .padding(.horizontal, 20)
                 .padding(.top, 40)
-                .padding(.bottom, 120) // Space for fixed bottom button
+                .padding(.bottom, 40)
             }
             
             // Dynamic Progress Bar

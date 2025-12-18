@@ -55,6 +55,11 @@ struct UnifiedTransactionDisplay: View {
         // Green for income (positive amounts), red for expenses (negative amounts)
         return transaction.amount > 0 ? AppColors.successForeground : Color.red
     }
+
+    /// Get the current display name for the category (handles renamed categories)
+    private var categoryDisplayName: String {
+        categoriesManager.getCategoryDisplayName(for: transaction)
+    }
     
     /// Check if we should show secondary amount (user entered or converted amount)
     private var shouldShowSecondaryAmount: Bool {
@@ -97,13 +102,13 @@ struct UnifiedTransactionDisplay: View {
                     .fill(AppColors.surfacePrimary)
                     .frame(width: 34, height: 34)
                 
-                Text(categoriesManager.emojiFor(category: transaction.category, type: categoryType))
+                Text(categoriesManager.emojiFor(category: categoryDisplayName, type: categoryType))
                     .font(.system(size: 17))
             }
-            
+
             // Transaction Details
             VStack(alignment: .leading, spacing: 4) {
-                Text(transaction.category)
+                Text(categoryDisplayName)
                     .font(AppFonts.overusedGroteskMedium(size: 15))
                     .foregroundColor(AppColors.foregroundPrimary)
                 
@@ -138,22 +143,22 @@ struct UnifiedTransactionDisplay: View {
                     .fill(AppColors.surfacePrimary)
                     .frame(width: 34, height: 34)
                 
-                Text(categoriesManager.emojiFor(category: transaction.category, type: categoryType))
+                Text(categoriesManager.emojiFor(category: categoryDisplayName, type: categoryType))
                     .font(.system(size: 17))
             }
-            
+
             // Transaction Details
             VStack(alignment: .leading, spacing: 2) {
-                Text(transaction.merchantName ?? transaction.category)
+                Text(transaction.merchantName ?? categoryDisplayName)
                     .font(AppFonts.overusedGroteskSemiBold(size: 16))
                     .foregroundColor(AppColors.foregroundSecondary)
                     .lineLimit(1)
-                
-                Text(transaction.category)
+
+                Text(categoryDisplayName)
                     .font(AppFonts.overusedGroteskMedium(size: 14))
                     .foregroundColor(AppColors.foregroundSecondary)
                     .lineLimit(1)
-                
+
                 Text(transaction.date, style: .date)
                     .font(AppFonts.overusedGroteskMedium(size: 12))
                     .foregroundColor(AppColors.foregroundSecondary)
@@ -193,13 +198,13 @@ struct UnifiedTransactionDisplay: View {
                     .fill(AppColors.surfacePrimary)
                     .frame(width: 24, height: 24)
                 
-                Text(categoriesManager.emojiFor(category: transaction.category, type: categoryType))
+                Text(categoriesManager.emojiFor(category: categoryDisplayName, type: categoryType))
                     .font(.system(size: 12))
             }
-            
+
             // Minimal Details
             VStack(alignment: .leading, spacing: 1) {
-                Text(transaction.merchantName ?? transaction.category)
+                Text(transaction.merchantName ?? categoryDisplayName)
                     .font(AppFonts.overusedGroteskMedium(size: 13))
                     .foregroundColor(AppColors.foregroundSecondary)
                     .lineLimit(1)
@@ -230,17 +235,17 @@ struct UnifiedTransactionDisplay: View {
                         .fill(AppColors.surfacePrimary)
                         .frame(width: 40, height: 40)
                     
-                    Text(categoriesManager.emojiFor(category: transaction.category, type: categoryType))
+                    Text(categoriesManager.emojiFor(category: categoryDisplayName, type: categoryType))
                         .font(.system(size: 20))
                 }
-                
+
                 // Transaction Header
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(transaction.merchantName ?? transaction.category)
+                    Text(transaction.merchantName ?? categoryDisplayName)
                         .font(AppFonts.overusedGroteskSemiBold(size: 18))
                         .foregroundColor(AppColors.foregroundSecondary)
-                    
-                    Text(transaction.category)
+
+                    Text(categoryDisplayName)
                         .font(AppFonts.overusedGroteskMedium(size: 14))
                         .foregroundColor(AppColors.foregroundSecondary)
                 }
@@ -346,7 +351,19 @@ struct UnifiedTransactionDisplay: View {
     
     private func formatDate(_ date: Date) -> String {
         let formatter = DateFormatter()
-        formatter.dateFormat = "MMM d, yyyy h:mm a"
+        formatter.amSymbol = "am"
+        formatter.pmSymbol = "pm"
+
+        // Hide year if current year, show shorthand ('24) if different year
+        let calendar = Calendar.current
+        let isCurrentYear = calendar.component(.year, from: date) == calendar.component(.year, from: Date())
+
+        if isCurrentYear {
+            formatter.dateFormat = "MMM d, ha" // "Dec 17, 3pm"
+        } else {
+            formatter.dateFormat = "MMM d ''yy, ha" // "Dec 17 '24, 3pm"
+        }
+
         return formatter.string(from: date)
     }
 }

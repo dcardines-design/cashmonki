@@ -578,11 +578,25 @@ struct AppInputField: View {
     
     @ViewBuilder
     private var datePickerSheet: some View {
-        DatePicker("", selection: $dateValue, displayedComponents: datePickerComponents)
-            .datePickerStyle(.graphical)
-            .labelsHidden()
-            .tint(Color(hex: "542EFF") ?? .purple) // Consistent purple brand color for all date picker arrows
-            .presentationDetents([.fraction(0.5)])
+        VStack(spacing: 0) {
+            // Drag indicator
+            RoundedRectangle(cornerRadius: 2.5)
+                .fill(Color.gray.opacity(0.4))
+                .frame(width: 36, height: 5)
+                .padding(.top, 8)
+                .padding(.bottom, 16)
+
+            DatePicker("", selection: $dateValue, displayedComponents: datePickerComponents)
+                .datePickerStyle(.graphical)
+                .labelsHidden()
+                .tint(Color(hex: "542EFF") ?? .purple) // Consistent purple brand color for all date picker arrows
+                .padding(.horizontal, 12)
+
+            Spacer()
+        }
+        .background(Color(UIColor.systemBackground))
+        .presentationDetents([.fraction(0.65), .fraction(0.98)])
+        .presentationDragIndicator(.hidden) // Using custom indicator above
     }
     
     /// Determine initial tab based on current selected category type (not transaction amount)

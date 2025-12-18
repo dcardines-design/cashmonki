@@ -343,6 +343,7 @@ struct EditCategoriesSheet: View {
                         }
                     }
                     .padding(.horizontal, 20)
+                    .padding(.bottom, 20)
                 }
                 .scrollPosition($scrollPosition)
                 .background(AppColors.backgroundWhite)

@@ -47,6 +47,12 @@ struct ReceiptDetailSheet: View {
     @State private var showingEditSheet = false
     @State private var loadedReceiptImage: UIImage? = nil
     @State private var isLoadingReceiptImage = false
+    @ObservedObject private var categoriesManager = CategoriesManager.shared
+
+    /// Get the current display name for the category (handles renamed categories)
+    private var categoryDisplayName: String {
+        categoriesManager.getCategoryDisplayName(for: transactionState.transaction)
+    }
     
     init(transaction: Txn, onTransactionUpdate: ((Txn) -> Void)? = nil, onTransactionDelete: ((Txn) -> Void)? = nil, onDismiss: (() -> Void)? = nil) {
         print("🐛 ReceiptDetailSheet INIT - transaction.note: '\(transaction.note ?? "nil")'")
@@ -91,11 +97,11 @@ struct ReceiptDetailSheet: View {
                     // Category and merchant section
                     HStack(spacing: 12) {
                         // Category icon - 26px emoji size (52px container)
-                        TxnCategoryIcon(category: transactionState.transaction.category, size: 52)
-                        
+                        TxnCategoryIcon(category: categoryDisplayName, size: 52)
+
                         // Category and merchant
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(transactionState.transaction.category)
+                            Text(categoryDisplayName)
                                 .font(AppFonts.overusedGroteskMedium(size: 18))
                                 .foregroundColor(.primary)
                             
@@ -182,13 +188,13 @@ struct ReceiptDetailSheet: View {
                             Text("Category")
                                 .font(AppFonts.overusedGroteskMedium(size: 16))
                                 .foregroundColor(AppColors.foregroundSecondary)
-                            
+
                             Spacer()
-                            
+
                             HStack(spacing: 8) {
-                                TxnCategoryIcon(category: transactionState.transaction.category, size: 26)
-                                
-                                Text(transactionState.transaction.category)
+                                TxnCategoryIcon(category: categoryDisplayName, size: 26)
+
+                                Text(categoryDisplayName)
                                     .font(AppFonts.overusedGroteskMedium(size: 16))
                                     .foregroundColor(.primary)
                             }

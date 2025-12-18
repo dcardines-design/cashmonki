@@ -7,7 +7,14 @@ import RevenueCat
 struct ManageBillingSheet: View {
     @Binding var isPresented: Bool
     @ObservedObject private var revenueCatManager = RevenueCatManager.shared
+    @EnvironmentObject var toastManager: ToastManager
     @State private var isLoading = false
+
+    // Restore purchase alert states
+    @State private var showingRestoreSuccessAlert = false
+    @State private var showingRestoreNoPurchasesAlert = false
+    @State private var showingRestoreErrorAlert = false
+    @State private var restoreErrorMessage = ""
     
     #if DEBUG
     // Debug state management
@@ -67,7 +74,7 @@ struct ManageBillingSheet: View {
     
     // MARK: - Subscription Info Helpers
     private var currentSubscription: EntitlementInfo? {
-        revenueCatManager.customerInfo?.entitlements.active.values.first
+        return revenueCatManager.customerInfo?.entitlements.active.values.first
     }
     
     private var planTitle: String {
@@ -85,18 +92,12 @@ struct ManageBillingSheet: View {
         }
         #endif
         
-        switch subscriptionState {
-        case .freePlan:
-            return "Free"
-        case .trialActive:
-            guard let subscription = currentSubscription else { return "Free" }
-            return subscription.productIdentifier.contains("yearly") ? "Pro Annual" : "Pro Monthly"
-        case .trialLapsed:
-            return "Free"
-        case .subscribedRegular:
-            guard let subscription = currentSubscription else { return "Free" }
+        // Use RevenueCat entitlement info
+        if let subscription = currentSubscription {
             return subscription.productIdentifier.contains("yearly") ? "Pro Annual" : "Pro Monthly"
         }
+        
+        return "Free"
     }
     
     private var planPrice: String {
@@ -124,13 +125,12 @@ struct ManageBillingSheet: View {
         }
         #endif
         
-        guard let subscription = currentSubscription else { return "US$0.00" }
-        
-        if subscription.productIdentifier.contains("yearly") {
-            return "US$99.99"
-        } else {
-            return "US$9.99"
+        // Use RevenueCat entitlement info
+        if let subscription = currentSubscription {
+            return subscription.productIdentifier.contains("yearly") ? "US$99.99" : "US$9.99"
         }
+        
+        return "US$0.00"
     }
     
     private var pricePeriod: String {
@@ -148,13 +148,12 @@ struct ManageBillingSheet: View {
         }
         #endif
         
-        guard let subscription = currentSubscription else { return "" }
-        
-        if subscription.productIdentifier.contains("yearly") {
-            return " / year"
-        } else {
-            return " / month"
+        // Use RevenueCat entitlement info
+        if let subscription = currentSubscription {
+            return subscription.productIdentifier.contains("yearly") ? " / year" : " / month"
         }
+        
+        return ""
     }
     
     private var isTrialActive: Bool {
@@ -207,17 +206,18 @@ struct ManageBillingSheet: View {
     }
     
     private var trialEndDate: String {
-        guard let subscription = currentSubscription,
-              let originalPurchaseDate = subscription.originalPurchaseDate else { 
-            return "December 5, 2025" // Fallback 
+        // Use RevenueCat subscription data
+        if let subscription = currentSubscription,
+           let originalPurchaseDate = subscription.originalPurchaseDate {
+            
+            if let trialEnd = Calendar.current.date(byAdding: .day, value: 7, to: originalPurchaseDate) {
+                let formatter = DateFormatter()
+                formatter.dateStyle = .long
+                return formatter.string(from: trialEnd)
+            }
         }
         
-        if let trialEnd = Calendar.current.date(byAdding: .day, value: 7, to: originalPurchaseDate) {
-            let formatter = DateFormatter()
-            formatter.dateStyle = .long
-            return formatter.string(from: trialEnd)
-        }
-        
+        // Default fallback for testing
         return "December 5, 2025"
     }
     
@@ -428,6 +428,24 @@ struct ManageBillingSheet: View {
                             .foregroundColor(AppColors.foregroundPrimary)
                             .padding(.vertical, 12)
                         
+                        // RevenueCat Subscription Info
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("🎯 RevenueCat Subscription: \(revenueCatManager.isSubscriptionActive ? "ACTIVE" : "INACTIVE")")
+                                .font(Font.custom("Overused Grotesk", size: 12).weight(.medium))
+                                .foregroundColor(revenueCatManager.isSubscriptionActive ? .green : .red)
+                            
+                            if let subscription = currentSubscription {
+                                Text("📱 Product ID: \(subscription.productIdentifier)")
+                                    .font(Font.custom("Overused Grotesk", size: 12).weight(.medium))
+                                    .foregroundColor(.blue)
+                            }
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(AppColors.surfaceSecondary)
+                        .cornerRadius(8)
+                        .padding(.bottom, 12)
+                        
                         debugButton("🆓 Free Plan") {
                             debugSetState(.freePlan)
                         }
@@ -457,6 +475,25 @@ struct ManageBillingSheet: View {
                         debugButton("📆 Force Yearly Trial") {
                             debugSetState(.trialYearly)
                         }
+                        
+                        // RevenueCat Testing buttons
+                        Text("RevenueCat Debug States:")
+                            .font(Font.custom("Overused Grotesk", size: 14).weight(.semibold))
+                            .foregroundColor(AppColors.successForeground)
+                            .padding(.top, 12)
+                        
+                        debugButton("💰 Force Monthly Subscription") {
+                            debugSetState(.subscribedMonthly)
+                        }
+                        
+                        debugButton("📅 Force Yearly Subscription") {
+                            debugSetState(.subscribedYearly)
+                        }
+                        
+                        debugButton("🆓 Clear Debug State") {
+                            debugState = nil
+                            print("🔧 BILLING: Debug state cleared - using real RevenueCat data")
+                        }
                     }
                     .background(AppColors.backgroundWhite)
                     .cornerRadius(16)
@@ -476,15 +513,37 @@ struct ManageBillingSheet: View {
                     .font(Font.custom("Overused Grotesk", size: 14).weight(.medium))
                     .foregroundColor(AppColors.foregroundSecondary)
                 
-                Text("Dante Studio")
+                Text("Rosebud Studio")
                     .font(Font.custom("Overused Grotesk", size: 14).weight(.semibold))
                     .foregroundColor(AppColors.foregroundPrimary)
             }
             .padding(.bottom, 20)
         }
         .background(AppColors.surfacePrimary)
+        // MARK: - Restore Purchase Alerts
+        .alert("Purchases Restored!", isPresented: $showingRestoreSuccessAlert) {
+            Button("OK") {
+                // Auto-dismiss the billing sheet after successful restore
+                isPresented = false
+            }
+        } message: {
+            Text("Your subscription has been restored successfully. Enjoy your premium features!")
+        }
+        .alert("No Purchases Found", isPresented: $showingRestoreNoPurchasesAlert) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text("We couldn't find any previous purchases for this Apple ID.\n\nMake sure you're signed in with the same Apple ID you used to make the original purchase.")
+        }
+        .alert("Restore Failed", isPresented: $showingRestoreErrorAlert) {
+            Button("Try Again") {
+                restorePurchases()
+            }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text("Unable to restore purchases. Please check your internet connection and try again.\n\n\(restoreErrorMessage)")
+        }
     }
-    
+
     // MARK: - Actions
     private func openAppleSubscriptionManagement() {
         #if canImport(UIKit)
@@ -496,19 +555,39 @@ struct ManageBillingSheet: View {
     
     private func restorePurchases() {
         isLoading = true
-        
+
         Task {
             do {
                 let customerInfo = try await Purchases.shared.restorePurchases()
+
+                // Check if any entitlements were restored
+                let hasActiveEntitlements = customerInfo.entitlements.active.count > 0
+
+                // Refresh subscription status via RevenueCatManager
+                await revenueCatManager.forceRefreshCustomerInfo()
+
                 await MainActor.run {
-                    revenueCatManager.customerInfo = customerInfo
                     isLoading = false
                     print("✅ BILLING: Purchases restored successfully")
+
+                    if hasActiveEntitlements {
+                        // Show success alert and auto-dismiss after
+                        print("✅ BILLING: Active entitlements found - subscription restored")
+                        showingRestoreSuccessAlert = true
+                    } else {
+                        // No purchases to restore - show helpful message
+                        print("ℹ️ BILLING: No active entitlements found")
+                        showingRestoreNoPurchasesAlert = true
+                    }
                 }
             } catch {
                 await MainActor.run {
                     isLoading = false
                     print("❌ BILLING: Failed to restore purchases: \(error.localizedDescription)")
+
+                    // Show error alert
+                    restoreErrorMessage = error.localizedDescription
+                    showingRestoreErrorAlert = true
                 }
             }
         }

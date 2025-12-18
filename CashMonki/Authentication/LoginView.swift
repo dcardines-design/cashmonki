@@ -9,10 +9,12 @@ import SwiftUI
 
 struct LoginView: View {
     @ObservedObject private var authManager = AuthenticationManager.shared
+    @EnvironmentObject var toastManager: ToastManager
     @State private var email: String = ""
     @State private var password: String = ""
     @State private var showingForgotPassword: Bool = false
     @State private var resetEmail: String = ""
+    @State private var showingResetSuccessAlert: Bool = false
     
     // Callback for navigation
     let onLogin: () -> Void
@@ -25,7 +27,7 @@ struct LoginView: View {
     }
     
     var body: some View {
-        GeometryReader { geometry in
+        ScrollView(.vertical, showsIndicators: false) {
             VStack(spacing: 0) {
                 // Header Section
                 headerSection
@@ -38,13 +40,11 @@ struct LoginView: View {
                 
                 // Form Section
                 formSection
-                
-                Spacer()
             }
             .padding(.horizontal, 20)
             .padding(.top, 60)
             .padding(.bottom, 80)
-            .frame(width: geometry.size.width, height: geometry.size.height)
+            .frame(maxWidth: .infinity)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(AppColors.backgroundWhite)
@@ -55,11 +55,41 @@ struct LoginView: View {
             placeholder: "Email",
             message: "Enter your email address and we'll send you a link to reset your password.",
             primaryAction: .primary("Send Reset Email") {
+                let emailToReset = resetEmail.isEmpty ? email : resetEmail
+
+                // Don't proceed with empty email
+                guard !emailToReset.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                    toastManager.showError("Please enter an email address")
+                    return
+                }
+
                 Task {
-                    await authManager.resetPassword(email: resetEmail.isEmpty ? email : resetEmail)
+                    await authManager.resetPassword(email: emailToReset)
                     resetEmail = ""
+
+                    // Show feedback
+                    if authManager.authError != nil {
+                        toastManager.showError("Failed to send reset email")
+                    } else {
+                        showingResetSuccessAlert = true
+                    }
                 }
             }
+        )
+        .onChange(of: showingForgotPassword) { _, isShowing in
+            // Reset loading state when dialog is dismissed
+            if !isShowing {
+                Task {
+                    await MainActor.run {
+                        authManager.isLoading = false
+                    }
+                }
+            }
+        }
+        .appInfoAlert(
+            title: "Check Your Email",
+            isPresented: $showingResetSuccessAlert,
+            message: "We've sent you a reset link. Check your spam folder if you don't see it."
         )
     }
     
@@ -67,12 +97,6 @@ struct LoginView: View {
     
     private var headerSection: some View {
         VStack(spacing: 40) {
-            // App Logo/Title
-            Image("CashMonki Logo")
-                .resizable()
-                .scaledToFit()
-                .frame(width: 300)
-            
             // Welcome Message
             Text("Welcome back! 👋")
                 .font(

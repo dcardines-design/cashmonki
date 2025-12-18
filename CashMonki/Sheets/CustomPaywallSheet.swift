@@ -7,21 +7,21 @@ import RevenueCat
 
 extension Notification.Name {
     static let subscriptionSucceeded = Notification.Name("subscriptionSucceeded")
+    static let subscriptionFailed = Notification.Name("subscriptionFailed")
 }
 
 struct CustomPaywallSheet: View {
     @Binding var isPresented: Bool
     @State private var selectedPlan: PricingPlan = .yearly
     @State private var showingManageBilling = false
-    @State private var showingSubscriptionError = false
-    @State private var subscriptionErrorMessage = ""
     @ObservedObject private var revenueCatManager = RevenueCatManager.shared
+    @EnvironmentObject var toastManager: ToastManager
     
     // MARK: - RevenueCat Package Helpers
     private var targetOffering: Offering? {
         revenueCatManager.targetOffering
     }
-    
+
     private var monthlyPackage: Package? {
         guard let offering = targetOffering else { return nil }
         return offering.availablePackages.first { package in
@@ -29,11 +29,11 @@ struct CustomPaywallSheet: View {
             package.packageType == .monthly
         }
     }
-    
+
     private var yearlyPackage: Package? {
-        guard let offering = targetOffering else { 
+        guard let offering = targetOffering else {
             print("🎯 PAYWALL: No target offering available")
-            return nil 
+            return nil
         }
         
         // Debug: Print all available packages
@@ -72,12 +72,12 @@ struct CustomPaywallSheet: View {
     
     private var paymentTermsText: String {
         guard let package = selectedPackage else {
-            return selectedPlan == .yearly ? "$99.99 a year" : "$9.99 a month"
+            return selectedPlan == .yearly ? "$99.99/yr" : "$9.99/mo"
         }
-        
+
         let priceString = package.storeProduct.localizedPriceString
-        let periodString = selectedPlan == .yearly ? "a year" : "a month"
-        return "\(priceString) \(periodString)"
+        let periodString = selectedPlan == .yearly ? "/yr" : "/mo"
+        return "\(priceString)\(periodString)"
     }
     
     private func getYearlyPriceString() -> String {
@@ -266,7 +266,7 @@ struct CustomPaywallSheet: View {
                                         .foregroundColor(AppColors.foregroundWhite)
                                         .frame(maxWidth: .infinity, alignment: .topLeading)
                                     
-                                    Text("Support indie app creators just for 3 cups of coffee a month.")
+                                    Text("Support indie app creators for the price of a few cups of coffee a month.")
                                         .font(
                                             Font.custom("Overused Grotesk", size: 16)
                                                 .weight(.medium)
@@ -292,7 +292,9 @@ struct CustomPaywallSheet: View {
             VStack(alignment: .leading, spacing: 14) {
                 // Yearly pricing plan tile
                 Button(action: {
+                    print("🎯 PAYWALL DEBUG: Yearly tile TAPPED - changing selectedPlan from \(selectedPlan) to .yearly")
                     selectedPlan = .yearly
+                    print("🎯 PAYWALL DEBUG: selectedPlan is now: \(selectedPlan)")
                 }) {
                     HStack(alignment: .top) {
                     VStack(alignment: .leading, spacing: 6) {
@@ -377,7 +379,9 @@ struct CustomPaywallSheet: View {
                 
                 // Monthly pricing plan tile
                 Button(action: {
+                    print("🎯 PAYWALL DEBUG: Monthly tile TAPPED - changing selectedPlan from \(selectedPlan) to .monthly")
                     selectedPlan = .monthly
+                    print("🎯 PAYWALL DEBUG: selectedPlan is now: \(selectedPlan)")
                 }) {
                     HStack(alignment: .top) {
                     VStack(alignment: .leading, spacing: 4) {
@@ -468,7 +472,7 @@ struct CustomPaywallSheet: View {
                     Image(systemName: "checkmark")
                         .font(.system(size: 12, weight: .medium))
                         .foregroundColor(AppColors.foregroundSecondary)
-                    
+
                     Text(revenueCatManager.hasUsedTrialBefore ? "Secure checkout" : "No payment now")
                         .font(
                             Font.custom("Overused Grotesk", size: 14)
@@ -476,7 +480,7 @@ struct CustomPaywallSheet: View {
                         )
                         .multilineTextAlignment(.center)
                         .foregroundColor(AppColors.foregroundSecondary)
-                    
+
                     Text("•")
                         .font(
                             Font.custom("Overused Grotesk", size: 14)
@@ -484,8 +488,8 @@ struct CustomPaywallSheet: View {
                         )
                         .multilineTextAlignment(.center)
                         .foregroundColor(AppColors.foregroundSecondary)
-                    
-                    Text(revenueCatManager.hasUsedTrialBefore ? "Cancel anytime" : "Free 7 days then \(paymentTermsText)")
+
+                    Text(revenueCatManager.hasUsedTrialBefore ? "Cancel anytime" : "7 days free, then \(paymentTermsText)")
                         .font(
                             Font.custom("Overused Grotesk", size: 14)
                                 .weight(.medium)
@@ -494,6 +498,21 @@ struct CustomPaywallSheet: View {
                         .foregroundColor(AppColors.foregroundSecondary)
                 }
                 .frame(maxWidth: .infinity)
+
+                // Restore Purchase link
+                Button(action: {
+                    restorePurchases()
+                }) {
+                    Text("Restore Purchase")
+                        .font(
+                            Font.custom("Overused Grotesk", size: 14)
+                                .weight(.medium)
+                        )
+                        .multilineTextAlignment(.center)
+                        .foregroundColor(AppColors.foregroundSecondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .center)
+                .padding(.top, -8)
             }
             .padding(20)
             .frame(maxWidth: .infinity, alignment: .topLeading)
@@ -504,7 +523,7 @@ struct CustomPaywallSheet: View {
                     .inset(by: 0.5)
                     .stroke(AppColors.line1stLine, lineWidth: 1)
             )
-            .padding(.horizontal, 20)
+            .padding(.horizontal, 10)
             .padding(.bottom, 0)
             .shadow(color: .black.opacity(0.1), radius: 10, x: 0, y: -5)
             }
@@ -547,23 +566,12 @@ struct CustomPaywallSheet: View {
         .animation(.easeInOut(duration: 0.2), value: selectedPlan)
         .fullScreenCover(isPresented: $showingManageBilling) {
             ManageBillingSheet(isPresented: $showingManageBilling)
+                .environmentObject(toastManager)
         }
         .onAppear {
             Task {
                 await ensureOfferingsLoaded()
             }
-        }
-        .alert("Subscription Error", isPresented: $showingSubscriptionError) {
-            Button("Try Again") {
-                print("🔄 PAYWALL: User tapped Try Again on subscription error alert")
-                showingSubscriptionError = false
-            }
-            Button("Cancel", role: .cancel) {
-                print("❌ PAYWALL: User tapped Cancel on subscription error alert")
-                showingSubscriptionError = false
-            }
-        } message: {
-            Text(subscriptionErrorMessage)
         }
     }
     
@@ -575,14 +583,61 @@ struct CustomPaywallSheet: View {
     }
     
     // MARK: - Purchase Handling
+    private func restorePurchases() {
+        Task {
+            do {
+                let customerInfo = try await Purchases.shared.restorePurchases()
+                let hasActiveEntitlements = customerInfo.entitlements.active.count > 0
+                await revenueCatManager.forceRefreshCustomerInfo()
+
+                await MainActor.run {
+                    if hasActiveEntitlements {
+                        print("✅ Restore successful - active entitlements found")
+                        isPresented = false
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                            NotificationCenter.default.post(name: .subscriptionSucceeded, object: nil)
+                        }
+                    } else {
+                        print("ℹ️ Restore completed - no active purchases found")
+                        toastManager.showSubscriptionError(message: "No previous purchases found")
+                    }
+                }
+            } catch {
+                await MainActor.run {
+                    print("❌ Restore failed: \(error.localizedDescription)")
+                    toastManager.showSubscriptionError(message: "Restore failed. Please try again.")
+                }
+            }
+        }
+    }
+
     private func handleStartFreeTrial() {
+        print("🎯 PAYWALL DEBUG: handleStartFreeTrial() called")
+        print("🎯 PAYWALL DEBUG: Current selectedPlan = \(selectedPlan)")
+        print("🎯 PAYWALL DEBUG: monthlyPackage = \(monthlyPackage?.storeProduct.productIdentifier ?? "nil")")
+        print("🎯 PAYWALL DEBUG: yearlyPackage = \(yearlyPackage?.storeProduct.productIdentifier ?? "nil")")
+        print("🎯 PAYWALL DEBUG: selectedPackage = \(selectedPackage?.storeProduct.productIdentifier ?? "nil")")
+
         Task {
             await ensureOfferingsLoaded()
-            
+
+            print("🎯 PAYWALL DEBUG: After ensureOfferingsLoaded - selectedPlan = \(selectedPlan)")
+            print("🎯 PAYWALL DEBUG: After ensureOfferingsLoaded - selectedPackage = \(selectedPackage?.storeProduct.productIdentifier ?? "nil")")
+
             guard let package = selectedPackage else {
                 await MainActor.run {
-                    subscriptionErrorMessage = "Subscription plans are not available. Please try again later."
-                    showingSubscriptionError = true
+                    // Dismiss paywall first so toast appears on main view
+                    isPresented = false
+                    
+                    // Show error toast instead of blocking alert
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                        print("🎯 PAYWALL: Posting subscription error notification - no package available")
+                        NotificationCenter.default.post(
+                            name: .subscriptionFailed, 
+                            object: nil,
+                            userInfo: ["errorMessage": "Subscription plans are not available. Please try again later."]
+                        )
+                    }
                 }
                 return
             }
@@ -628,8 +683,18 @@ struct CustomPaywallSheet: View {
                             errorMessage = "Something went wrong with your subscription. Please try again later."
                         }
                         
-                        subscriptionErrorMessage = errorMessage
-                        showingSubscriptionError = true
+                        // Dismiss paywall first so toast appears on main view
+                        isPresented = false
+                        
+                        // Show error toast instead of blocking alert
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                            print("🎯 PAYWALL: Posting subscription error notification")
+                            NotificationCenter.default.post(
+                                name: .subscriptionFailed, 
+                                object: nil,
+                                userInfo: ["errorMessage": errorMessage]
+                            )
+                        }
                     } else {
                         return // No error object, likely user cancellation
                     }

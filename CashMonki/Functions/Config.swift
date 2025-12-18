@@ -71,11 +71,11 @@ struct Config {
         }
         #endif
         
-        // DEBUG: Use test fallback key for development
+        // DEBUG: Use actual RevenueCat API key for development
         #if DEBUG
-        let fallbackKey = "test_placeholder_key_for_debug"
+        let fallbackKey = "appl_fDIJnBlvjEbTMquNGkbjPATlooQ"
         if KeychainManager.shared.store(fallbackKey, for: .revenueCatAPIKey) {
-            print("✅ RevenueCat TEST API key initialized (DEBUG)")
+            print("✅ RevenueCat API key initialized (DEBUG)")
         }
         #endif
     }
@@ -154,6 +154,68 @@ struct Config {
         initializeRevenueCatKey()
         print("✅ CONFIG: Now using LIVE key for sandbox testing: \(revenueCatAPIKey?.prefix(10) ?? "none")...")
         #endif
+    }
+    
+    /// Debug helper to show current API key status
+    static func debugAPIKeyStatus() {
+        print("🔍 CONFIG: === API KEY STATUS ===")
+        print("📝 Environment REVENUECAT_API_KEY: \(ProcessInfo.processInfo.environment["REVENUECAT_API_KEY"]?.prefix(10) ?? "NOT SET")...")
+        print("🔐 Keychain RevenueCat key: \(revenueCatAPIKey?.prefix(10) ?? "NOT SET")...")
+        print("✅ Key exists in keychain: \(KeychainManager.shared.exists(for: .revenueCatAPIKey))")
+        if let key = revenueCatAPIKey {
+            print("🔍 Key type: \(key.contains("test") ? "TEST" : key.contains("live") ? "LIVE (Legacy)" : key.hasPrefix("appl_") ? "MODERN PUBLIC KEY ✅" : key.hasPrefix("sk_") ? "SECRET KEY (Wrong for iOS)" : "UNKNOWN")")
+        }
+        print("🔍 CONFIG: === STATUS END ===")
+    }
+    
+    /// Test RevenueCat API connection
+    static func testRevenueCatConnection() {
+        guard let apiKey = revenueCatAPIKey else {
+            print("❌ REVENUECAT TEST: No API key available")
+            return
+        }
+        
+        print("🧪 REVENUECAT TEST: Testing API connection...")
+        print("🔑 Using API key: \(apiKey.prefix(15))...")
+        
+        // Test with a simple HTTP request to RevenueCat API
+        guard let url = URL(string: "https://api.revenuecat.com/v1/subscribers/test") else { return }
+        
+        var request = URLRequest(url: url)
+        request.addValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        request.addValue("application/json", forHTTPHeaderField: "Content-Type")
+        
+        Task {
+            do {
+                let (_, response) = try await URLSession.shared.data(for: request)
+                if let httpResponse = response as? HTTPURLResponse {
+                    print("🌐 REVENUECAT TEST: API Response: \(httpResponse.statusCode)")
+                    switch httpResponse.statusCode {
+                    case 200...299:
+                        print("✅ REVENUECAT TEST: API key is VALID and connected!")
+                    case 401:
+                        print("❌ REVENUECAT TEST: API key is INVALID or wrong")
+                    case 404:
+                        print("✅ REVENUECAT TEST: API key is valid (404 expected for test user)")
+                    default:
+                        print("⚠️ REVENUECAT TEST: Unexpected status: \(httpResponse.statusCode)")
+                    }
+                }
+            } catch {
+                print("❌ REVENUECAT TEST: Network error: \(error)")
+            }
+        }
+    }
+    
+    /// Force use your actual API key for testing
+    static func useActualRevenueCatKey() {
+        print("🔑 CONFIG: Setting actual RevenueCat API key...")
+        let removed = KeychainManager.shared.delete(for: .revenueCatAPIKey)
+        print("🗑️ CONFIG: Removed old key: \(removed)")
+        let actualKey = "appl_fDIJnBlvjEbTMquNGkbjPATlooQ"
+        if KeychainManager.shared.store(actualKey, for: .revenueCatAPIKey) {
+            print("✅ CONFIG: Actual RevenueCat API key set: \(actualKey.prefix(10))...")
+        }
     }
 }
 

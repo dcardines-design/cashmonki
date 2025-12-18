@@ -10,10 +10,11 @@ import Combine
 
 // MARK: - Edit Category Detail Sheet
 struct EditCategoryDetailSheet: View {
+    @EnvironmentObject var toastManager: ToastManager
     let categoryData: DisplayCategoryData
     let onDismiss: () -> Void
     let currentTab: CategoryTab // Current tab context (Income/Expense)
-    
+
     enum CategoryTab {
         case income
         case expense
@@ -549,7 +550,10 @@ struct EditCategoryDetailSheet: View {
             }
             
             print("🔥 ====== SAVE CATEGORY DEBUG END ======")
-            
+
+            // Show changes saved toast
+            toastManager.showChangesSaved()
+
             // Force immediate UI update and dismiss synchronously
             DispatchQueue.main.async {
                 onDismiss()

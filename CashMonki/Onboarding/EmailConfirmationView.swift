@@ -19,6 +19,7 @@ struct EmailConfirmationView: View {
     @State private var resendTimer: Timer?
     @State private var resendCountdown: Int = 0
     @State private var canResend: Bool = true
+    @State private var hasSentInitialEmail = false
     @ObservedObject private var authManager = AuthenticationManager.shared
     
     var body: some View {
@@ -37,12 +38,12 @@ struct EmailConfirmationView: View {
                     
                     // Resend Section
                     resendSection
+                        .padding(.top, 18)
                     
-                    Spacer(minLength: 100) // Space for bottom button
                 }
                 .padding(.horizontal, 20)
-                .padding(.top, 60)
-                .padding(.bottom, 120) // Space for fixed bottom button
+                .padding(.top, 40)
+                .padding(.bottom, 40)
             }
             
             // Progress Bar - full width (no progress - all grey)
@@ -72,13 +73,20 @@ struct EmailConfirmationView: View {
             print("🔍 EmailConfirmation: Email domain: \(email.components(separatedBy: "@").last ?? "unknown")")
             print("👤 EmailConfirmation: AuthManager authenticated: \(authManager.isAuthenticated)")
             print("📧 EmailConfirmation: Current user email: \(authManager.currentUser?.email ?? "none")")
-            
+
+            // Only send email once - prevent duplicate sends from SwiftUI re-renders
+            guard !hasSentInitialEmail else {
+                print("⚠️ EmailConfirmation: Already sent initial email, skipping duplicate send")
+                return
+            }
+            hasSentInitialEmail = true
+
             // Automatically send verification email when view appears
             Task {
                 print("🚀 EmailConfirmation: Calling sendEmailVerification()...")
                 await authManager.sendEmailVerification()
                 print("🏁 EmailConfirmation: sendEmailVerification() completed")
-                
+
                 if let error = authManager.authError {
                     print("❌ EmailConfirmation: Email sending failed: \(error)")
                     await MainActor.run {
@@ -167,7 +175,7 @@ struct EmailConfirmationView: View {
                 )
                 .multilineTextAlignment(.center)
                 .foregroundColor(AppColors.foregroundPrimary)
-                .frame(width: 400, alignment: .top)
+                .frame(maxWidth: .infinity, alignment: .top)
             
             // Instruction text and email
             VStack(spacing: 6) {
@@ -175,8 +183,7 @@ struct EmailConfirmationView: View {
                     .font(Font.custom("Overused Grotesk", size: 18))
                     .multilineTextAlignment(.center)
                     .foregroundColor(AppColors.foregroundSecondary)
-                    .frame(width: 340, alignment: .top)
-                
+
                 Text(email)
                     .font(
                         Font.custom("Overused Grotesk", size: 18)
@@ -184,7 +191,11 @@ struct EmailConfirmationView: View {
                     )
                     .multilineTextAlignment(.center)
                     .foregroundColor(AppColors.foregroundPrimary)
-                    .frame(maxWidth: .infinity, alignment: .top)
+
+                Text("Check your spam folder if you don't see it.")
+                    .font(Font.custom("Overused Grotesk", size: 18))
+                    .multilineTextAlignment(.center)
+                    .foregroundColor(AppColors.foregroundSecondary)
             }
             
             // Error Message

@@ -245,6 +245,7 @@ struct ReceiptsPage: View {
                 .background(AppColors.surfacePrimary)
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(AppColors.surfacePrimary)
         .onChange(of: accountManager.selectedSubAccountId) { _, _ in
             print("🏦 ReceiptsPage: Account selection changed - refreshing transactions list")

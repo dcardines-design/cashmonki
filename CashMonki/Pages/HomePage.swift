@@ -91,6 +91,7 @@ struct HomePage: View {
 
     var body: some View {
         scrollContent
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(AppColors.surfacePrimary)
             .modifier(modifiersWrapper)
             .onChange(of: accountManager.selectedSubAccountId) { [self] oldValue, newValue in

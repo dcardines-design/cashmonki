@@ -8,13 +8,15 @@
 import SwiftUI
 
 struct EditWalletSheet: View {
+    @EnvironmentObject var toastManager: ToastManager
     @Binding var isPresented: Bool
     let wallet: SubAccount
     let onWalletUpdated: (SubAccount) -> Void
     let onWalletDeleted: () -> Void
-    
+
     @State private var walletName: String
     @State private var showingDeleteConfirmation = false
+    @State private var changesSaved = false
     @FocusState private var isWalletNameFocused: Bool
     @ObservedObject private var accountManager = AccountManager.shared
     
@@ -131,9 +133,14 @@ struct EditWalletSheet: View {
     // MARK: - Helper Methods
     
     private func saveChanges() {
+        // Prevent duplicate saves (can be triggered by both Save button and onDisappear)
+        guard !changesSaved else { return }
+
         let trimmedName = walletName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedName.isEmpty && trimmedName != wallet.name else { return }
-        
+
+        changesSaved = true
+
         // Create updated wallet
         let updatedWallet = SubAccount(
             id: wallet.id,
@@ -144,13 +151,16 @@ struct EditWalletSheet: View {
             colorHex: wallet.colorHex,
             isDefault: wallet.isDefault
         )
-        
+
         // Update through AccountManager
         accountManager.updateSubAccount(updatedWallet)
-        
+
         // Notify parent
         onWalletUpdated(updatedWallet)
-        
+
+        // Show changes saved toast
+        toastManager.showChangesSaved()
+
         print("💾 EditWalletSheet: Saved wallet name change from '\(wallet.name)' to '\(trimmedName)'")
     }
     

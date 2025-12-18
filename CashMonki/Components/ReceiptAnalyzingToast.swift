@@ -98,7 +98,7 @@ struct ReceiptAnalyzingToast: View {
             y: 24
         )
         .padding(.horizontal, 20)
-        .transition(.move(edge: .bottom).combined(with: .opacity))
+        .transition(.move(edge: .top))
     }
     
     // MARK: - Public Methods

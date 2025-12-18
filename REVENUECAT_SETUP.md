@@ -46,7 +46,7 @@ If you want to use real RevenueCat integration:
    - Add both products to the offering
 
 3. **Update Entitlements**:
-   - Create entitlement: `premium`
+   - Create entitlement: `cashmonki-subs`
    - Attach to both products
 
 ## 🧪 **Testing the Fix**

@@ -1,5 +1,5 @@
 {
-  "identifier" : "F4A8C1B0",
+  "identifier" : "6B3D8F2A-9C1E-4A7B-B5D3-F8E2C1A4B9D6",
   "nonRenewingSubscriptions" : [
 
   ],
@@ -7,6 +7,8 @@
 
   ],
   "settings" : {
+    "_applicationInternalID" : "6740553912",
+    "_developerTeamID" : "YOUR_TEAM_ID",
     "_failTransactionsEnabled" : false,
     "_locale" : "en_US",
     "_storefront" : "USA",
@@ -58,65 +60,81 @@
       }
     ]
   },
-  "subscriptions" : [
+  "subscriptionGroups" : [
     {
-      "adHocOffers" : [
-
-      ],
-      "codeOffers" : [
-
-      ],
-      "displayPrice" : "9.99",
-      "familyShareable" : false,
-      "groupNumber" : 1,
-      "internalID" : "6736123456",
-      "introductoryOffer" : null,
+      "id" : "21613073",
       "localizations" : [
-        {
-          "description" : "Get unlimited transactions, advanced analytics, and premium features",
-          "displayName" : "CashMonki Premium Monthly",
-          "locale" : "en_US"
-        }
-      ],
-      "productID" : "cashmonki_pro_monthly",
-      "recurringSubscriptionPeriod" : "P1M",
-      "referenceName" : "Premium Monthly",
-      "subscriptionGroupID" : "21835937",
-      "type" : "RecurringSubscription"
-    },
-    {
-      "adHocOffers" : [
 
       ],
-      "codeOffers" : [
-
-      ],
-      "displayPrice" : "99.99",
-      "familyShareable" : false,
-      "groupNumber" : 1,
-      "internalID" : "6736123457",
-      "introductoryOffer" : {
-        "displayPrice" : "0.00",
-        "internalID" : "20781234",
-        "paymentMode" : "free",
-        "subscriptionPeriod" : "P1W"
-      },
-      "localizations" : [
+      "name" : "CashMonki Pro",
+      "subscriptions" : [
         {
-          "description" : "Get unlimited transactions, advanced analytics, and premium features with annual savings",
-          "displayName" : "CashMonki Premium Annual",
-          "locale" : "en_US"
+          "adHocOffers" : [
+
+          ],
+          "codeOffers" : [
+
+          ],
+          "displayPrice" : "99.99",
+          "familyShareable" : false,
+          "groupNumber" : 1,
+          "internalID" : "yearly_cashmonki_pro",
+          "introductoryOffer" : {
+            "displayPrice" : "0",
+            "internalID" : "yearly_trial",
+            "numberOfPeriods" : 1,
+            "paymentMode" : "free",
+            "subscriptionPeriod" : "P1W"
+          },
+          "localizations" : [
+            {
+              "description" : "Full access to all CashMonki Pro features",
+              "displayName" : "CashMonki Pro Yearly",
+              "locale" : "en_US"
+            }
+          ],
+          "productID" : "yearly_cashmonki_pro",
+          "recurringSubscriptionPeriod" : "P1Y",
+          "referenceName" : "CashMonki Pro Yearly",
+          "subscriptionGroupID" : "21613073",
+          "type" : "RecurringSubscription"
+        },
+        {
+          "adHocOffers" : [
+
+          ],
+          "codeOffers" : [
+
+          ],
+          "displayPrice" : "9.99",
+          "familyShareable" : false,
+          "groupNumber" : 2,
+          "internalID" : "monthly_cashmonki_pro",
+          "introductoryOffer" : {
+            "displayPrice" : "0",
+            "internalID" : "monthly_trial",
+            "numberOfPeriods" : 1,
+            "paymentMode" : "free",
+            "subscriptionPeriod" : "P1W"
+          },
+          "localizations" : [
+            {
+              "description" : "Full access to all CashMonki Pro features",
+              "displayName" : "CashMonki Pro Monthly",
+              "locale" : "en_US"
+            }
+          ],
+          "productID" : "monthly_cashmonki_pro",
+          "recurringSubscriptionPeriod" : "P1M",
+          "referenceName" : "CashMonki Pro Monthly",
+          "subscriptionGroupID" : "21613073",
+          "type" : "RecurringSubscription"
         }
-      ],
-      "productID" : "cashmonki_pro_yearly",
-      "recurringSubscriptionPeriod" : "P1Y",
-      "referenceName" : "Premium Annual",
-      "subscriptionGroupID" : "21835937",
-      "type" : "RecurringSubscription"
+      ]
     }
   ],
   "version" : {
-    "major" : 4,
+    "major" : 3,
     "minor" : 0
   }
 }

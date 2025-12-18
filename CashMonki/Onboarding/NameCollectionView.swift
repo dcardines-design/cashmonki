@@ -58,11 +58,10 @@ struct NameCollectionView: View {
                     // Name Input Section
                     nameInputSection
                     
-                    Spacer(minLength: 100) // Space for bottom button
                 }
                 .padding(.horizontal, 20)
                 .padding(.top, 40)
-                .padding(.bottom, 120) // Space for fixed bottom button
+                .padding(.bottom, 40)
             }
             
             // Dynamic Progress Bar

@@ -110,16 +110,31 @@ class AIReceiptAnalyzer {
     func analyzeReceiptSecure(image: UIImage, creationTime: Date = Date()) async throws -> ReceiptAnalysis {
         print("🔒 Starting secure receipt analysis via backend...")
         print("📸 Image dimensions: \(image.size.width) x \(image.size.height)")
-        
-        // Resize image to reduce memory usage and API payload size
-        let resizedImage = resizeImageForAPI(image)
-        
-        guard let imageData = resizedImage.jpegData(compressionQuality: 0.8) else {
+
+        // Resize image more aggressively for backend (smaller = faster upload, less "message too long" errors)
+        let resizedImage = resizeImageForBackend(image)
+
+        // Use more aggressive compression for network transfer
+        // Start with 0.5 quality and reduce if still too large
+        var compressionQuality: CGFloat = 0.5
+        var imageData = resizedImage.jpegData(compressionQuality: compressionQuality)
+
+        // If image is still too large (>500KB), compress more aggressively
+        let maxSizeBytes = 500_000 // 500KB limit for reliable network transfer
+        while let data = imageData, data.count > maxSizeBytes, compressionQuality > 0.1 {
+            compressionQuality -= 0.1
+            imageData = resizedImage.jpegData(compressionQuality: compressionQuality)
+            print("📐 Reducing compression to \(compressionQuality): \(data.count) bytes")
+        }
+
+        guard let finalImageData = imageData else {
             throw ReceiptAIError.imageProcessingFailed
         }
-        
+
+        print("📦 Final image size: \(finalImageData.count) bytes (\(String(format: "%.1f", Double(finalImageData.count) / 1024))KB) at \(String(format: "%.0f", compressionQuality * 100))% quality")
+
         // Use secure backend service
-        let backendResult = try await backendService.analyzeReceipt(imageData: imageData)
+        let backendResult = try await backendService.analyzeReceipt(imageData: finalImageData)
         
         // Convert backend result to ReceiptAnalysis
         // Parse detected currency from backend or fallback to user's primary currency
@@ -496,27 +511,52 @@ class AIReceiptAnalyzer {
         )
     }
     
-    // Resize image to reduce memory usage and API payload size
+    // Resize image to reduce memory usage and API payload size (for legacy direct API)
     private func resizeImageForAPI(_ image: UIImage) -> UIImage {
         let maxDimension: CGFloat = 1024 // Reasonable size for API
         let size = image.size
-        
+
         // If image is already small enough, return as-is
         if size.width <= maxDimension && size.height <= maxDimension {
             return image
         }
-        
+
         // Calculate new size maintaining aspect ratio
         let ratio = min(maxDimension / size.width, maxDimension / size.height)
         let newSize = CGSize(width: size.width * ratio, height: size.height * ratio)
-        
+
         // Resize the image
         UIGraphicsBeginImageContextWithOptions(newSize, false, 1.0)
         image.draw(in: CGRect(origin: .zero, size: newSize))
         let resizedImage = UIGraphicsGetImageFromCurrentImageContext() ?? image
         UIGraphicsEndImageContext()
-        
+
         print("📐 Image resized from \(size) to \(newSize)")
+        return resizedImage
+    }
+
+    /// Resize image more aggressively for backend API (smaller to avoid "message too long" errors)
+    private func resizeImageForBackend(_ image: UIImage) -> UIImage {
+        let maxDimension: CGFloat = 800 // Smaller for reliable network transfer
+        let size = image.size
+
+        // If image is already small enough, return as-is
+        if size.width <= maxDimension && size.height <= maxDimension {
+            print("📐 Image already small enough: \(size)")
+            return image
+        }
+
+        // Calculate new size maintaining aspect ratio
+        let ratio = min(maxDimension / size.width, maxDimension / size.height)
+        let newSize = CGSize(width: size.width * ratio, height: size.height * ratio)
+
+        // Resize the image
+        UIGraphicsBeginImageContextWithOptions(newSize, false, 1.0)
+        image.draw(in: CGRect(origin: .zero, size: newSize))
+        let resizedImage = UIGraphicsGetImageFromCurrentImageContext() ?? image
+        UIGraphicsEndImageContext()
+
+        print("📐 Backend: Image resized from \(size) to \(newSize)")
         return resizedImage
     }
 }
