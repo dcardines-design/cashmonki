@@ -1312,7 +1312,12 @@ class CategoriesManager: ObservableObject {
         
         // Refresh transactions if type changed
         refreshTransactionsForCategoryTypeChange(categoryId: categoryId, oldType: oldType, newType: newType)
-        
+
+        // Update budget categoryName if name changed
+        if originalName != trimmedName {
+            updateBudgetCategoryName(categoryId: categoryId, newName: trimmedName)
+        }
+
         saveCategories()
         
         // Force immediate UI refresh for category changes
@@ -1484,20 +1489,27 @@ class CategoriesManager: ObservableObject {
             return false
         }
         
-        // Get the current subcategory to preserve its type
+        // Get the current subcategory to preserve its type and ID
         let currentSubcategory = categories[parentIndex].subcategories[subcategoryIndex]
-        
-        // Update the subcategory, preserving its type
+        let subcategoryId = currentSubcategory.id
+
+        // Update the subcategory, preserving its type and ID
         categories[parentIndex].subcategories[subcategoryIndex] = SubcategoryData(
+            id: subcategoryId,
             name: trimmedName,
             emoji: newEmoji,
             type: currentSubcategory.type // Preserve the existing type
         )
         categories[parentIndex].updatedAt = Date()
-        
+
+        // Update budget categoryName if name changed
+        if originalName != trimmedName {
+            updateBudgetCategoryName(categoryId: subcategoryId, newName: trimmedName)
+        }
+
         saveCategories()
         clearCategoryGroupCache()
-        
+
         print("✅ updateSubcategory: Successfully updated subcategory '\(originalName)' to '\(trimmedName)' under parent '\(parentCategory.name)'")
         self.objectWillChange.send()
         return true
@@ -1551,7 +1563,10 @@ class CategoriesManager: ObservableObject {
         print("🗑️ deleteCategory: About to call convertOrphanedTransactionsToNoCategory")
         print("🗑️ deleteCategory: categoryName='\(categoryName)', categoryId=\(categoryId.uuidString.prefix(8)), categoryType=\(categoryType)")
         convertOrphanedTransactionsToNoCategory(deletedCategoryName: categoryName, deletedCategoryId: categoryId, originalType: categoryType)
-        
+
+        // Convert affected budgets to "No Category"
+        convertOrphanedBudgetsToNoCategory(deletedCategoryId: categoryId, originalType: categoryType)
+
         // Invalidate category group cache after deleting category
         clearCategoryGroupCache()
         
@@ -1661,7 +1676,88 @@ class CategoriesManager: ObservableObject {
             self.objectWillChange.send()
         }
     }
-    
+
+    /// Convert budgets that reference deleted categories to "No Category"
+    private func convertOrphanedBudgetsToNoCategory(deletedCategoryId: UUID, originalType: CategoryType) {
+        print("🔄 ===== ORPHANED BUDGET CONVERSION START =====")
+        print("🔄 Deleted category ID: \(deletedCategoryId.uuidString.prefix(8))")
+        print("🔄 Original category type: \(originalType)")
+
+        let userManager = UserManager.shared
+        let allBudgets = userManager.currentUser.budgets
+
+        // Determine the appropriate "No Category" UUID based on original category type
+        let noCategoryId: UUID
+        let noCategoryName = "No Category"
+
+        switch originalType {
+        case .income:
+            noCategoryId = UUID(uuidString: "00000000-0000-0000-0000-000000000001")! // No Category (Income)
+        case .expense:
+            noCategoryId = UUID(uuidString: "00000000-0000-0000-0000-000000000002")! // No Category (Expense)
+        }
+
+        var updatedCount = 0
+
+        for budget in allBudgets {
+            if budget.categoryId == deletedCategoryId {
+                // Update budget to use "No Category"
+                let updatedBudget = Budget(
+                    id: budget.id,
+                    walletId: budget.walletId,
+                    categoryId: noCategoryId,
+                    categoryName: noCategoryName,
+                    amount: budget.amount,
+                    currency: budget.currency,
+                    period: budget.period,
+                    applyToAllPeriods: budget.applyToAllPeriods,
+                    isActive: budget.isActive
+                )
+                userManager.updateBudget(updatedBudget)
+                updatedCount += 1
+                print("   ✅ Updated budget to 'No Category'")
+            }
+        }
+
+        print("🔄 ===== ORPHANED BUDGET CONVERSION COMPLETE =====")
+        print("✅ Converted \(updatedCount) orphaned budgets to 'No Category'")
+    }
+
+    /// Update budget categoryName when a category is renamed
+    private func updateBudgetCategoryName(categoryId: UUID, newName: String) {
+        print("🔄 ===== BUDGET NAME UPDATE START =====")
+        print("🔄 Category ID: \(categoryId.uuidString.prefix(8))")
+        print("🔄 New name: '\(newName)'")
+
+        let userManager = UserManager.shared
+        let allBudgets = userManager.currentUser.budgets
+
+        var updatedCount = 0
+
+        for budget in allBudgets {
+            if budget.categoryId == categoryId && budget.categoryName != newName {
+                // Update budget with new category name
+                let updatedBudget = Budget(
+                    id: budget.id,
+                    walletId: budget.walletId,
+                    categoryId: budget.categoryId,
+                    categoryName: newName,
+                    amount: budget.amount,
+                    currency: budget.currency,
+                    period: budget.period,
+                    applyToAllPeriods: budget.applyToAllPeriods,
+                    isActive: budget.isActive
+                )
+                userManager.updateBudget(updatedBudget)
+                updatedCount += 1
+                print("   ✅ Updated budget name from '\(budget.categoryName)' to '\(newName)'")
+            }
+        }
+
+        print("🔄 ===== BUDGET NAME UPDATE COMPLETE =====")
+        print("✅ Updated \(updatedCount) budget(s) with new category name")
+    }
+
     /// Delete a specific subcategory and convert affected transactions to "No Category"
     func deleteSubcategory(subcategoryName: String, parentCategoryName: String) -> Bool {
         print("🗑️ deleteSubcategory: Starting deletion of subcategory '\(subcategoryName)' under '\(parentCategoryName)'")
@@ -1691,11 +1787,14 @@ class CategoriesManager: ObservableObject {
         
         // Convert affected transactions to "No Category"
         convertOrphanedTransactionsToNoCategory(deletedCategoryName: subcategoryName, deletedCategoryId: subcategoryId, originalType: subcategoryType)
-        
+
+        // Convert affected budgets to "No Category"
+        convertOrphanedBudgetsToNoCategory(deletedCategoryId: subcategoryId, originalType: subcategoryType)
+
         // Invalidate category group cache after deleting subcategory
         clearCategoryGroupCache()
-        
-        print("✅ Successfully deleted subcategory '\(subcategoryName)' and updated affected transactions")
+
+        print("✅ Successfully deleted subcategory '\(subcategoryName)' and updated affected transactions and budgets")
         objectWillChange.send()
         return true
     }
