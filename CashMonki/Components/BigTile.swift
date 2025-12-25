@@ -213,18 +213,34 @@ extension BigTile {
         onTap: @escaping () -> Void
     ) -> BigTile {
         let iconColor = if isLoading {
-            Color.secondary
+            AppColors.foregroundSecondary // Grey color when loading
         } else if assetName == "scan" || assetName == "upload-01" || assetName == "upload-cloud-01" || assetName == "upload-02" {
             Color(red: 0.329, green: 0.180, blue: 1.0) // Blue color for scan and upload icons
         } else {
             AppColors.primary
         }
         
-        let iconView = AnyView(
-            AppIcon(assetName: assetName, fallbackSystemName: fallbackSystemName)
-                .font(AppFonts.overusedGroteskSemiBold(size: 28))
-                .foregroundStyle(iconColor)
-        )
+        // Create icon view with consistent sizing for both asset images and SF Symbols
+        let iconView: AnyView
+        if UIImage(named: assetName) != nil {
+            // Asset image - use resizable with fixed frame
+            iconView = AnyView(
+                Image(assetName)
+                    .renderingMode(.template)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 32, height: 32)
+                    .foregroundStyle(iconColor)
+            )
+        } else {
+            // SF Symbol - use font for sizing
+            iconView = AnyView(
+                Image(systemName: fallbackSystemName)
+                    .font(.system(size: 28, weight: .medium))
+                    .frame(width: 32, height: 32)
+                    .foregroundStyle(iconColor)
+            )
+        }
         
         return BigTile(
             icon: iconView,

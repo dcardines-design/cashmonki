@@ -35,6 +35,10 @@ class RevenueCatManager: NSObject, ObservableObject {
     @Published var offerings: Offerings?
     @Published var isSubscriptionActive: Bool = false
 
+    // Debug flags for testing (always available for testing)
+    @Published var debugForceTrialLapsed: Bool = false
+    @Published var debugForceNewUser: Bool = false
+
     // MARK: - Configuration
 
     private var isConfigured: Bool = false
@@ -61,6 +65,12 @@ class RevenueCatManager: NSObject, ObservableObject {
 
     /// Check if user has used trial before but isn't currently subscribed
     var hasUsedTrialBefore: Bool {
+        // Debug override for testing trial-ended UI
+        if debugForceTrialLapsed { return true }
+
+        // Debug override for testing new user (no trial history)
+        if debugForceNewUser { return false }
+
         guard let customerInfo = customerInfo else { return false }
 
         // If currently subscribed, they're not a "lapsed" user
@@ -93,6 +103,11 @@ class RevenueCatManager: NSObject, ObservableObject {
         Task { @MainActor in
             await configureRevenueCat()
         }
+    }
+
+    /// Async configuration that can be awaited from background tasks
+    func configureAsync() async {
+        await configureRevenueCat()
     }
 
     private func configureRevenueCat() async {
@@ -151,18 +166,8 @@ class RevenueCatManager: NSObject, ObservableObject {
     }
 
     private func updateSubscriptionStatus(_ info: CustomerInfo) {
-        // Check for active entitlement
         let hasEntitlement = info.entitlements[entitlementID]?.isActive == true
         isSubscriptionActive = hasEntitlement
-
-        print("💰 RevenueCat: Subscription active: \(isSubscriptionActive)")
-
-        if !info.entitlements.active.isEmpty {
-            print("✅ Active entitlements:")
-            for (id, entitlement) in info.entitlements.active {
-                print("   - \(id): expires \(entitlement.expirationDate?.description ?? "never")")
-            }
-        }
     }
 
     // MARK: - Offerings
@@ -280,9 +285,8 @@ class RevenueCatManager: NSObject, ObservableObject {
         return isSubscriptionActive
     }
 
-    // MARK: - Debug Methods (for development only)
+    // MARK: - Debug Methods (always available for testing)
 
-    #if DEBUG
     /// Enable test premium features for debugging
     func enableTestPremium() {
         isSubscriptionActive = true
@@ -295,21 +299,26 @@ class RevenueCatManager: NSObject, ObservableObject {
         print("🧪 RevenueCat: Test premium disabled")
     }
 
-    /// Force lapsed trial state for testing (no-op in simplified version)
+    /// Force lapsed trial state for testing
     func forceDebugLapsedTrial() {
-        print("🧪 RevenueCat: Force lapsed trial (simplified - no effect)")
+        debugForceTrialLapsed = true
+        debugForceNewUser = false
+        print("🧪 RevenueCat: Force lapsed trial enabled")
     }
 
-    /// Force new user state for testing (no-op in simplified version)
+    /// Force new user state for testing (shows trial paywall)
     func forceDebugNewUser() {
-        print("🧪 RevenueCat: Force new user (simplified - no effect)")
+        debugForceNewUser = true
+        debugForceTrialLapsed = false
+        print("🧪 RevenueCat: Force new user enabled - will show trial paywall")
     }
 
-    /// Reset debug trial state (no-op in simplified version)
+    /// Reset debug trial state (back to real data)
     func resetDebugTrialState() {
-        print("🧪 RevenueCat: Reset trial state (simplified - no effect)")
+        debugForceTrialLapsed = false
+        debugForceNewUser = false
+        print("🧪 RevenueCat: Debug state reset - using real RevenueCat data")
     }
-    #endif
 }
 
 // MARK: - Purchases Delegate

@@ -19,15 +19,15 @@ struct GoalsOnboardingView: View {
     @State private var selectedGoals: Set<String> = []
     
     /// Check if current user is Gmail user
+    /// CURRENT: Always false in no-auth flow
     private var isGmailUser: Bool {
-        #if canImport(FirebaseAuth)
-        if let currentUser = Auth.auth().currentUser {
-            return currentUser.providerData.contains { $0.providerID == "google.com" }
-        }
+        // FUTURE: Uncomment when re-enabling authentication
+        // #if canImport(FirebaseAuth)
+        // if let currentUser = Auth.auth().currentUser {
+        //     return currentUser.providerData.contains { $0.providerID == "google.com" }
+        // }
+        // #endif
         return false
-        #else
-        return false
-        #endif
     }
     
     // Goal options matching the design
@@ -85,48 +85,29 @@ struct GoalsOnboardingView: View {
                 isGmailUser: isGmailUser
             )
             
-            // Fixed Bottom Button
+            // Fixed Bottom Button - "Skip" if no goals selected, "Continue" otherwise
             FixedBottomGroup.primary(
-                title: "Continue",
+                title: selectedGoals.isEmpty ? "Skip" : "Continue",
                 action: {
-                    guard !selectedGoals.isEmpty else { 
-                        print("🎯 GoalsOnboarding: ❌ Cannot proceed - no goals selected")
-                        return 
-                    }
-                    
-                    print("🎯 GoalsOnboarding: ======= GOAL SELECTION COMPLETED =======")
-                    print("🎯 GoalsOnboarding: User selected goals: \(Array(selectedGoals))")
-                    print("🎯 GoalsOnboarding: Timestamp: \(Date())")
-                    print("🎯 GoalsOnboarding: Thread: \(Thread.isMainThread ? "MAIN" : "BACKGROUND")")
-                    print("🎯 GoalsOnboarding: Saving goal completion to UserDefaults AND user profile...")
-                    
-                    // Save goals as comma-separated string and mark completion
                     let goalsString = Array(selectedGoals).joined(separator: ",")
+
+                    if selectedGoals.isEmpty {
+                        print("🎯 GoalsOnboarding: User skipped goal selection")
+                    } else {
+                        print("🎯 GoalsOnboarding: ======= GOAL SELECTION COMPLETED =======")
+                        print("🎯 GoalsOnboarding: User selected goals: \(Array(selectedGoals))")
+                    }
+
+                    // Save goals (empty string if skipped) and mark completion
                     UserDefaults.standard.set(goalsString, forKey: "selectedPrimaryGoals")
                     UserDefaults.standard.set(true, forKey: "hasCompletedGoalSelection")
-                    
-                    // Note: hasSetPrimaryCurrency should only be set when user actually confirms currency
-                    // This flag is properly set in CurrencyOnboardingView when user confirms selection
-                    print("🎯 GoalsOnboarding: Currency completion handled by CurrencyOnboardingView")
-                    
-                    // 🎯 SAVE TO USER PROFILE: Add goals to user's preferences
-                    print("🎯 GoalsOnboarding: Saving goals to user profile...")
+
+                    // Save to user profile
                     UserManager.shared.updateUserGoals(goalsString)
-                    print("🎯 GoalsOnboarding: ✅ Goals saved to user profile")
-                    
-                    // Verify the save
-                    let savedGoals = UserDefaults.standard.string(forKey: "selectedPrimaryGoals")
-                    let savedCompletion = UserDefaults.standard.bool(forKey: "hasCompletedGoalSelection")
-                    let userGoals = UserManager.shared.currentUser.goals
-                    print("🎯 GoalsOnboarding: ✅ Verification - Goals saved to UserDefaults: '\(savedGoals ?? "nil")'")
-                    print("🎯 GoalsOnboarding: ✅ Verification - Completion saved: \(savedCompletion)")
-                    print("🎯 GoalsOnboarding: ✅ Verification - Goals saved to user profile: '\(userGoals ?? "nil")'")
-                    print("🎯 GoalsOnboarding: 🚨 DEBUG: About to call onGoalSelected - this will trigger onboarding completion")
-                    print("🎯 GoalsOnboarding: 🚨 DEBUG: If onboarding sheet reappears, check ContentView validation after this point")
-                    
+                    print("🎯 GoalsOnboarding: ✅ Goals saved: '\(goalsString.isEmpty ? "(skipped)" : goalsString)'")
+
                     onGoalSelected(goalsString)
-                },
-                isEnabled: !selectedGoals.isEmpty
+                }
             )
         }
         .background(AppColors.backgroundWhite)
@@ -162,12 +143,12 @@ struct GoalsOnboardingView: View {
             Spacer()
             
             // Title
-            Text("Complete Setup")
+            Text("Get Started")
                 .font(AppFonts.overusedGroteskSemiBold(size: 17))
                 .foregroundColor(AppColors.foregroundPrimary)
-            
+
             Spacer()
-            
+
             // Invisible element for balance
             Rectangle()
                 .fill(Color.clear)
@@ -177,9 +158,9 @@ struct GoalsOnboardingView: View {
         .padding(.vertical, 16)
         .background(AppColors.backgroundWhite)
     }
-    
+
     // MARK: - Icon and Title Section
-    
+
     private var iconAndTitleSection: some View {
         VStack(spacing: 18) {
             // Target Icon

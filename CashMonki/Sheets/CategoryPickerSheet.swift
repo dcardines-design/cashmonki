@@ -12,12 +12,13 @@ struct CategoryPickerSheet: View {
     @Binding var selectedCategoryId: UUID?
     @Binding var isPresented: Bool
     let initialTab: CategoryTab?
+    let expenseOnly: Bool  // When true, hides income tab (for budgets)
     @State private var searchText = ""
     @State private var debouncedSearchText = ""
     @State private var showingEditCategories = false
     @State private var selectedTab: CategoryTab = .expense
     @ObservedObject private var categoriesManager = CategoriesManager.shared
-    
+
     // Track whether we're using ID-based or String-based selection
     private let useIdBasedSelection: Bool
     
@@ -78,24 +79,26 @@ struct CategoryPickerSheet: View {
         }
     }
     
-    init(selectedCategory: Binding<String>, isPresented: Binding<Bool>, initialTab: CategoryTab? = nil) {
+    init(selectedCategory: Binding<String>, isPresented: Binding<Bool>, initialTab: CategoryTab? = nil, expenseOnly: Bool = false) {
         self._selectedCategory = selectedCategory
         self._selectedCategoryId = .constant(nil)
         self._isPresented = isPresented
         self.initialTab = initialTab
+        self.expenseOnly = expenseOnly
         self.useIdBasedSelection = false
-        // Set smart default based on initialTab
-        self._selectedTab = State(initialValue: initialTab ?? .expense)
+        // Set smart default based on initialTab (expense only if expenseOnly mode)
+        self._selectedTab = State(initialValue: expenseOnly ? .expense : (initialTab ?? .expense))
     }
-    
-    init(selectedCategoryId: Binding<UUID?>, isPresented: Binding<Bool>, initialTab: CategoryTab? = nil) {
+
+    init(selectedCategoryId: Binding<UUID?>, isPresented: Binding<Bool>, initialTab: CategoryTab? = nil, expenseOnly: Bool = false) {
         self._selectedCategory = .constant("")
         self._selectedCategoryId = selectedCategoryId
         self._isPresented = isPresented
         self.initialTab = initialTab
+        self.expenseOnly = expenseOnly
         self.useIdBasedSelection = true
-        // Set smart default based on initialTab
-        self._selectedTab = State(initialValue: initialTab ?? .expense)
+        // Set smart default based on initialTab (expense only if expenseOnly mode)
+        self._selectedTab = State(initialValue: expenseOnly ? .expense : (initialTab ?? .expense))
     }
     
     enum CategoryTab {
@@ -310,20 +313,22 @@ struct CategoryPickerSheet: View {
                 .background(AppColors.backgroundWhite)
                 .fixedSize(horizontal: false, vertical: true)
             
-            // Income/Expense tabs
-            HStack(spacing: 8) {
-                TabChip.basic(title: "Income", isSelected: selectedTab == .income) {
-                    selectedTab = .income
-                    updateCachedGroups(searchText: searchText)
+            // Income/Expense tabs (hidden in expenseOnly mode for budgets)
+            if !expenseOnly {
+                HStack(spacing: 8) {
+                    TabChip.basic(title: "Income", isSelected: selectedTab == .income) {
+                        selectedTab = .income
+                        updateCachedGroups(searchText: searchText)
+                    }
+
+                    TabChip.basic(title: "Expense", isSelected: selectedTab == .expense) {
+                        selectedTab = .expense
+                        updateCachedGroups(searchText: searchText)
+                    }
                 }
-                
-                TabChip.basic(title: "Expense", isSelected: selectedTab == .expense) {
-                    selectedTab = .expense
-                    updateCachedGroups(searchText: searchText)
-                }
+                .padding(.horizontal, 20)
+                .padding(.bottom, 24)
             }
-            .padding(.horizontal, 20)
-            .padding(.bottom, 24)
             
             // Category list with loading state
             if isSearching && !searchText.isEmpty {
@@ -343,8 +348,8 @@ struct CategoryPickerSheet: View {
             } else {
                 ScrollView(showsIndicators: false) {
                     LazyVStack(spacing: 12) {
-                        // No Category option for transactions (only show when not searching)
-                        if searchText.isEmpty {
+                        // No Category option for transactions (only show when not searching and not in expenseOnly/budget mode)
+                        if searchText.isEmpty && !expenseOnly {
                             NoCategoryOption(
                                 tabType: selectedTab,
                                 isSelected: isNoCategorySelected,

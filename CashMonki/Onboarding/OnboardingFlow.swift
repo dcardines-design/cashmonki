@@ -24,7 +24,8 @@ struct OnboardingFlow: View {
     @State private var selectedCurrency: Currency = .php
     @State private var isNavigatingForward: Bool = true // Track navigation direction
     @State private var isDismissing: Bool = false // Track slide down dismissal
-    
+    @State private var showingPaywall: Bool = false // Show paywall at end of onboarding
+
     // State manager integration
     @ObservedObject private var onboardingStateManager = OnboardingStateManager.shared
     @EnvironmentObject private var toastManager: ToastManager
@@ -83,17 +84,24 @@ struct OnboardingFlow: View {
                 print("   - Email: '\(currentUser.email)'")
                 print("   - Firebase UID: '\(currentUser.firebaseUID)'")
                 
-                // Check if this is a Google sign-in
-                #if canImport(FirebaseAuth)
-                if let firebaseUser = Auth.auth().currentUser {
-                    let isGoogleSignIn = firebaseUser.providerData.contains { $0.providerID == "google.com" }
-                    print("   - Is Google sign-in: \(isGoogleSignIn)")
-                    print("   - Provider data: \(firebaseUser.providerData.map { $0.providerID })")
-                }
-                #endif
+                // FUTURE: Uncomment when re-enabling authentication
+                // #if canImport(FirebaseAuth)
+                // if let firebaseUser = Auth.auth().currentUser {
+                //     let isGoogleSignIn = firebaseUser.providerData.contains { $0.providerID == "google.com" }
+                //     print("   - Is Google sign-in: \(isGoogleSignIn)")
+                // }
+                // #endif
             }
             
             print("🎆 OnboardingFlow: ======= ONBOARDING FLOW READY =======")
+        }
+        .fullScreenCover(isPresented: $showingPaywall, onDismiss: {
+            // When paywall is dismissed, complete onboarding and show welcome
+            print("💰 OnboardingFlow: Paywall dismissed - finishing onboarding")
+            finishOnboardingAfterPaywall()
+        }) {
+            CustomPaywallSheet(isPresented: $showingPaywall)
+                .environmentObject(toastManager)
         }
     }
     
@@ -101,7 +109,11 @@ struct OnboardingFlow: View {
     private var currentStepView: some View {
         ZStack {
             switch currentStep {
+            // MARK: - FUTURE: Email confirmation step (commented out for no-auth flow)
             case .emailConfirmation:
+                // Currently skipped - uncomment when re-enabling authentication
+                EmptyView()
+                /*
                 if let email = userEmail {
                     EmailConfirmationViewContainer(
                         email: email,
@@ -111,20 +123,19 @@ struct OnboardingFlow: View {
                         onBack: onBack
                     )
                     .transition(.asymmetric(
-                        insertion: isNavigatingForward ? 
-                            .move(edge: .trailing).combined(with: .opacity) :  // Forward: slide in from right
-                            .move(edge: .leading).combined(with: .opacity),   // Back: slide in from left
-                        removal: isNavigatingForward ? 
-                            .move(edge: .leading).combined(with: .opacity) :   // Forward: slide out to left  
-                            .move(edge: .trailing).combined(with: .opacity)    // Back: slide out to right
+                        insertion: isNavigatingForward ?
+                            .move(edge: .trailing).combined(with: .opacity) :
+                            .move(edge: .leading).combined(with: .opacity),
+                        removal: isNavigatingForward ?
+                            .move(edge: .leading).combined(with: .opacity) :
+                            .move(edge: .trailing).combined(with: .opacity)
                     ))
                 } else {
-                    // No email provided - progressive gate system should have determined correct step
-                    // This case should not happen with proper unified gate validation
                     Text("Email confirmation step error - contact support")
                         .foregroundColor(.red)
                 }
-                
+                */
+
             case .nameCollection:
                 NameCollectionView(
                     isPresented: $isPresented,
@@ -154,13 +165,16 @@ struct OnboardingFlow: View {
                             currentStep = nextStep
                         }
                     },
-                    onBack: {
-                        print("⬅️ OnboardingFlow: Back from name collection to email confirmation")
-                        isNavigatingForward = false // Backward navigation
-                        withAnimation(.spring(response: 0.3, dampingFraction: 0.9, blendDuration: 0.05)) {
-                            currentStep = .emailConfirmation
-                        }
-                    },
+                    // CURRENT: No back button on first screen (name collection is now first)
+                    onBack: nil,
+                    // FUTURE: Uncomment when re-enabling email step
+                    // onBack: {
+                    //     print("⬅️ OnboardingFlow: Back from name collection to email confirmation")
+                    //     isNavigatingForward = false
+                    //     withAnimation(.spring(response: 0.3, dampingFraction: 0.9, blendDuration: 0.05)) {
+                    //         currentStep = .emailConfirmation
+                    //     }
+                    // },
                     isNewRegistration: isNewRegistration
                 )
                 .transition(.asymmetric(
@@ -434,28 +448,30 @@ struct OnboardingFlow: View {
         let hasValidLocalName = hasContent && (hasMultipleWords || isMeaningfulSingleName)
         print("🔍 OnboardingFlow: Local name validation: \(hasValidLocalName ? "✅" : "❌")")
         
-        // GOOGLE USER SUPPORT: Check Firebase displayName for step determination
+        // CURRENT: No-auth flow - skip Firebase displayName check
         var hasValidFirebaseName = false
+        // FUTURE: Uncomment when re-enabling authentication
+        /*
         #if canImport(FirebaseAuth)
         if let firebaseUser = Auth.auth().currentUser,
            let displayName = firebaseUser.displayName,
            !displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            
+
             let isGoogleSignIn = firebaseUser.providerData.contains { $0.providerID == "google.com" }
             let isAppleSignIn = firebaseUser.providerData.contains { $0.providerID == "apple.com" }
             let isSocialSignIn = isGoogleSignIn || isAppleSignIn
-            
+
             print("🔍 OnboardingFlow: Firebase user found:")
             print("   - Display name: '\(displayName)'")
             print("   - Is Google sign-in: \(isGoogleSignIn)")
             print("   - Is Apple sign-in: \(isAppleSignIn)")
             print("   - Is social sign-in: \(isSocialSignIn)")
-            
+
             if isSocialSignIn {
                 let firebaseNameComponents = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
                     .components(separatedBy: " ").filter { !$0.isEmpty }
                 hasValidFirebaseName = firebaseNameComponents.count >= 1 && firebaseNameComponents[0].count >= 1
-                
+
                 let signInType = isGoogleSignIn ? "Google" : "Apple"
                 print("🔍 OnboardingFlow: \(signInType) user Firebase name check:")
                 print("   - Firebase displayName: '\(displayName)' → \(hasValidFirebaseName ? "✅" : "❌")")
@@ -467,6 +483,7 @@ struct OnboardingFlow: View {
             print("🔍 OnboardingFlow: No Firebase user or displayName found")
         }
         #endif
+        */
         
         let finalResult = hasValidLocalName || hasValidFirebaseName
         
@@ -535,17 +552,24 @@ struct OnboardingFlow: View {
     }
     
     // Helper function to check if user's email is verified
+    /// CURRENT: Always true in no-auth flow
     private func checkEmailVerification() -> Bool {
+        // CURRENT: No-auth flow - always return true (email not required)
+        print("🔍 OnboardingFlow: No-auth flow - email verification bypassed")
+        return true
+
+        // FUTURE: Uncomment when re-enabling authentication
+        /*
         // Check persistent flag first (for app resume scenarios)
         let hasCompletedEmailVerification = UserDefaults.standard.bool(forKey: "hasCompletedEmailVerification")
-        
+
         #if canImport(FirebaseAuth)
         if let currentUser = Auth.auth().currentUser {
             let isVerified = currentUser.isEmailVerified
             let isGoogleSignIn = currentUser.providerData.contains { $0.providerID == "google.com" }
             let isAppleSignIn = currentUser.providerData.contains { $0.providerID == "apple.com" }
             let isSocialSignIn = isGoogleSignIn || isAppleSignIn
-            
+
             print("🔍 OnboardingFlow: Email verification status:")
             print("   - Firebase verified: \(isVerified)")
             print("   - Persistent flag: \(hasCompletedEmailVerification)")
@@ -553,14 +577,14 @@ struct OnboardingFlow: View {
             print("   - Apple sign-in: \(isAppleSignIn)")
             print("   - Social sign-in: \(isSocialSignIn)")
             print("   - Provider data: \(currentUser.providerData.map { $0.providerID })")
-            
+
             // ENHANCED: Social signups (Google/Apple) are typically auto-verified
             if isSocialSignIn {
                 let signInType = isGoogleSignIn ? "Google" : "Apple"
                 print("🔍 OnboardingFlow: \(signInType) sign-in detected - treating as verified")
                 return true
             }
-            
+
             // If either Firebase says verified OR we have persistent completion flag, consider verified
             let finalResult = isVerified || hasCompletedEmailVerification
             print("🔍 OnboardingFlow: Final verification result: \(finalResult)")
@@ -573,6 +597,7 @@ struct OnboardingFlow: View {
         print("🔍 OnboardingFlow: Firebase not available - simulating verified email")
         return true // Allow progression when Firebase isn't available
         #endif
+        */
     }
     
     /// Unified: Determine next step after name collection using progressive gates
@@ -660,40 +685,40 @@ struct OnboardingFlow: View {
         print("🏁 OnboardingFlow: ======= COMPLETING ONBOARDING =======")
         print("🏁 OnboardingFlow: Completing onboarding process...")
         print("🏁 OnboardingFlow: Called from thread: \(Thread.isMainThread ? "MAIN" : "BACKGROUND")")
-        
+
         // Clear active onboarding session flag
         UserDefaults.standard.set(false, forKey: "isActiveOnboardingSession")
         print("🏁 OnboardingFlow: Cleared active onboarding session flag")
         print("💰 OnboardingFlow: Final currency selection: \(selectedCurrency.rawValue) (\(selectedCurrency.displayName))")
-        
+
         // GOOGLE DEBUG: Check if this is called for Google users
         if let currentUser = AuthenticationManager.shared.currentUser {
             print("🏁 OnboardingFlow: GOOGLE DEBUG - Completing for user: '\(currentUser.name)' (\(currentUser.email))")
         }
-        
+
         // Save the selected currency to the user's account
         let userManager = UserManager.shared
         print("💰 OnboardingFlow: Updating primary currency in UserManager...")
         userManager.updatePrimaryCurrency(selectedCurrency)
-        
+
         // Sync with centralized currency preferences
         print("💰 OnboardingFlow: Syncing with CurrencyPreferences...")
         CurrencyPreferences.shared.setPrimaryCurrency(selectedCurrency)
-        
+
         // Also update rate manager to clear cached rates and initialize properly
         CurrencyRateManager.shared.setPrimaryCurrency(selectedCurrency)
-        
+
         // CRITICAL: Mark onboarding as complete in the state manager FIRST
         print("🎯 OnboardingFlow: Marking onboarding as complete in state manager...")
         onboardingStateManager.markAsComplete()
-        
+
         // Legacy flag support (the state manager also sets these, but we'll be explicit)
         print("💾 OnboardingFlow: Saving completion flags to UserDefaults...")
         UserDefaults.standard.set(true, forKey: "hasCompletedCurrencySelection")
         UserDefaults.standard.set(true, forKey: "hasCompletedOnboarding")
         UserDefaults.standard.set(true, forKey: "hasSetPrimaryCurrency")  // 🔧 CRITICAL FIX: Add missing flag
         print("💾 OnboardingFlow: Currency selection and onboarding completion saved to UserDefaults")
-        
+
         // Verify the flags were saved
         let currencyCompleted = UserDefaults.standard.bool(forKey: "hasCompletedCurrencySelection")
         let onboardingCompleted = UserDefaults.standard.bool(forKey: "hasCompletedOnboarding")
@@ -702,27 +727,46 @@ struct OnboardingFlow: View {
         print("💾 OnboardingFlow: Verification - Onboarding completed: \(onboardingCompleted)")
         print("💾 OnboardingFlow: Verification - Primary currency set: \(hasSetPrimary)")
         print("🎯 OnboardingFlow: State manager state: \(onboardingStateManager.currentState)")
-        
-        print("🎯 OnboardingFlow: Onboarding completed successfully!")
-        print("🎉 OnboardingFlow: Welcome to CashMonki!")
-        print("🏁 OnboardingFlow: ======= STARTING SLIDE DOWN DISMISSAL =======")
-        
-        // CRITICAL: Call completion IMMEDIATELY to show dashboard behind slide down
-        print("🏁 OnboardingFlow: ======= CALLING onComplete() BEFORE SLIDE DOWN =======")
-        
-        // GOOGLE DEBUG: Final step before calling main app callback
-        if let currentUser = AuthenticationManager.shared.currentUser {
-            print("🏁 OnboardingFlow: GOOGLE DEBUG - About to call onComplete() for: '\(currentUser.name)'")
-            print("🏁 OnboardingFlow: GOOGLE DEBUG - About to call onComplete callback")
-        }
-        
-        onComplete() // Dashboard appears immediately behind the slide down
-        
-        // Start slide down animation AFTER showing dashboard
+
+        print("🎯 OnboardingFlow: Onboarding data saved!")
+        print("💰 OnboardingFlow: ======= SHOWING TRIAL PAYWALL =======")
+
+        // Show paywall immediately - no delay!
+        showingPaywall = true
+    }
+
+    /// Called after paywall is dismissed to finish onboarding and show welcome
+    private func finishOnboardingAfterPaywall() {
+        print("🏁 OnboardingFlow: ======= FINISHING AFTER PAYWALL =======")
+
+        // Check if user subscribed
+        let isProUser = RevenueCatManager.shared.isProUser
+        print("🏁 OnboardingFlow: User is Pro: \(isProUser)")
+
+        // Call onComplete to dismiss onboarding and transition to main app
+        print("🏁 OnboardingFlow: Calling onComplete callback...")
+        onComplete()
+
+        // Start slide down animation
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
             print("🏁 OnboardingFlow: ======= STARTING SLIDE ANIMATION =======")
             withAnimation(.easeInOut(duration: 0.35)) {
                 isDismissing = true
+            }
+        }
+
+        // Show welcome toast after a brief delay (if user didn't subscribe, subscription toast is handled by notification)
+        if !isProUser {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                let userName = UserManager.shared.currentUser.name.trimmingCharacters(in: .whitespacesAndNewlines)
+                let firstName = userName.components(separatedBy: " ").first ?? ""
+
+                print("👋 OnboardingFlow: Showing welcome toast")
+                if firstName.isEmpty {
+                    toastManager.showWelcome()
+                } else {
+                    toastManager.showWelcome(firstName)
+                }
             }
         }
     }
@@ -766,18 +810,24 @@ struct OnboardingFlow: View {
     }
     
     /// Check if this user should see name collection step
+    /// CURRENT: Always true in no-auth flow
     private func shouldShowNameCollection() -> Bool {
+        // CURRENT: No-auth flow - always show name collection
+        return true
+
+        // FUTURE: Uncomment when re-enabling authentication
+        /*
         #if canImport(FirebaseAuth)
         // For social users (Google/Apple) with complete Firebase displayName, skip name collection
         if let currentUser = Auth.auth().currentUser,
            let displayName = currentUser.displayName, !displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             let components = displayName.components(separatedBy: " ")
             let hasValidFirebaseName = components.count >= 2 && components.allSatisfy { !$0.isEmpty }
-            
+
             let isGoogleSignIn = currentUser.providerData.contains { $0.providerID == "google.com" }
             let isAppleSignIn = currentUser.providerData.contains { $0.providerID == "apple.com" }
             let isSocialSignIn = isGoogleSignIn || isAppleSignIn
-            
+
             if hasValidFirebaseName && isSocialSignIn {
                 let signInType = isGoogleSignIn ? "Google" : "Apple"
                 print("🔍 OnboardingFlow: \(signInType) user with valid displayName - skipping name collection")
@@ -785,9 +835,10 @@ struct OnboardingFlow: View {
             }
         }
         #endif
-        
+
         // Regular users or social users without complete names need name collection
         return true
+        */
     }
 }
 

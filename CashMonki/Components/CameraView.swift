@@ -66,11 +66,25 @@ struct CameraView: View {
                 VStack(spacing: 20) {
                     // Capture button
                     Button {
+                        let captureButtonTapped = Date()
+                        // PERFORMANCE FIX: Dismiss camera IMMEDIATELY on tap
+                        // Don't wait for photo capture to complete
+                        print("🕐 DEBUG TIMING: ==== CAPTURE BUTTON TAPPED ====")
+                        print("🕐 DEBUG TIMING: Capture button tapped at \(captureButtonTapped)")
+                        print("📸 Camera: Dismissing camera immediately...")
+                        isPresented = false
+                        print("🕐 DEBUG TIMING: isPresented set to false in \(String(format: "%.3f", Date().timeIntervalSince(captureButtonTapped) * 1000))ms")
+
+                        // Capture photo in background after dismissal starts
                         cameraManager.capturePhoto { image in
+                            let captureComplete = Date()
+                            print("🕐 DEBUG TIMING: Photo capture complete, took \(String(format: "%.3f", captureComplete.timeIntervalSince(captureButtonTapped) * 1000))ms from button tap")
                             if let image = image {
-                                print("📸 Camera: Photo captured successfully with AVFoundation")
+                                print("📸 Camera: Photo captured successfully - Size: \(image.size)")
+                                print("🕐 DEBUG TIMING: Calling onPhotoTaken callback...")
+                                let callbackStart = Date()
                                 onPhotoTaken(image)
-                                isPresented = false
+                                print("🕐 DEBUG TIMING: onPhotoTaken callback returned in \(String(format: "%.3f", Date().timeIntervalSince(callbackStart) * 1000))ms")
                             }
                         }
                     } label: {
@@ -122,13 +136,18 @@ struct CameraView: View {
             }
         }
         .onDisappear {
-            print("📸 Camera: View disappearing, stopping session")
-            // Stop session on background thread to avoid blocking UI
-            DispatchQueue.global(qos: .userInitiated).async {
-                cameraManager.stopSession()
+            print("📸 Camera: View disappearing")
+            // DON'T stop session here - let capture complete first
+            // Session will be cleaned up when manager is deallocated
+            // Only stop if NOT currently capturing
+            if !cameraManager.isCapturing {
+                print("📸 Camera: Not capturing, stopping session")
+                DispatchQueue.global(qos: .userInitiated).async {
+                    cameraManager.stopSession()
+                }
+            } else {
+                print("📸 Camera: Still capturing, will stop after completion")
             }
-            
-            // Don't immediately cleanup - let the manager persist for potential retake
         }
     }
 }
@@ -187,28 +206,37 @@ class CameraManager: NSObject, ObservableObject {
     
     deinit {
         print("📸 Camera: CameraManager deinit - cleaning up session")
-        cleanupSession()
+        // Don't cleanup if still capturing - let capture complete first
+        if !isCapturing {
+            cleanupSession()
+        } else {
+            print("📸 Camera: Deinit while capturing - cleanup will happen after capture")
+        }
     }
-    
+
     func cleanupSession() {
         print("📸 Camera: Starting session cleanup (non-blocking)")
-        
+
+        // Don't clear completion handler if still capturing
+        if !isCapturing {
+            photoCompletionHandler = nil
+        }
+
         // Clear state immediately on main thread
         isConfigured = false
         isConfiguring = false
-        photoCompletionHandler = nil
-        
+
         // Move heavy cleanup to background thread - this prevents 9+ second delays
         DispatchQueue.global(qos: .utility).async { [session] in
             print("📸 Camera: Background cleanup starting...")
-            
+
             if session.isRunning {
                 session.stopRunning()
                 print("📸 Camera: Session stopped (background)")
             }
             session.inputs.forEach { session.removeInput($0) }
             session.outputs.forEach { session.removeOutput($0) }
-            
+
             print("📸 Camera: Session cleanup completed")
         }
     }
@@ -577,15 +605,13 @@ extension CameraManager: AVCapturePhotoCaptureDelegate {
     }
     
     func photoOutput(_ output: AVCapturePhotoOutput, didFinishProcessingPhoto photo: AVCapturePhoto, error: Error?) {
-        defer {
-            DispatchQueue.main.async { [weak self] in
-                self?.isCapturing = false
-            }
-        }
-        
+        // Capture completion handler EARLY to ensure it survives manager deallocation
+        let completionHandler = photoCompletionHandler
+
         if let error = error {
             print("📸 Camera: Photo capture error: \(error)")
-            
+            photoCompletionHandler = nil
+
             // Handle specific error types
             let nsError = error as NSError
             switch nsError.code {
@@ -602,40 +628,48 @@ extension CameraManager: AVCapturePhotoCaptureDelegate {
             default:
                 print("📸 Camera: Unhandled capture error code: \(nsError.code)")
             }
-            
+
             DispatchQueue.main.async { [weak self] in
-                self?.photoCompletionHandler?(nil)
-                self?.photoCompletionHandler = nil
+                self?.isCapturing = false
+                completionHandler?(nil)
+                self?.stopSession()
             }
             return
         }
-        
+
         guard let data = photo.fileDataRepresentation() else {
             print("📸 Camera: Failed to get photo data representation")
+            photoCompletionHandler = nil
             DispatchQueue.main.async { [weak self] in
-                self?.photoCompletionHandler?(nil)
-                self?.photoCompletionHandler = nil
+                self?.isCapturing = false
+                completionHandler?(nil)
+                self?.stopSession()
             }
             return
         }
-        
+
+        // Clear handler now that we've captured it
+        photoCompletionHandler = nil
+
         // PERFORMANCE FIX: Move expensive UIImage creation to background thread
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let image = UIImage(data: data) else {
                 print("📸 Camera: Failed to convert photo data to UIImage")
                 DispatchQueue.main.async {
-                    self?.photoCompletionHandler?(nil)
-                    self?.photoCompletionHandler = nil
+                    self?.isCapturing = false
+                    completionHandler?(nil)
+                    self?.stopSession()
                 }
                 return
             }
-            
+
             print("📸 Camera: Photo captured successfully - size: \(image.size)")
-            
+
             // Return image on main thread (already captured at optimal size)
             DispatchQueue.main.async {
-                self?.photoCompletionHandler?(image)
-                self?.photoCompletionHandler = nil
+                self?.isCapturing = false
+                completionHandler?(image)
+                self?.stopSession()
             }
         }
     }

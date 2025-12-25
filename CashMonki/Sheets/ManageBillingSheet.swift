@@ -49,25 +49,14 @@ struct ManageBillingSheet: View {
         
         let hasActiveSubscription = revenueCatManager.isProUser
         let hasUsedTrialBefore = revenueCatManager.hasUsedTrialBefore
-        
-        print("🔍 BILLING: Subscription state debug:")
-        print("   - Has active subscription: \(hasActiveSubscription)")
-        print("   - Has used trial before: \(hasUsedTrialBefore)")
-        print("   - Is trial active: \(isTrialActive)")
-        
-        // FIXED: Check trial status BEFORE general subscription status
+
         if isTrialActive {
-            print("✅ BILLING: State = trialActive")
             return .trialActive
         } else if hasActiveSubscription {
-            print("✅ BILLING: State = subscribedRegular")
             return .subscribedRegular
         } else if hasUsedTrialBefore {
-            // If they had trial before but no active subscription, they're lapsed
-            print("✅ BILLING: State = trialLapsed")
             return .trialLapsed
         } else {
-            print("✅ BILLING: State = freePlan")
             return .freePlan
         }
     }
@@ -169,40 +158,8 @@ struct ManageBillingSheet: View {
         }
         #endif
         
-        guard let subscription = currentSubscription else { 
-            print("🔍 BILLING: No current subscription found")
-            return false 
-        }
-        
-        // ENHANCED: Use RevenueCat's built-in trial detection
-        let isRevenueCatTrial = subscription.willRenew && subscription.periodType == .trial
-        
-        print("🔍 BILLING: Trial detection debug:")
-        print("   - Will renew: \(subscription.willRenew)")
-        print("   - Period type: \(subscription.periodType)")
-        print("   - Product ID: \(subscription.productIdentifier)")
-        print("   - Is trial period: \(isRevenueCatTrial)")
-        
-        if isRevenueCatTrial {
-            print("✅ BILLING: Active trial detected via RevenueCat")
-            return true
-        }
-        
-        // FALLBACK: Time-based trial detection (legacy support)
-        guard let originalPurchaseDate = subscription.originalPurchaseDate else { 
-            print("❌ BILLING: No original purchase date")
-            return false 
-        }
-        
-        let trialEndDate = Calendar.current.date(byAdding: .day, value: 7, to: originalPurchaseDate)
-        let isTimeBasedTrial = Date() < (trialEndDate ?? Date())
-        
-        print("🕐 BILLING: Time-based trial check:")
-        print("   - Purchase date: \(originalPurchaseDate)")
-        print("   - Trial end date: \(trialEndDate?.description ?? "nil")")
-        print("   - Is active: \(isTimeBasedTrial)")
-        
-        return isTimeBasedTrial
+        guard let subscription = currentSubscription else { return false }
+        return subscription.periodType == .trial
     }
     
     private var trialEndDate: String {
@@ -233,16 +190,8 @@ struct ManageBillingSheet: View {
             // Content
             ScrollView(showsIndicators: false) {
                 VStack(spacing: 0) {
-                    // Combined container with image and billing card
+                    // Billing card container
                     VStack(spacing: 0) {
-                        // Manage billing image - no top spacing
-                        Image("manage-billing-image")
-                            .resizable()
-                            .aspectRatio(contentMode: .fit)
-                            .frame(height: 68)
-                            .frame(maxWidth: .infinity)
-                            .clipped()
-                        
                         // Billing card section
                         VStack(alignment: .leading, spacing: 4) {
                             // Current Plan label
@@ -307,9 +256,9 @@ struct ManageBillingSheet: View {
                     }
                     .background(AppColors.backgroundWhite)
                     .cornerRadius(16)
-                    .clipShape(RoundedRectangle(cornerRadius: 16))
                     .padding(.horizontal, 20)
-                    
+                    .padding(.top, 16)
+
                     // Action Items - grouped together like settings buttons
                     VStack(spacing: 0) {
                         // Manage Subscription

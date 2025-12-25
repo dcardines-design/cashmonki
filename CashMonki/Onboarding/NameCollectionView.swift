@@ -17,32 +17,33 @@ struct NameCollectionView: View {
     let onBack: (() -> Void)?
     let isNewRegistration: Bool
     
-    @State private var firstName: String = ""
-    @State private var lastName: String = ""
-    @State private var isValid: Bool = false
+    @State private var name: String = ""
+    // FUTURE: Uncomment when re-enabling last name
+    // @State private var lastName: String = ""
     
     /// Check if current user is Gmail user
+    /// CURRENT: Always false in no-auth flow
     private var isGmailUser: Bool {
-        #if canImport(FirebaseAuth)
-        if let currentUser = Auth.auth().currentUser {
-            return currentUser.providerData.contains { $0.providerID == "google.com" }
-        }
+        // FUTURE: Uncomment when re-enabling authentication
+        // #if canImport(FirebaseAuth)
+        // if let currentUser = Auth.auth().currentUser {
+        //     return currentUser.providerData.contains { $0.providerID == "google.com" }
+        // }
+        // #endif
         return false
-        #else
-        return false
-        #endif
     }
     
-    private var fullName: String {
-        let trimmedFirst = firstName.trimmingCharacters(in: .whitespacesAndNewlines)
-        let trimmedLast = lastName.trimmingCharacters(in: .whitespacesAndNewlines)
-        
-        if trimmedLast.isEmpty {
-            return trimmedFirst
-        } else {
-            return "\(trimmedFirst) \(trimmedLast)"
-        }
+    private var trimmedName: String {
+        name.trimmingCharacters(in: .whitespacesAndNewlines)
     }
+
+    // FUTURE: Uncomment when re-enabling last name
+    // private var fullName: String {
+    //     let trimmedFirst = firstName.trimmingCharacters(in: .whitespacesAndNewlines)
+    //     let trimmedLast = lastName.trimmingCharacters(in: .whitespacesAndNewlines)
+    //     if trimmedLast.isEmpty { return trimmedFirst }
+    //     return "\(trimmedFirst) \(trimmedLast)"
+    // }
     
     var body: some View {
         VStack(spacing: 0) {
@@ -70,34 +71,37 @@ struct NameCollectionView: View {
                 isGmailUser: isGmailUser
             )
             
-            // Fixed Bottom Button
+            // Fixed Bottom Button - "Skip" if empty, "Continue" if name entered
             FixedBottomGroup.primary(
-                title: "Continue",
+                title: trimmedName.isEmpty ? "Skip" : "Continue",
                 action: {
-                    onNameCollected(fullName)
-                },
-                isEnabled: isValid
+                    // Mark name collection as complete (whether skipped or filled)
+                    UserDefaults.standard.set(true, forKey: "hasCompletedNameCollection")
+
+                    if trimmedName.isEmpty {
+                        print("👤 NameCollection: User skipped name entry - marking complete")
+                    } else {
+                        print("👤 NameCollection: User entered name '\(trimmedName)' - marking complete")
+                    }
+
+                    onNameCollected(trimmedName)
+                }
             )
         }
         .background(AppColors.backgroundWhite)
         .navigationBarHidden(true)
-        .onChange(of: firstName) { _, newValue in 
-            validateForm()
-            // Save first name immediately as user types
-            saveNameToUser(firstName: newValue, lastName: lastName)
-        }
-        .onChange(of: lastName) { _, newValue in 
-            validateForm() 
-            // Save last name immediately as user types
-            saveNameToUser(firstName: firstName, lastName: newValue)
+        .onChange(of: name) { _, newValue in
+            // Save name immediately as user types (if not empty)
+            let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty {
+                print("💾 NameCollection: Auto-saving name: '\(trimmed)'")
+                UserManager.shared.updateUserName(trimmed)
+            }
         }
         .onAppear {
             print("👤 NameCollection: View appeared")
-            
-            // Intelligent name pre-fill: Firebase display name > UserManager stored name > empty
+            // Load any previously saved name
             loadPersistedName()
-            
-            validateForm()
         }
     }
     
@@ -123,7 +127,7 @@ struct NameCollectionView: View {
             Spacer()
             
             // Title
-            Text(isNewRegistration ? "Create Account" : "Complete Setup")
+            Text("Get Started")
                 .font(AppFonts.overusedGroteskSemiBold(size: 17))
                 .foregroundColor(AppColors.foregroundPrimary)
             
@@ -158,14 +162,14 @@ struct NameCollectionView: View {
             
             // Title and Subtitle
             VStack(spacing: 6) {
-                Text("Heya! What's your name?")
+                Text("What should we call you?")
                     .font(
                         Font.custom("Overused Grotesk", size: 30)
                             .weight(.semibold)
                     )
                     .foregroundColor(AppColors.foregroundPrimary)
                     .multilineTextAlignment(.center)
-                
+
                 Text("Just so we're not strangers....")
                     .font(AppFonts.overusedGroteskMedium(size: 16))
                     .foregroundColor(AppColors.foregroundSecondary)
@@ -175,148 +179,42 @@ struct NameCollectionView: View {
     }
     
     // MARK: - Name Input Section
-    
+
     private var nameInputSection: some View {
         VStack(spacing: 16) {
-            // First Name
+            // Name (optional)
             CashMonkiDS.Input.text(
-                title: "First Name",
-                text: $firstName,
+                title: "Name (optional)",
+                text: $name,
                 placeholder: "John"
             )
-            
-            // Last Name
-            CashMonkiDS.Input.text(
-                title: "Last Name (Optional)",
-                text: $lastName,
-                placeholder: "Doe"
-            )
+
+            // FUTURE: Uncomment when re-enabling last name
+            // CashMonkiDS.Input.text(
+            //     title: "Last Name (Optional)",
+            //     text: $lastName,
+            //     placeholder: "Doe"
+            // )
         }
     }
     
     // MARK: - Helper Methods
-    
-    private func validateForm() {
-        let trimmedFirst = firstName.trimmingCharacters(in: .whitespacesAndNewlines)
-        // Only require first name - last name is optional
-        isValid = !trimmedFirst.isEmpty
-    }
-    
-    /// Immediately save name changes to UserManager as user types
-    private func saveNameToUser(firstName: String, lastName: String) {
-        let trimmedFirst = firstName.trimmingCharacters(in: .whitespacesAndNewlines)
-        let trimmedLast = lastName.trimmingCharacters(in: .whitespacesAndNewlines)
-        
-        let fullName: String
-        if trimmedLast.isEmpty {
-            fullName = trimmedFirst
-        } else {
-            fullName = "\(trimmedFirst) \(trimmedLast)"
-        }
-        
-        // Only update if we have a valid first name
-        if !trimmedFirst.isEmpty {
-            print("💾 NameCollection: Auto-saving name as user types: '\(fullName)'")
-            UserManager.shared.updateUserName(fullName)
-        }
-    }
-    
-    /// Intelligent name loading: Firebase display name (Google users) > UserManager stored name > empty
-    private func loadPersistedName() {
-        // First check if user is a Google sign-in user with Firebase display name
-        let prefillResult = attemptFirebaseDisplayNamePrefill()
-        
-        // If Firebase pre-fill didn't work, try loading from UserManager
-        if !prefillResult {
-            loadFromUserManager()
-        }
-        
-        print("👤 NameCollection: Final name state after loading:")
-        print("   - First name: '\(firstName)'")
-        print("   - Last name: '\(lastName)'")
-        print("   - Source: \(prefillResult ? "Firebase" : "UserManager/Empty")")
-    }
-    
-    /// Attempt to pre-fill with Firebase display name (Google users only)
-    /// Returns true if successfully pre-filled, false otherwise
-    private func attemptFirebaseDisplayNamePrefill() -> Bool {
-        #if canImport(FirebaseAuth)
-        guard let firebaseUser = Auth.auth().currentUser else {
-            print("👤 NameCollection: No Firebase user found")
-            return false
-        }
-        
-        // Check if user signed in with Google
-        let isGoogleSignIn = firebaseUser.providerData.contains { $0.providerID == "google.com" }
-        
-        print("👤 NameCollection: Authentication check:")
-        print("   - Provider data: \(firebaseUser.providerData.map { $0.providerID })")
-        print("   - Is Google sign-in: \(isGoogleSignIn)")
-        
-        // Only pre-fill for Google sign-in users with display name
-        if isGoogleSignIn,
-           let displayName = firebaseUser.displayName,
-           !displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            
-            let nameComponents = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
-                .components(separatedBy: " ").filter { !$0.isEmpty }
-            
-            if nameComponents.count >= 2 {
-                firstName = nameComponents[0]
-                lastName = nameComponents.dropFirst().joined(separator: " ")
-                
-                print("👤 NameCollection: Pre-filled from Firebase display name:")
-                print("   - First name: '\(firstName)'")
-                print("   - Last name: '\(lastName)'")
-                print("   - Full name: '\(displayName)'")
-                return true
-            } else if nameComponents.count == 1 {
-                firstName = nameComponents[0]
-                lastName = ""
-                
-                print("👤 NameCollection: Pre-filled single name from Firebase: '\(firstName)'")
-                return true
-            }
-        } else if isGoogleSignIn {
-            print("👤 NameCollection: Gmail user but no display name found")
-        } else {
-            print("👤 NameCollection: Email sign-in user")
-        }
-        #else
-        print("👤 NameCollection: Firebase not available")
-        #endif
-        
-        return false
-    }
-    
+
     /// Load name from UserManager if available
-    private func loadFromUserManager() {
-        let currentUserName = UserManager.shared.currentUser.name.trimmingCharacters(in: .whitespacesAndNewlines)
-        
-        if !currentUserName.isEmpty {
-            let nameComponents = currentUserName.components(separatedBy: " ").filter { !$0.isEmpty }
-            
-            if nameComponents.count >= 2 {
-                firstName = nameComponents[0]
-                lastName = nameComponents.dropFirst().joined(separator: " ")
-                
-                print("👤 NameCollection: Loaded from UserManager:")
-                print("   - First name: '\(firstName)'")
-                print("   - Last name: '\(lastName)'")
-                print("   - Full name: '\(currentUserName)'")
-            } else if nameComponents.count == 1 {
-                firstName = nameComponents[0]
-                lastName = ""
-                
-                print("👤 NameCollection: Loaded single name from UserManager: '\(firstName)'")
-            } else {
-                print("👤 NameCollection: UserManager name is empty - starting fresh")
-            }
+    private func loadPersistedName() {
+        let storedName = UserManager.shared.currentUser.name.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if !storedName.isEmpty {
+            name = storedName
+            print("👤 NameCollection: Loaded name from UserManager: '\(storedName)'")
         } else {
-            print("👤 NameCollection: No stored name in UserManager - starting fresh")
+            print("👤 NameCollection: No stored name - starting fresh")
         }
     }
-    
+
+    // FUTURE: Uncomment when re-enabling Firebase/Google sign-in prefill
+    // private func attemptFirebaseDisplayNamePrefill() -> Bool { ... }
+
 }
 
 // MARK: - Preview

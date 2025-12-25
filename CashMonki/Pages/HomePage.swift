@@ -12,9 +12,21 @@ import Combine
 import UIKit
 #endif
 
+// Identifiable wrapper for roast message (needed for .sheet(item:))
+struct RoastMessage: Identifiable {
+    let id = UUID()
+    let message: String
+}
+
 struct HomePage: View {
     @Binding var selectedTab: Tab
     @Binding var primaryCurrency: Currency
+
+    // Receipt confirmation state (now passed from ContentView for global availability)
+    @Binding var showingReceiptConfirmation: Bool
+    @Binding var pendingReceiptImage: UIImage?
+    @Binding var pendingReceiptAnalysis: ReceiptAnalysis?
+
     @ObservedObject internal var userManager = UserManager.shared
     @ObservedObject internal var accountManager = AccountManager.shared
     @ObservedObject internal var currencyPrefs = CurrencyPreferences.shared
@@ -44,14 +56,13 @@ struct HomePage: View {
         case scan
     }
     @State internal var receiptSuccessMessage: String?
-    @State internal var showingReceiptConfirmation: Bool = false
-    @State internal var pendingReceiptImage: UIImage?
-    @State internal var pendingReceiptAnalysis: ReceiptAnalysis?
     @State internal var showingReceiptDetail: Bool = false
     @State internal var selectedTransactionForDetail: Txn?
     @State internal var showingUsageLimitModal: Bool = false
     @State internal var showingCustomPaywall: Bool = false
-    
+
+    // Note: Roast feature state moved to ContentView for global availability
+
     // Performance optimization: Cache filtered transaction results
     @State internal var cachedCurrentPeriodTotal: Double = 0.0
     @State internal var cachedPreviousPeriodTotal: Double = 0.0
@@ -89,11 +100,20 @@ struct HomePage: View {
         var id: String { rawValue }
     }
 
-    var body: some View {
+    // MARK: - Main Content View
+    private var mainContentView: some View {
         scrollContent
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(AppColors.surfacePrimary)
             .modifier(modifiersWrapper)
+    }
+
+    var body: some View {
+        bodyWithSheets
+    }
+
+    private var bodyWithModifiers: some View {
+        mainContentView
             .onChange(of: accountManager.selectedSubAccountId) { [self] oldValue, newValue in
                 print("🏦 HomePage: Account selection changed - updating data")
                 print("🏦 HomePage: Old account: \(oldValue?.uuidString.prefix(8) ?? "nil")")
@@ -220,109 +240,35 @@ struct HomePage: View {
             .onChange(of: capturedImage) { _, newImage in
                 if let newImage = newImage {
                     let transitionStart = Date()
-                    print("🕐 HomePage: Camera to analysis transition started")
-                    
+                    print("🕐 DEBUG TIMING: ==== CAMERA TO ANALYSIS TRANSITION ====")
+                    print("🕐 DEBUG TIMING: onChange triggered at \(transitionStart)")
+
                     // Enhanced timing for analysis transition
                     if let captureTime = photoCaptureStartTime {
                         let transitionDuration = transitionStart.timeIntervalSince(captureTime)
-                        print("🕐 DEBUG: TRANSITION TIME: \(String(format: "%.3f", transitionDuration * 1000))ms")
-                        print("🚀 DEBUG: Transition from capture to sheet: \(String(format: "%.2f", transitionDuration))s")
+                        print("🕐 DEBUG TIMING: Time since photo capture: \(String(format: "%.3f", transitionDuration * 1000))ms")
                     }
-                    
+
                     print("✅ HomePage: Camera captured image, starting analysis...")
                     print("📸 HomePage: Image passed to analysis - Size: \(newImage.size)")
+
+                    // CRITICAL: Call analyzeReceiptImage which shows toast immediately
+                    let analyzeStart = Date()
                     analyzeReceiptImage(newImage, source: .scan)
-                    
+                    print("🕐 DEBUG TIMING: analyzeReceiptImage call returned in \(String(format: "%.3f", Date().timeIntervalSince(analyzeStart) * 1000))ms")
+
                     // Reset capture time and clear captured image to free memory
                     photoCaptureStartTime = nil
                     capturedImage = nil  // Clear after starting analysis
                     print("🧹 HomePage: Cleared capturedImage after analysis started")
-                    
-                    print("🕐 HomePage: Analysis started")
+                    print("🕐 DEBUG TIMING: Total transition handling took \(String(format: "%.3f", Date().timeIntervalSince(transitionStart) * 1000))ms")
                 }
             }
-            .sheet(isPresented: $showingReceiptConfirmation) {
-                if let pendingImage = pendingReceiptImage, let pendingAnalysis = pendingReceiptAnalysis {
-                    ReceiptConfirmationSheet(
-                        originalImage: pendingImage,
-                        analysis: pendingAnalysis,
-                        primaryCurrency: primaryCurrency,
-                        onConfirm: { confirmedAnalysis, note in
-                            print("✅ HomePage: Receipt confirmed, creating transaction")
-                            
-                            // Create transaction from confirmed analysis with currency conversion
-                            let categoryResult = CategoriesManager.shared.findCategoryOrSubcategory(by: confirmedAnalysis.category)
-                            let categoryId = categoryResult.category?.id ?? categoryResult.subcategory?.id
-                            
-                            // Determine if this is income based on category type
-                            let isIncome = categoryResult.category?.type == .income || categoryResult.subcategory?.type == .income
-                            
-                            let confirmedTransaction = rateManager.createTransaction(
-                                accountID: userManager.currentUser.id,
-                                walletID: accountManager.selectedSubAccountId,
-                                category: confirmedAnalysis.category,
-                                categoryId: categoryId,
-                                originalAmount: confirmedAnalysis.totalAmount,
-                                originalCurrency: confirmedAnalysis.currency,
-                                date: confirmedAnalysis.date,
-                                merchantName: confirmedAnalysis.merchantName,
-                                note: note,
-                                items: confirmedAnalysis.items,
-                                isIncome: isIncome,
-                                receiptImage: pendingReceiptImage
-                            )
-                            
-                            print("💫 HomePage: Created confirmed transaction with currency conversion:")
-                            print("   - Original: \(confirmedAnalysis.currency.symbol)\(confirmedAnalysis.totalAmount)")
-                            print("   - Converted: \(confirmedTransaction.primaryCurrency.symbol)\(abs(confirmedTransaction.amount))")
-                            print("   - Receipt image: \(confirmedTransaction.receiptImage != nil ? "✅ INCLUDED" : "❌ MISSING")")
-                            print("   - Has receipt flag: \(confirmedTransaction.hasReceiptImage)")
-                            print("   - pendingReceiptImage was: \(pendingReceiptImage != nil ? "✅ AVAILABLE" : "❌ NIL")")
-                            
-                            if let image = confirmedTransaction.receiptImage {
-                                print("   - Final transaction image size: \(image.size.width) x \(image.size.height)")
-                            }
-                            if let pendingImage = pendingReceiptImage {
-                                print("   - Pending image size was: \(pendingImage.size.width) x \(pendingImage.size.height)")
-                            }
-                            
-                            // Handle successful receipt confirmation
-                            userManager.addTransaction(confirmedTransaction)
-                            
-                            // Show success toast
-                            toastManager.showSuccess("Transaction added!")
-                            
-                            // Force UI refresh
-                            updateCachedTotalsIfNeeded()
-                            updateRecentTransactions()
-                            
-                            // Clear pending data (async to avoid SwiftUI warnings)
-                            DispatchQueue.main.async {
-                                pendingReceiptImage = nil
-                                pendingReceiptAnalysis = nil
-                                showingReceiptConfirmation = false
-                            }
-                            
-                            // Show success message with merchant name and amount
-                            receiptSuccessMessage = "Receipt saved! \(confirmedAnalysis.merchantName) - \(currencyPrefs.formatPrimaryAmount(confirmedTransaction.amount))"
-                            
-                            // Clear success message after 3 seconds
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
-                                receiptSuccessMessage = nil
-                            }
-                        },
-                        onCancel: {
-                            DispatchQueue.main.async {
-                                pendingReceiptImage = nil
-                                pendingReceiptAnalysis = nil
-                                showingReceiptConfirmation = false
-                            }
-                        }
-                    )
-                    .presentationDetents([.fraction(0.98)])
-                    .presentationDragIndicator(.hidden)
-                }
-            }
+    }
+
+    private var bodyWithSheets: some View {
+        bodyWithModifiers
+            // Note: Receipt confirmation sheet is now in ContentView for global availability
             .sheet(item: $selectedTransactionForDetail) { transaction in
                 ReceiptDetailSheet(
                     transaction: transaction,
@@ -346,6 +292,7 @@ struct HomePage: View {
             .fullScreenCover(isPresented: $showingCustomPaywall) {
                 CustomPaywallSheet(isPresented: $showingCustomPaywall)
             }
+            // Note: Roast sheet moved to ContentView for global availability
             // TODO: Add toast functionality back when toast extension is available
             // .toast(message: receiptSuccessMessage, isShowing: .constant(receiptSuccessMessage != nil), duration: 3)
             // .toast(message: receiptAnalysisError, isShowing: .constant(receiptAnalysisError != nil), duration: 5)

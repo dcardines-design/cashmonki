@@ -1410,6 +1410,7 @@ struct UserData: Identifiable, Codable {
     var email: String
     var transactions: [Txn] // User's transactions (income/expenses)
     var accounts: [AccountData] // Multiple businesses/wallets
+    var budgets: [Budget] // User's budgets per category/wallet
     let createdAt: Date
     var updatedAt: Date
     
@@ -1426,6 +1427,7 @@ struct UserData: Identifiable, Codable {
         email: String,
         transactions: [Txn] = [],
         accounts: [AccountData] = [],
+        budgets: [Budget] = [],
         createdAt: Date = Date(),
         updatedAt: Date = Date(),
         goals: String? = nil,
@@ -1437,6 +1439,7 @@ struct UserData: Identifiable, Codable {
         self.email = email
         self.transactions = transactions
         self.accounts = accounts
+        self.budgets = budgets
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.goals = goals
@@ -1538,7 +1541,7 @@ struct UserData: Identifiable, Codable {
     // MARK: - Custom Codable Implementation
     
     enum CodingKeys: String, CodingKey {
-        case id, name, email, accounts, createdAt, updatedAt, goals, onboardingCompleted, enableFirebaseSync
+        case id, name, email, accounts, budgets, createdAt, updatedAt, goals, onboardingCompleted, enableFirebaseSync
         // Note: transactions excluded because Txn contains UIImage which isn't Codable
     }
     
@@ -1555,6 +1558,8 @@ struct UserData: Identifiable, Codable {
         onboardingCompleted = try container.decodeIfPresent(Int.self, forKey: .onboardingCompleted) ?? 0
         // Default to true for backward compatibility with existing users
         enableFirebaseSync = try container.decodeIfPresent(Bool.self, forKey: .enableFirebaseSync) ?? true
+        // Backward compatibility - budgets may not exist in older data
+        budgets = try container.decodeIfPresent([Budget].self, forKey: .budgets) ?? []
         transactions = [] // Initialize empty, will be loaded separately
     }
     
@@ -1569,6 +1574,7 @@ struct UserData: Identifiable, Codable {
         try container.encodeIfPresent(goals, forKey: .goals)
         try container.encode(onboardingCompleted, forKey: .onboardingCompleted)
         try container.encode(enableFirebaseSync, forKey: .enableFirebaseSync)
+        try container.encode(budgets, forKey: .budgets)
         // Note: transactions not encoded due to UIImage
     }
 }
@@ -1623,6 +1629,82 @@ enum AccountType: String, CaseIterable, Codable {
         case .investment: return "chart.line.uptrend.xyaxis"
         case .wallet: return "wallet.fill"
         case .creditCard: return "creditcard.fill"
+        }
+    }
+}
+
+// MARK: - Budget Data Model
+
+/// Budget for tracking spending limits per category
+struct Budget: Identifiable, Codable, Equatable {
+    let id: UUID
+    let walletId: UUID            // Per-wallet scope (required)
+    let categoryId: UUID          // Parent category only
+    let categoryName: String      // Denormalized for display
+
+    let amount: Double            // Budget limit (e.g., 500)
+    let currency: Currency        // Budget currency (e.g., PHP)
+
+    let period: BudgetPeriod      // The period user sets (daily, weekly, etc.)
+    let applyToAllPeriods: Bool   // If true, budget shows in all period tabs (converted). If false, only shows in its own period tab.
+
+    var isActive: Bool
+    let createdAt: Date
+    var updatedAt: Date
+
+    init(
+        id: UUID = UUID(),
+        walletId: UUID,
+        categoryId: UUID,
+        categoryName: String,
+        amount: Double,
+        currency: Currency,
+        period: BudgetPeriod,
+        applyToAllPeriods: Bool = true,
+        isActive: Bool = true,
+        createdAt: Date = Date(),
+        updatedAt: Date = Date()
+    ) {
+        self.id = id
+        self.walletId = walletId
+        self.categoryId = categoryId
+        self.categoryName = categoryName
+        self.amount = amount
+        self.currency = currency
+        self.period = period
+        self.applyToAllPeriods = applyToAllPeriods
+        self.isActive = isActive
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+    }
+}
+
+/// Budget time period options
+enum BudgetPeriod: String, Codable, CaseIterable {
+    case daily
+    case weekly
+    case monthly
+    case quarterly
+    case yearly
+
+    var displayName: String {
+        switch self {
+        case .daily: return "Daily"
+        case .weekly: return "Weekly"
+        case .monthly: return "Monthly"
+        case .quarterly: return "Quarterly"
+        case .yearly: return "Yearly"
+        }
+    }
+
+    /// Short abbreviation for compact display
+    var shortName: String {
+        switch self {
+        case .daily: return "day"
+        case .weekly: return "week"
+        case .monthly: return "month"
+        case .quarterly: return "quarter"
+        case .yearly: return "year"
         }
     }
 }

@@ -203,25 +203,13 @@ struct OnboardingTransactionSheet: View {
     // MARK: - Action Handlers (same logic as HomePage)
     
     private func handleUploadAction() {
-        // Check daily usage limit before proceeding
-        guard dailyUsageManager.canUseReceiptAnalysis() else {
-            print("📊 OnboardingTransactionSheet: Upload blocked - daily limit reached")
-            showingUsageLimitModal = true
-            return
-        }
-        
+        // No daily limit check during onboarding - let users experience the app
         currentPhotoSource = .upload
         isDirectPhotoPickerPresented = true
     }
-    
+
     private func handleScanAction() {
-        // Check daily usage limit before proceeding
-        guard dailyUsageManager.canUseReceiptAnalysis() else {
-            print("📊 OnboardingTransactionSheet: Scan blocked - daily limit reached")
-            showingUsageLimitModal = true
-            return
-        }
-        
+        // No daily limit check during onboarding - let users experience the app
         currentPhotoSource = .camera
         isCameraPresented = true
     }
@@ -356,7 +344,7 @@ struct OnboardingTransactionSheet: View {
             Spacer()
             
             // Title
-            Text("Complete Setup")
+            Text("Get Started")
                 .font(AppFonts.overusedGroteskSemiBold(size: 17))
                 .foregroundColor(AppColors.foregroundPrimary)
             

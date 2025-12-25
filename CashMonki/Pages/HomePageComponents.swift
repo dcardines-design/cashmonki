@@ -115,9 +115,9 @@ extension HomePage {
     internal var actionTiles: some View {
         HStack(alignment: .top, spacing: 10) {
             BigTile.icon(
-                assetName: (isAnalyzingReceipt && originalTileClicked == .upload) ? "clock" : "upload-01",
-                fallbackSystemName: (isAnalyzingReceipt && originalTileClicked == .upload) ? "clock" : "square.and.arrow.up",
-                title: (isAnalyzingReceipt && originalTileClicked == .upload) ? "Analyzing..." : "Upload",
+                assetName: (isAnalyzingReceipt && originalTileClicked == .upload) ? "clock-refresh" : "upload-01",
+                fallbackSystemName: (isAnalyzingReceipt && originalTileClicked == .upload) ? "clock.arrow.circlepath" : "square.and.arrow.up",
+                title: (isAnalyzingReceipt && originalTileClicked == .upload) ? "..." : "Upload",
                 isLoading: isAnalyzingReceipt && originalTileClicked == .upload,
                 usageLimitText: RevenueCatManager.shared.isProUser ? nil : dailyUsageManager.getUsageDisplayText()
             ) {
@@ -136,9 +136,9 @@ extension HomePage {
             }
             
             BigTile.icon(
-                assetName: (isAnalyzingReceipt && originalTileClicked == .scan) ? "clock" : "scan",
-                fallbackSystemName: (isAnalyzingReceipt && originalTileClicked == .scan) ? "clock" : "camera",
-                title: (isAnalyzingReceipt && originalTileClicked == .scan) ? "Analyzing..." : "Scan",
+                assetName: (isAnalyzingReceipt && originalTileClicked == .scan) ? "clock-refresh" : "scan",
+                fallbackSystemName: (isAnalyzingReceipt && originalTileClicked == .scan) ? "clock.arrow.circlepath" : "camera",
+                title: (isAnalyzingReceipt && originalTileClicked == .scan) ? "..." : "Scan",
                 isLoading: isAnalyzingReceipt && originalTileClicked == .scan,
                 usageLimitText: RevenueCatManager.shared.isProUser ? nil : dailyUsageManager.getUsageDisplayText()
             ) {

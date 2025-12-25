@@ -64,17 +64,21 @@ extension OnboardingProgressBar {
         isGmailUser: Bool
     ) -> (current: Int, total: Int, percentage: Double) {
         
-        // Define steps based on user type
-        var userSteps: [OnboardingStep] = [.emailConfirmation]
-        
-        // Always include name collection step if we're currently on it, 
-        // or for non-Gmail users, or Gmail users without complete names
-        if currentStep == .nameCollection || !isGmailUser || shouldShowNameForGmailUser() {
-            userSteps.append(.nameCollection)
-        }
-        
-        // Add remaining steps
-        userSteps.append(contentsOf: [.currencySelection, .goalSelection, .transactionAddition])
+        // CURRENT: No-auth flow - 4 steps only (email step removed)
+        // Steps: Name → Currency → Goals → Transaction
+        let userSteps: [OnboardingStep] = [
+            .nameCollection,
+            .currencySelection,
+            .goalSelection,
+            .transactionAddition
+        ]
+
+        // FUTURE: Auth flow - uncomment when re-enabling email verification
+        // var userSteps: [OnboardingStep] = [.emailConfirmation]
+        // if currentStep == .nameCollection || !isGmailUser || shouldShowNameForGmailUser() {
+        //     userSteps.append(.nameCollection)
+        // }
+        // userSteps.append(contentsOf: [.currencySelection, .goalSelection, .transactionAddition])
         
         // Find current position
         guard let currentIndex = userSteps.firstIndex(of: currentStep) else {
@@ -97,18 +101,18 @@ extension OnboardingProgressBar {
     }
     
     /// Check if Gmail user needs name collection
+    /// CURRENT: Always true in no-auth flow
     private static func shouldShowNameForGmailUser() -> Bool {
-        #if canImport(FirebaseAuth)
-        guard let currentUser = Auth.auth().currentUser,
-              let displayName = currentUser.displayName else {
-            return true // No displayName, need name collection
-        }
-        
-        let components = displayName.components(separatedBy: " ")
-        return components.count < 2 || components.contains { $0.isEmpty }
-        #else
+        // FUTURE: Uncomment when re-enabling authentication
+        // #if canImport(FirebaseAuth)
+        // guard let currentUser = Auth.auth().currentUser,
+        //       let displayName = currentUser.displayName else {
+        //     return true
+        // }
+        // let components = displayName.components(separatedBy: " ")
+        // return components.count < 2 || components.contains { $0.isEmpty }
+        // #endif
         return true
-        #endif
     }
 }
 

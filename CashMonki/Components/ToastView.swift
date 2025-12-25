@@ -13,12 +13,55 @@ struct ToastView: View {
     let type: ToastType
     @Binding var isShowing: Bool
     let showFailedOverlay: Bool
+    let scanningBlurb: String  // Random blurb passed in for scanning toasts
     @State private var animationOpacity: Double = 1.0
-    
+
+    // 20 random blurbs shown during receipt analysis (Deadpool energy)
+    static let analyzingBlurbs = [
+        "Oh, this is gonna be good... 👀",
+        "Your wallet called. It's crying. 👀",
+        "No judgment. Okay, some judgment. 👀",
+        "What do we have here... 👀",
+        "Bold purchases. Questionable timing. 👀",
+        "Your bank account just flinched. 👀",
+        "Interesting strategy there... 👀",
+        "Seen worse. Not by much though. 👀",
+        "Ah yes, the classic 'treat yourself' purchase. 👀",
+        "Someone likes to live dangerously. 👀",
+        "Your future self is typing a strongly worded letter. 👀",
+        "Doing some light financial stalking... 👀",
+        "This is going to be interesting... 👀",
+        "Calculating the damage... 👀",
+        "Your money had a good run. 👀",
+        "Reading between the line items... 👀",
+        "Someone's been busy... 👀",
+        "So many questions here... 👀",
+        "Brb, alerting your accountant. 👀",
+        "Well well well... 👀"
+    ]
+
+    // Convenience initializer without scanningBlurb (for non-scanning toasts)
+    init(message: String, type: ToastType, isShowing: Binding<Bool>, showFailedOverlay: Bool) {
+        self.message = message
+        self.type = type
+        self._isShowing = isShowing
+        self.showFailedOverlay = showFailedOverlay
+        self.scanningBlurb = ToastView.analyzingBlurbs.randomElement() ?? "Oh, this is gonna be good..."
+    }
+
+    // Full initializer with explicit scanningBlurb
+    init(message: String, type: ToastType, isShowing: Binding<Bool>, showFailedOverlay: Bool, scanningBlurb: String) {
+        self.message = message
+        self.type = type
+        self._isShowing = isShowing
+        self.showFailedOverlay = showFailedOverlay
+        self.scanningBlurb = scanningBlurb
+    }
+
     private var subtitleText: String {
         switch type {
         case .scanning:
-            return "Maybe judging your coffee habit 👀"
+            return scanningBlurb
         case .done:
             return "All scanned and sorted ✨"
         case .failed:
@@ -35,6 +78,8 @@ struct ToastView: View {
             return "" // No subtitle for deleted toast
         case .welcome:
             return "" // No subtitle for welcome toast
+        case .trialEnded:
+            return "" // No subtitle for trial ended toast
         case .noConnection:
             return "" // No subtitle for no connection toast
         }
@@ -50,6 +95,7 @@ struct ToastView: View {
         case subscriptionError
         case deleted
         case welcome
+        case trialEnded
         case noConnection
         
         var animationName: String {
@@ -72,11 +118,13 @@ struct ToastView: View {
                 return "toast-deleted" // Use deleted Lottie animation
             case .welcome:
                 return "toast-wave" // Use wave animation for welcome
+            case .trialEnded:
+                return "toast-wave" // Use wave animation for trial ended
             case .noConnection:
                 return "toast-no-connection" // Use no-connection JSON animation
             }
         }
-        
+
         var animationFileName: String {
             switch self {
             case .scanning:
@@ -97,11 +145,13 @@ struct ToastView: View {
                 return "toast-deleted" // Use deleted Lottie animation
             case .welcome:
                 return "toast-wave" // Use wave animation for welcome
+            case .trialEnded:
+                return "toast-wave" // Use wave animation for trial ended
             case .noConnection:
                 return "toast-no-connection" // Use no-connection JSON animation
             }
         }
-        
+
         var loopMode: LottieLoopMode {
             switch self {
             case .welcome:
@@ -136,12 +186,14 @@ struct ToastView: View {
                 return "deleted"
             case .welcome:
                 return "welcome"
+            case .trialEnded:
+                return "trialEnded"
             case .noConnection:
                 return "noConnection"
             }
         }
     }
-    
+
     var body: some View {
         ZStack {
         HStack(alignment: .top, spacing: 0) {
@@ -264,6 +316,7 @@ class ToastManager: ObservableObject {
         var type: ToastView.ToastType
         var isShowing: Bool = true
         var showFailedOverlay: Bool = false
+        var scanningBlurb: String = ToastView.analyzingBlurbs.randomElement() ?? "Oh, this is gonna be good..."
     }
     
     func show(_ message: String, type: ToastView.ToastType) {
@@ -298,6 +351,9 @@ class ToastManager: ObservableObject {
     
     func showScanning(_ message: String = "Crunching the numbers...") {
         show(message, type: .scanning)
+        if let blurb = currentToast?.scanningBlurb {
+            print("🎲 Random blurb selected: \"\(blurb)\"")
+        }
     }
     
     func showDone(_ message: String = "Done analyzing!") {
@@ -385,14 +441,49 @@ class ToastManager: ObservableObject {
         print("🎉 ToastManager: About to call show() with .welcome type...")
         show(message, type: .welcome)
         print("🎉 ToastManager: ✅ Called show() successfully!")
-        
+
         // Auto-dismiss after 2.5 seconds (1 second longer than transaction added toast)
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
             print("🎉 ToastManager: Auto-dismissing welcome toast after 2.5 seconds")
             self.dismiss()
         }
     }
-    
+
+    /// Show welcome toast without a name (uses wave animation)
+    func showWelcome() {
+        print("🎉 ToastManager: ======= WELCOME TOAST (NO NAME) CALLED =======")
+        let message = "Welcome to Cashmonki!"
+        print("🎉 ToastManager: Welcome message: '\(message)'")
+        show(message, type: .welcome)
+        print("🎉 ToastManager: ✅ Called show() successfully!")
+
+        // Auto-dismiss after 2.5 seconds
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
+            print("🎉 ToastManager: Auto-dismissing welcome toast after 2.5 seconds")
+            self.dismiss()
+        }
+    }
+
+    /// Show subscription expired toast (uses wave animation)
+    func showSubscriptionExpired() {
+        print("⏰ ToastManager: ======= SUBSCRIPTION EXPIRED TOAST CALLED =======")
+        let message = "Sad to see you go!"
+        print("⏰ ToastManager: Subscription expired message: '\(message)'")
+        show(message, type: .trialEnded)
+        print("⏰ ToastManager: ✅ Called show() successfully!")
+
+        // Auto-dismiss after 1.5 seconds
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+            print("⏰ ToastManager: Auto-dismissing subscription expired toast after 1.5 seconds")
+            self.dismiss()
+        }
+    }
+
+    /// Legacy alias for showSubscriptionExpired
+    func showTrialEnded() {
+        showSubscriptionExpired()
+    }
+
     func showSubscriptionSuccess() {
         print("🎯 ToastManager: ======= SUBSCRIPTION SUCCESS TOAST =======")
         show("Welcome to Cashmonki Pro!", type: .subscriptionSuccess)
@@ -720,7 +811,8 @@ struct WindowToastView: View {
                         get: { toast.isShowing },
                         set: { _ in toastManager.dismiss() }
                     ),
-                    showFailedOverlay: toast.showFailedOverlay
+                    showFailedOverlay: toast.showFailedOverlay,
+                    scanningBlurb: toast.scanningBlurb
                 )
                 .allowsHitTesting(true)
                 .padding(.top, safeAreaTop + 8)
@@ -782,7 +874,8 @@ struct ToastOverlay: ViewModifier {
                             get: { toast.isShowing },
                             set: { _ in toastManager.dismiss() }
                         ),
-                        showFailedOverlay: toast.showFailedOverlay
+                        showFailedOverlay: toast.showFailedOverlay,
+                        scanningBlurb: toast.scanningBlurb
                     )
                     .onAppear {
                         print("🍞 UI: ToastView appeared on screen!")

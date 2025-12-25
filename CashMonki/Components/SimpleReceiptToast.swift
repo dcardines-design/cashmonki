@@ -10,11 +10,36 @@ import SwiftUI
 struct SimpleReceiptToast: View {
     @Binding var isShowing: Bool
     @State private var analysisState: AnalysisState = .analyzing
-    
+    @State private var randomBlurb: String = SimpleReceiptToast.analyzingBlurbs.randomElement() ?? "Oh, this is gonna be good..."
+
+    // 20 random blurbs shown during receipt analysis (Deadpool energy)
+    private static let analyzingBlurbs = [
+        "Oh, this is gonna be good...",
+        "Your wallet called. It's crying.",
+        "No judgment. Okay, some judgment.",
+        "What do we have here... 👀",
+        "Bold purchases. Questionable timing.",
+        "Your bank account just flinched.",
+        "Interesting strategy there...",
+        "Seen worse. Not by much though.",
+        "Ah yes, the classic 'treat yourself' purchase.",
+        "Someone likes to live dangerously.",
+        "Your future self is typing a strongly worded letter.",
+        "Doing some light financial stalking...",
+        "This is going to be interesting...",
+        "Calculating the damage...",
+        "Your money had a good run.",
+        "Reading between the line items...",
+        "Someone's been busy...",
+        "So many questions here...",
+        "Brb, alerting your accountant.",
+        "Well well well..."
+    ]
+
     enum AnalysisState {
         case analyzing
         case done
-        
+
         var title: String {
             switch self {
             case .analyzing:
@@ -23,16 +48,7 @@ struct SimpleReceiptToast: View {
                 return "Done analyzing!"
             }
         }
-        
-        var subtitle: String {
-            switch self {
-            case .analyzing:
-                return "Maybe judging your coffee habit 👀"
-            case .done:
-                return "All scanned and sorted ✨"
-            }
-        }
-        
+
         var iconSystemName: String {
             switch self {
             case .analyzing:
@@ -40,6 +56,15 @@ struct SimpleReceiptToast: View {
             case .done:
                 return "checkmark.circle.fill"
             }
+        }
+    }
+
+    var subtitle: String {
+        switch analysisState {
+        case .analyzing:
+            return randomBlurb
+        case .done:
+            return "All scanned and sorted ✨"
         }
     }
     
@@ -76,7 +101,7 @@ struct SimpleReceiptToast: View {
                     .frame(maxWidth: .infinity, alignment: .topLeading)
                     .lineLimit(1)
                 
-                Text(analysisState.subtitle)
+                Text(subtitle)
                     .font(
                         Font.custom("Overused Grotesk", size: 14)
                             .weight(.medium)

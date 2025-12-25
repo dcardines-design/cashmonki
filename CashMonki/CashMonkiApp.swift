@@ -22,6 +22,7 @@ struct CashMonkiApp: App {
     @State private var showingOnboarding = false
     @State private var isNewUser = false
     @State private var showingWelcome = true
+    // Note: showingPaywallAfterOnboarding removed - paywall now shown directly from OnboardingFlow
     @StateObject private var authManager = AuthenticationManager.shared
     @StateObject private var toastManager = ToastManager()
     
@@ -55,63 +56,66 @@ struct CashMonkiApp: App {
                 // Only show main content after welcome screen is dismissed
                 if !showingWelcome {
                     Group {
+                        // CURRENT: No-auth flow - use showingOnboarding as primary control
+                        // ContentView is always the base, onboarding shows as fullScreenCover
+                        ContentView()
+                            .environmentObject(toastManager)
+                            .preferredColorScheme(.light)
+                            .fullScreenCover(isPresented: $showingOnboarding) {
+                                OnboardingFlow(
+                                    isPresented: $showingOnboarding,
+                                    onComplete: {
+                                        print("🎉 CashMonkiApp: ======= ONBOARDING COMPLETION CALLBACK =======")
+                                        // Paywall is now shown directly from OnboardingFlow
+                                        // Just dismiss onboarding - welcome toast is also handled by OnboardingFlow
+                                        showingOnboarding = false
+                                        isNewUser = false
+                                        print("✅ CashMonkiApp: Onboarding dismissed")
+                                    },
+                                    onBack: nil, // No back button needed - no login to go back to
+                                    userEmail: nil, // No email yet - collected during onboarding
+                                    isNewRegistration: true, // Treat all first-time users as new
+                                    forceStartStep: nil
+                                )
+                                .environmentObject(toastManager)
+                            }
+                            // Note: Paywall after onboarding is now shown directly from OnboardingFlow
+                            // This eliminates the 2-second delay between onboarding and paywall
+                            .onAppear {
+                                // Check if onboarding needs to be shown
+                                if !OnboardingStateManager.shared.isOnboardingComplete() {
+                                    showingOnboarding = true
+                                }
+                            }
+
+                        // MARK: - FUTURE: Auth-first flow (commented out for future use)
+                        /*
                         if authManager.isAuthenticated {
                             if showingOnboarding {
                                 OnboardingFlow(
                                     isPresented: $showingOnboarding,
                                     onComplete: {
                                         print("🎉 CashMonkiApp: ======= ONBOARDING COMPLETION CALLBACK =======")
-                                        print("🎉 CashMonkiApp: BEFORE completion - isNewRegistration: \(authManager.isNewRegistration)")
-                                        print("🎉 CashMonkiApp: BEFORE completion - showingOnboarding: \(showingOnboarding)")
-                                        print("🎉 CashMonkiApp: BEFORE completion - isNewUser: \(isNewUser)")
-                                        
                                         showingOnboarding = false
                                         isNewUser = false
-                                        
-                                        // CRITICAL FIX: Reset isNewRegistration flag to prevent flag clearing on next launch
                                         authManager.isNewRegistration = false
-                                        
-                                        print("🎉 CashMonkiApp: AFTER completion - isNewRegistration: \(authManager.isNewRegistration)")
-                                        print("🎉 CashMonkiApp: AFTER completion - showingOnboarding: \(showingOnboarding)")
-                                        print("🎉 CashMonkiApp: AFTER completion - isNewUser: \(isNewUser)")
-                                        print("🔄 CashMonkiApp: Reset authManager.isNewRegistration to false after onboarding completion")
-                                        
-                                        // Show welcome toast with user's first name (SINGLE TIME ONLY)
+
+                                        // Show welcome toast with user's first name
                                         if let currentUser = authManager.currentUser {
                                             let firstName = currentUser.name.components(separatedBy: " ").first ?? "there"
-                                            print("🎉 CashMonkiApp: ======= NEW USER ONBOARDING COMPLETION =======")
-                                            print("🎉 CashMonkiApp: Onboarding completed, preparing welcome toast for: \(firstName)")
-                                            print("🎉 CashMonkiApp: Current user name: '\(currentUser.name)'")
-                                            print("🎉 CashMonkiApp: Current user email: '\(currentUser.email)'")
-                                            print("🎉 CashMonkiApp: Extracted firstName: '\(firstName)'")
-                                            
-                                            // Check if we already showed welcome toast for this session
                                             let hasShownWelcomeKey = "hasShownWelcomeToast_\(currentUser.firebaseUID)"
                                             if !UserDefaults.standard.bool(forKey: hasShownWelcomeKey) {
-                                                // Mark as shown BEFORE posting to prevent duplicates
                                                 UserDefaults.standard.set(true, forKey: hasShownWelcomeKey)
-                                                
-                                                // Post notification with delay to allow ContentView to initialize properly
                                                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-                                                    print("🎉 CashMonkiApp: ======= POSTING WELCOME TOAST NOTIFICATION (DELAYED) =======")
-                                                    print("🎉 CashMonkiApp: Posting welcome toast notification for: \(firstName)")
-                                                    print("🎉 CashMonkiApp: Notification name: 'ShowWelcomeToast'")
-                                                    print("🎉 CashMonkiApp: Notification object: '\(firstName)'")
                                                     NotificationCenter.default.post(
                                                         name: NSNotification.Name("ShowWelcomeToast"),
                                                         object: firstName
                                                     )
-                                                    print("🎉 CashMonkiApp: ✅ Welcome toast notification posted successfully!")
                                                 }
-                                            } else {
-                                                print("🎉 CashMonkiApp: ⏭️ Welcome toast already shown for this user session - skipping")
                                             }
-                                        } else {
-                                            print("🎉 CashMonkiApp: ❌ No current user found - cannot show welcome toast")
                                         }
                                     },
                                     onBack: {
-                                        // Go back to login by logging out
                                         authManager.logout()
                                         showingOnboarding = false
                                         isNewUser = false
@@ -124,17 +128,13 @@ struct CashMonkiApp: App {
                             } else {
                                 ContentView()
                                     .environmentObject(toastManager)
-                                    .preferredColorScheme(.light) // Force light mode - never change colors for dark mode
+                                    .preferredColorScheme(.light)
                             }
                         } else {
                             AuthenticationView()
-                                .preferredColorScheme(.light) // Force light mode - never change colors for dark mode
-                                .onAppear {
-                                    print("🔐 CashMonkiApp: Showing AuthenticationView - login first approach")
-                                    print("🔐 CashMonkiApp: User authenticated: \(authManager.isAuthenticated)")
-                                    print("👤 CashMonkiApp: Current user: \(authManager.currentUser?.email ?? "none")")
-                                }
+                                .preferredColorScheme(.light)
                         }
+                        */
                     }
                     .transition(.opacity)
                 }
@@ -186,12 +186,17 @@ struct CashMonkiApp: App {
                     // Switch to persistent storage asynchronously after startup
                     DispatchQueue.global(qos: .background).async {
                         let persistentContainer = createPersistentModelContainer()
-                        
+
                         DispatchQueue.main.async {
                             sharedModelContainer = persistentContainer
                         }
                     }
-                    
+
+                    // Pre-initialize RevenueCat early so offerings are ready by the time paywall is needed
+                    // This runs during welcome screen, giving plenty of time to load
+                    print("💰 CashMonkiApp: Pre-initializing RevenueCat during welcome screen...")
+                    initializeRevenueCat()
+
                     // Debug: Check if custom fonts are loaded
                     #if DEBUG
                     AppFonts.debugAvailableFonts()
@@ -199,12 +204,12 @@ struct CashMonkiApp: App {
                 }
                 .onChange(of: showingWelcome) { oldValue, newValue in
                     print("🎬 CashMonkiApp: Welcome screen state changed from \(oldValue) to \(newValue)")
-                    
-                    // Initialize Firebase and RevenueCat after welcome screen is dismissed
+
+                    // Initialize Firebase after welcome screen is dismissed
+                    // Note: RevenueCat is pre-initialized in onAppear for faster loading
                     if !newValue && oldValue {
-                        print("🔥 CashMonkiApp: Welcome screen dismissed - initializing services...")
+                        print("🔥 CashMonkiApp: Welcome screen dismissed - initializing Firebase...")
                         initializeFirebase()
-                        initializeRevenueCat()
                     }
                 }
                 .onChange(of: authManager.isAuthenticated) { oldValue, isAuthenticated in
@@ -374,9 +379,12 @@ struct CashMonkiApp: App {
     // MARK: - RevenueCat Initialization
 
     private func initializeRevenueCat() {
-        print("💰 CashMonkiApp: Initializing RevenueCat...")
-        RevenueCatManager.shared.configure()
-        print("✅ CashMonkiApp: RevenueCat initialized")
+        print("💰 CashMonkiApp: Initializing RevenueCat in background...")
+        // Fire-and-forget - don't block the UI
+        Task.detached(priority: .utility) {
+            await RevenueCatManager.shared.configureAsync()
+            print("✅ CashMonkiApp: RevenueCat initialization complete (background)")
+        }
     }
     
     // MARK: - Onboarding State Management

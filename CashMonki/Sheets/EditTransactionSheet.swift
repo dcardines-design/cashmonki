@@ -122,19 +122,19 @@ struct EditTransactionSheet: View {
                     ), onCurrencyTap: {
                         showingCurrencyPicker = true
                     }, size: .md, focusBinding: $isAmountFocused)
-                    
-                    // Merchant field
-                    AppInputField.merchant(text: $merchant, size: .md, focusBinding: $isMerchantFocused)
-                    
-                    // Date field with Time using AppInputField
-                    AppInputField.date(title: "Date", dateValue: $selectedDate, components: [.date, .hourAndMinute], size: .md)
-                    
+
                     // Category field using AppInputField
                     AppInputField.categoryById(
-                        selectedCategoryId: $selectedCategoryId, 
+                        selectedCategoryId: $selectedCategoryId,
                         size: .md,
                         transactionAmount: Double(amount.replacingOccurrences(of: ",", with: "")) ?? 0
                     )
+
+                    // Date field with Time using AppInputField
+                    AppInputField.date(title: "Date", dateValue: $selectedDate, components: [.date, .hourAndMinute], size: .md)
+
+                    // Merchant field
+                    AppInputField.merchant(text: $merchant, size: .md, focusBinding: $isMerchantFocused)
                     
                     // Note field
                     AppInputField.text(title: "Note", text: $note, placeholder: "Add note...", size: .md, focusBinding: $isNoteFocused)

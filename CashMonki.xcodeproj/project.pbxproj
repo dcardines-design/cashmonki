@@ -46,12 +46,14 @@
 			membershipExceptions = (
 				"File Assets/cashmonki pro text trial ended.png",
 				"File Assets/cashmonki pro text.png",
+				"File Assets/clock-refresh.svg",
 				"File Assets/feature usage card image.svg",
 				"File Assets/home-line.svg",
+				"File Assets/horizontal-bar-chart-03.svg",
 				"File Assets/manage billing image.svg",
 				"File Assets/paywall bg.jpg",
+				"File Assets/plus.svg",
 				"File Assets/receipt-check.svg",
-				"File Assets/roast.json",
 				"File Assets/user-02.svg",
 				"GoogleService-Info.plist",
 			);
@@ -62,12 +64,14 @@
 			membershipExceptions = (
 				"File Assets/cashmonki pro text trial ended.png",
 				"File Assets/cashmonki pro text.png",
+				"File Assets/clock-refresh.svg",
 				"File Assets/feature usage card image.svg",
 				"File Assets/home-line.svg",
+				"File Assets/horizontal-bar-chart-03.svg",
 				"File Assets/manage billing image.svg",
 				"File Assets/paywall bg.jpg",
+				"File Assets/plus.svg",
 				"File Assets/receipt-check.svg",
-				"File Assets/roast.json",
 				"File Assets/user-02.svg",
 				"GoogleService-Info.plist",
 			);

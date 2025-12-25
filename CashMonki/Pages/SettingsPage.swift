@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import StoreKit
 #if canImport(FirebaseAuth)
 import FirebaseAuth
 #endif
@@ -20,6 +21,7 @@ import RevenueCatUI
 
 struct SettingsPage: View {
     @Binding var primaryCurrency: Currency
+    @Binding var selectedTab: Tab
     // COMMENTED OUT: Language picker (localization not yet implemented)
     // @State private var selectedLanguage: Language = .english
     // @State private var showingLanguagePicker = false
@@ -78,7 +80,8 @@ struct SettingsPage: View {
     @State private var showingLogoutConfirmation = false
 
     // Delete account state
-    @State private var showingDeleteAccountConfirmation = false
+    @State private var showingDeleteAccountSheet = false
+    @State private var deleteConfirmationText = ""
     @State private var isDeletingAccount = false
     @State private var accountDeletionError: String?
     @State private var showingReauthenticationAlert = false
@@ -94,11 +97,11 @@ struct SettingsPage: View {
     
     // Currency change confirmation state
     @State private var showingCurrencyChangeConfirmation = false
+    @State private var showingSupportOptions = false
     @State private var pendingCurrencyChange: Currency?
     
-    // Roast My Receipt feature toggle
-    @State private var isRoastReceiptEnabled = false
-    @State private var showingRoastReceiptSheet = false
+    // Roast My Receipt feature toggle (shared via AppStorage)
+    @AppStorage("isRoastReceiptEnabled") private var isRoastReceiptEnabled = false
     
     // Computed bindings to fix type checker issues
     private var primaryCurrencyBinding: Binding<Currency> {
@@ -142,8 +145,8 @@ struct SettingsPage: View {
                 .blur(radius: 25)
                 .ignoresSafeArea()
                 .allowsHitTesting(false)
-                .opacity(showingRoastReceiptSheet ? 1 : 0)
-                .animation(.easeOut(duration: 0.3), value: showingRoastReceiptSheet)
+                .opacity(0)
+                .animation(.easeOut(duration: 0.3), value: false)
         }
     }
     
@@ -185,19 +188,30 @@ struct SettingsPage: View {
                 .presentationDetents([.fraction(0.98)])
                 .presentationDragIndicator(.hidden)
             }
-            .sheet(isPresented: $showingRoastReceiptSheet) {
-                RoastReceiptSheet(isPresented: $showingRoastReceiptSheet)
-                .presentationDetents([.fraction(0.7)])
-                .presentationDragIndicator(.hidden)
-                .presentationCornerRadius(50)
-                .presentationBackground(.clear)
-                .presentationBackgroundInteraction(.disabled)
-            }
-            .onChange(of: showingRoastReceiptSheet) { oldValue, newValue in
-                if !newValue && isRoastReceiptEnabled {
-                    // Turn off toggle when sheet is dismissed
-                    isRoastReceiptEnabled = false
+            .alert("Delete Everything?", isPresented: $showingDeleteAccountSheet) {
+                TextField("Type DELETE to confirm", text: $deleteConfirmationText)
+                    .autocapitalization(.allCharacters)
+                Button("Cancel", role: .cancel) {
+                    deleteConfirmationText = ""
                 }
+                Button("Delete", role: .destructive) {
+                    if deleteConfirmationText.uppercased() == "DELETE" {
+                        deleteConfirmationText = ""
+                        deleteAccount()
+                    }
+                }
+                .disabled(deleteConfirmationText.uppercased() != "DELETE")
+            } message: {
+                Text("This will permanently delete all your data. Type DELETE to confirm.\n\nNote: This does not cancel your subscription. To cancel, go to Settings → Manage Billing → Manage Subscription.")
+            }
+            .confirmationDialog("Customer Support", isPresented: $showingSupportOptions, titleVisibility: .visible) {
+                Button("Send Email") {
+                    openSupportEmail()
+                }
+                Button("Chat in X (Twitter)") {
+                    openTwitterSupport()
+                }
+                Button("Cancel", role: .cancel) { }
             }
             .fullScreenCover(isPresented: $showingCustomPaywall) {
                 CustomPaywallSheet(isPresented: $showingCustomPaywall)
@@ -553,11 +567,9 @@ struct SettingsPage: View {
         contentWithAlerts
             .appAlert(
                 title: "Delete Account",
-                isPresented: $showingDeleteAccountConfirmation,
-                message: "Are you sure you want to permanently delete your account? This will delete all your data including transactions, categories, and settings. This action cannot be undone.",
-                primaryAction: .destructive("Delete Account") {
-                    deleteAccount()
-                }
+                isPresented: .constant(false), // Disabled - using sheet instead
+                message: "",
+                primaryAction: .destructive("Delete Account") { }
             )
             .appAlert(
                 title: "Delete All Transactions",
@@ -668,22 +680,19 @@ struct SettingsPage: View {
                 Circle()
                     .fill(AppColors.blue500)
                     .frame(width: 120, height: 120)
-                
+
                 Text(getUserInitials())
                     .font(.custom("OverusedGrotesk-SemiBold", size: 50))
                     .foregroundColor(.white)
             }
-            
-            // User Info
-            VStack(spacing: 4) {
-                Text(userManager.currentUser.name)
-                    .font(AppFonts.overusedGroteskSemiBold(size: 24))
-                    .foregroundColor(AppColors.foregroundPrimary)
-                
-                Text(userManager.currentUser.email)
-                    .font(AppFonts.overusedGroteskMedium(size: 16))
-                    .foregroundColor(AppColors.foregroundSecondary)
-            }
+
+            // User Name (or "CashMonki User" if empty)
+            let userName = userManager.currentUser.name.trimmingCharacters(in: .whitespacesAndNewlines)
+            Text(userName.isEmpty ? "Cashmonki User" : userName)
+                .font(AppFonts.overusedGroteskSemiBold(size: 24))
+                .foregroundColor(AppColors.foregroundPrimary)
+
+            // Email hidden - no auth in current flow
         }
         .padding(.top, 40)
         .padding(.bottom, 20)
@@ -693,9 +702,10 @@ struct SettingsPage: View {
     
     private var settingsMainSections: some View {
         VStack(alignment: .leading, spacing: 24) {
-            accountSection
-            featureUsageSection
+            // HIDDEN: Account section commented out for now
+            // accountSection
             preferencesSection
+            featureUsageSection
         }
     }
     
@@ -706,19 +716,24 @@ struct SettingsPage: View {
             supportSection
             legalSection
 
+            // Debug section only visible in debug builds
+            #if DEBUG
+            debugSection
+            #endif
+
             // Footer
             VStack(spacing: 8) {
                 Text("Made with ☕️ & ♥️ by")
                     .font(Font.custom("Overused Grotesk", size: 14).weight(.medium))
                     .foregroundColor(AppColors.foregroundSecondary)
-                
+
                 Text("Rosebud Studio")
                     .font(Font.custom("Overused Grotesk", size: 14).weight(.semibold))
                     .foregroundColor(AppColors.foregroundPrimary)
             }
             .frame(maxWidth: .infinity)
             .padding(.top, 8)
-            
+
             // HIDDEN: Account Debug section
             // duplicateAccountDebugSection // DEBUG: Temporary for duplicate account issue
         }
@@ -784,16 +799,17 @@ struct SettingsPage: View {
                     showingEditNameSheet = true
                 }
                 
-                Divider()
-                    .padding(.leading, 52)
-                
-                settingsRow(
-                    title: "Logout",
-                    subtitle: "",
-                    icon: "🚪"
-                ) {
-                    showingLogoutConfirmation = true
-                }
+                // FUTURE: Uncomment when re-enabling authentication
+                // Divider()
+                //     .padding(.leading, 52)
+                //
+                // settingsRow(
+                //     title: "Logout",
+                //     subtitle: "",
+                //     icon: "🚪"
+                // ) {
+                //     showingLogoutConfirmation = true
+                // }
             }
             .background(AppColors.backgroundWhite)
             .clipShape(RoundedRectangle(cornerRadius: 16))
@@ -821,36 +837,43 @@ struct SettingsPage: View {
                 // Divider()
                 //     .padding(.leading, 52)
 
-                // Roast My Receipt
-                Button(action: {
-                    showingRoastReceiptSheet = true
-                }) {
-                    HStack {
-                        HStack(spacing: 12) {
-                            Text("🔥")
-                                .font(.system(size: 20))
-
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("Roast My Receipt")
-                                    .font(AppFonts.overusedGroteskMedium(size: 16))
-                                    .foregroundColor(AppColors.foregroundPrimary)
-                                Text("Get roasted for your spending")
-                                    .font(AppFonts.overusedGroteskMedium(size: 14))
-                                    .foregroundColor(AppColors.foregroundSecondary)
-                                    .lineLimit(1)
-                            }
-                        }
-
-                        Spacer()
-
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 14, weight: .medium))
-                            .foregroundColor(AppColors.foregroundSecondary)
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 12)
+                // Name
+                settingsRow(
+                    title: "Name",
+                    subtitle: userManager.currentUser.name.isEmpty ? "Cashmonki User" : userManager.currentUser.name,
+                    icon: "👤"
+                ) {
+                    showingEditNameSheet = true
                 }
-                .buttonStyle(PlainButtonStyle())
+
+                Divider()
+                    .padding(.leading, 52)
+
+                // Roast My Receipt Toggle
+                HStack {
+                    HStack(spacing: 12) {
+                        Text("🔥")
+                            .font(.system(size: 20))
+
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Roast My Receipt")
+                                .font(AppFonts.overusedGroteskMedium(size: 16))
+                                .foregroundColor(AppColors.foregroundPrimary)
+                            Text("Turn it on, scan a receipt... ;)")
+                                .font(AppFonts.overusedGroteskMedium(size: 14))
+                                .foregroundColor(AppColors.foregroundSecondary)
+                                .lineLimit(1)
+                        }
+                    }
+
+                    Spacer()
+
+                    Toggle("", isOn: $isRoastReceiptEnabled)
+                        .labelsHidden()
+                        .tint(Color(red: 0.33, green: 0.18, blue: 1))
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
 
                 Divider()
                     .padding(.leading, 52)
@@ -893,6 +916,48 @@ struct SettingsPage: View {
                 //     .padding(.leading, 52)
                 
                 currencySettingsRows
+
+                Divider()
+                    .padding(.leading, 52)
+
+                // Sync to Cloud Toggle (Coming Soon)
+                HStack {
+                    HStack(spacing: 12) {
+                        Text("☁️")
+                            .font(.system(size: 20))
+
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Sync to Cloud")
+                                .font(AppFonts.overusedGroteskMedium(size: 16))
+                                .foregroundColor(AppColors.foregroundPrimary)
+                            Text("Coming soon")
+                                .font(AppFonts.overusedGroteskMedium(size: 14))
+                                .foregroundColor(AppColors.foregroundSecondary)
+                                .lineLimit(1)
+                        }
+                    }
+
+                    Spacer()
+
+                    Toggle("", isOn: .constant(false))
+                        .labelsHidden()
+                        .tint(Color(red: 0.33, green: 0.18, blue: 1))
+                        .disabled(true)
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+                .opacity(0.5) // Dim to indicate coming soon
+
+                Divider()
+                    .padding(.leading, 52)
+
+                settingsRow(
+                    title: "Rate CashMonki",
+                    subtitle: "5 stars = Good money karma... 🙈",
+                    icon: "⭐"
+                ) {
+                    requestAppReview()
+                }
 
                 // COMMENTED OUT: Add first transaction guide
                 // Divider()
@@ -1167,7 +1232,7 @@ struct SettingsPage: View {
                     subtitle: "Permanently delete your account and all data",
                     icon: "🗑️"
                 ) {
-                    showingDeleteAccountConfirmation = true
+                    showingDeleteAccountSheet = true
                 }
                 
                 Divider()
@@ -1178,7 +1243,7 @@ struct SettingsPage: View {
                     subtitle: "Get help with your account",
                     icon: "😁"
                 ) {
-                    openSupportEmail()
+                    showingSupportOptions = true
                 }
             }
             .background(AppColors.backgroundWhite)
@@ -1386,21 +1451,42 @@ struct SettingsPage: View {
             
             Divider()
                 .padding(.leading, 52)
-            
-            
+
             settingsRow(
-                title: "Reset Trial Debug State",
-                subtitle: "Return to normal RevenueCat data",
+                title: "Test Trial-Ended Paywall",
+                subtitle: "Shows 'Continue with Pro' button",
+                icon: "⏰"
+            ) {
+                RevenueCatManager.shared.forceDebugLapsedTrial()
+                showingCustomPaywall = true
+            }
+
+            Divider()
+                .padding(.leading, 52)
+
+            settingsRow(
+                title: "Test New User Paywall",
+                subtitle: "Shows 'Start my free week' button",
+                icon: "🆕"
+            ) {
+                RevenueCatManager.shared.forceDebugNewUser()
+                showingCustomPaywall = true
+            }
+
+            Divider()
+                .padding(.leading, 52)
+
+            settingsRow(
+                title: "Reset Debug State",
+                subtitle: "Use real RevenueCat data",
                 icon: "🔧"
             ) {
-                #if DEBUG
                 RevenueCatManager.shared.resetDebugTrialState()
-                #endif
-                toastManager.showSuccess("Trial debug state reset")
+                toastManager.showSuccess("Using real subscription data")
             }
         }
     }
-    
+
     private var debugCurrencyPickerTestRows: some View {
         Group {
             Divider()
@@ -2150,7 +2236,11 @@ struct SettingsPage: View {
     
     /// Get user initials from name
     private func getUserInitials() -> String {
-        let nameComponents = userManager.currentUser.name.components(separatedBy: " ")
+        let name = userManager.currentUser.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        if name.isEmpty {
+            return "CU" // Cashmonki User
+        }
+        let nameComponents = name.components(separatedBy: " ")
         let initials = nameComponents.compactMap { $0.first }.map { String($0) }
         return initials.prefix(2).joined().uppercased()
     }
@@ -2287,7 +2377,7 @@ struct SettingsPage: View {
                     subtitle: "Permanently delete your account and all data",
                     icon: "⚠️"
                 ) {
-                    showingDeleteAccountConfirmation = true
+                    showingDeleteAccountSheet = true
                 }
                 
                 Divider()
@@ -2386,9 +2476,15 @@ struct SettingsPage: View {
         
         // 7. Clear any other managers/caches if needed
         // TODO: Add other manager resets here if we have them
-        
+
         print("✅ Settings: COMPLETE account deletion and data wipe finished")
         print("🎯 Settings: App is now in fresh state - new user can register")
+
+        // 8. Navigate to home tab and show snippy toast
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            self.selectedTab = .home
+            self.toastManager.showDeleted("Poof. All gone. Now what?")
+        }
     }
     
     private func handleReauthenticationRequired() {
@@ -3052,7 +3148,15 @@ struct SettingsPage: View {
     }
     
     // MARK: - Support Functions
-    
+
+    /// Opens the App Store review prompt
+    private func requestAppReview() {
+        if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene {
+            SKStoreReviewController.requestReview(in: windowScene)
+            print("⭐ Settings: App review request shown")
+        }
+    }
+
     /// Opens the user's default email app with support email pre-filled
     private func openSupportEmail() {
         let email = "dcardinesiii@gmail.com"
@@ -3084,6 +3188,24 @@ struct SettingsPage: View {
             #endif
         } else {
             print("❌ Support Email: Failed to create mailto URL")
+        }
+    }
+
+    /// Opens the user's Twitter/X profile for support chat
+    private func openTwitterSupport() {
+        let twitterURL = "https://x.com/dantecardines"
+
+        print("🐦 Twitter Support: Attempting to open \(twitterURL)")
+
+        if let url = URL(string: twitterURL) {
+            #if canImport(UIKit)
+            UIApplication.shared.open(url)
+            print("🐦 Twitter Support: Opened X profile")
+            #else
+            NSWorkspace.shared.open(url)
+            #endif
+        } else {
+            print("❌ Twitter Support: Failed to create URL")
         }
     }
 }

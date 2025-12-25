@@ -14,6 +14,7 @@ struct CustomPaywallSheet: View {
     @Binding var isPresented: Bool
     @State private var selectedPlan: PricingPlan = .yearly
     @State private var showingManageBilling = false
+    @State private var isDismissing = false // Prevents UI re-render during dismissal
     @ObservedObject private var revenueCatManager = RevenueCatManager.shared
     @EnvironmentObject var toastManager: ToastManager
     
@@ -31,34 +32,16 @@ struct CustomPaywallSheet: View {
     }
 
     private var yearlyPackage: Package? {
-        guard let offering = targetOffering else {
-            print("🎯 PAYWALL: No target offering available")
-            return nil
-        }
-        
-        // Debug: Print all available packages
-        print("🎯 PAYWALL: Available packages:")
-        for package in offering.availablePackages {
-            print("   📦 \(package.storeProduct.productIdentifier) - \(package.packageType) - \(package.storeProduct.localizedTitle)")
-        }
-        
-        let yearlyPkg = offering.availablePackages.first { package in
+        guard let offering = targetOffering else { return nil }
+
+        return offering.availablePackages.first { package in
             let identifier = package.storeProduct.productIdentifier.lowercased()
-            // Prioritize product identifier over packageType (since packageType can be wrong in test environments)
-            return identifier.contains("yearly") || 
+            return identifier.contains("yearly") ||
                    identifier.contains("annual") ||
                    identifier.hasSuffix("_yearly") ||
                    identifier.contains("_pro_yearly") ||
-                   identifier.contains("test_cashmonki_pro_yearly") // Exact test environment match
+                   identifier.contains("test_cashmonki_pro_yearly")
         }
-        
-        if let pkg = yearlyPkg {
-            print("✅ PAYWALL: Found yearly package: \(pkg.storeProduct.productIdentifier)")
-        } else {
-            print("❌ PAYWALL: No yearly package found")
-        }
-        
-        return yearlyPkg
     }
     
     private var selectedPackage: Package? {
@@ -81,20 +64,12 @@ struct CustomPaywallSheet: View {
     }
     
     private func getYearlyPriceString() -> String {
-        // Ensure yearly pricing is always $99.99
-        guard let package = yearlyPackage else {
-            return "$99.99"
-        }
-        
+        guard let package = yearlyPackage else { return "$99.99" }
         let priceString = package.storeProduct.localizedPriceString
-        print("🎯 PAYWALL: Yearly package price: \(priceString)")
-        
         // If RevenueCat returns incorrect price, use fallback
         if priceString.contains("9.99") && !priceString.contains("99.99") {
-            print("⚠️ PAYWALL: Incorrect yearly price detected, using fallback $99.99")
             return "$99.99"
         }
-        
         return priceString
     }
     
@@ -292,9 +267,7 @@ struct CustomPaywallSheet: View {
             VStack(alignment: .leading, spacing: 14) {
                 // Yearly pricing plan tile
                 Button(action: {
-                    print("🎯 PAYWALL DEBUG: Yearly tile TAPPED - changing selectedPlan from \(selectedPlan) to .yearly")
                     selectedPlan = .yearly
-                    print("🎯 PAYWALL DEBUG: selectedPlan is now: \(selectedPlan)")
                 }) {
                     HStack(alignment: .top) {
                     VStack(alignment: .leading, spacing: 6) {
@@ -319,8 +292,8 @@ struct CustomPaywallSheet: View {
                         HStack(alignment: .bottom, spacing: 4) {
                             Text(getYearlyPriceString())
                                 .font(
-                                    Font.custom("Overused Grotesk", size: 20)
-                                        .weight(.medium)
+                                    Font.custom("Overused Grotesk", size: 24)
+                                        .weight(.bold)
                                 )
                                 .multilineTextAlignment(.center)
                                 .foregroundColor(AppColors.foregroundPrimary)
@@ -379,9 +352,7 @@ struct CustomPaywallSheet: View {
                 
                 // Monthly pricing plan tile
                 Button(action: {
-                    print("🎯 PAYWALL DEBUG: Monthly tile TAPPED - changing selectedPlan from \(selectedPlan) to .monthly")
                     selectedPlan = .monthly
-                    print("🎯 PAYWALL DEBUG: selectedPlan is now: \(selectedPlan)")
                 }) {
                     HStack(alignment: .top) {
                     VStack(alignment: .leading, spacing: 4) {
@@ -396,8 +367,8 @@ struct CustomPaywallSheet: View {
                         HStack(alignment: .bottom, spacing: 4) {
                             Text(monthlyPackage?.storeProduct.localizedPriceString ?? "$9.99")
                                 .font(
-                                    Font.custom("Overused Grotesk", size: 20)
-                                        .weight(.medium)
+                                    Font.custom("Overused Grotesk", size: 24)
+                                        .weight(.bold)
                                 )
                                 .multilineTextAlignment(.center)
                                 .foregroundColor(AppColors.foregroundPrimary)
@@ -455,47 +426,35 @@ struct CustomPaywallSheet: View {
                 .buttonStyle(PlainButtonStyle())
                 
                 // Primary button - changes based on subscription status
-                if revenueCatManager.isProUser {
+                // Use isDismissing to prevent showing "Manage Billing" during dismissal animation
+                let _ = print("🎫 PAYWALL BUTTON DEBUG: isProUser=\(revenueCatManager.isProUser), isDismissing=\(isDismissing), hasUsedTrialBefore=\(revenueCatManager.hasUsedTrialBefore)")
+                if revenueCatManager.isProUser && !isDismissing {
+                    let _ = print("🎫 PAYWALL: Showing 'Manage Billing' button")
                     AppButton.secondary("Manage Billing", size: .extraSmall) {
                         showingManageBilling = true
                     }
-                } else {
+                } else if !isDismissing {
                     // Different button text for lapsed trial users
                     let buttonText = revenueCatManager.hasUsedTrialBefore ? "Continue with Pro" : "Start my free week"
+                    let _ = print("🎫 PAYWALL: Showing '\(buttonText)' button")
                     AppButton.primary(buttonText, size: .extraSmall) {
                         handleStartFreeTrial()
                     }
+                } else {
+                    let _ = print("🎫 PAYWALL: ⚠️ NO BUTTON SHOWN - isDismissing=\(isDismissing)")
                 }
                 
                 // Payment terms text - different for lapsed trial users
-                HStack(spacing: 8) {
-                    Image(systemName: "checkmark")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundColor(AppColors.foregroundSecondary)
-
-                    Text(revenueCatManager.hasUsedTrialBefore ? "Secure checkout" : "No payment now")
+                HStack(spacing: 4) {
+                    Text(revenueCatManager.hasUsedTrialBefore ? "Secure checkout  •  Cancel anytime" : "7 days free, then \(paymentTermsText)  •  Cancel anytime")
                         .font(
                             Font.custom("Overused Grotesk", size: 14)
                                 .weight(.medium)
                         )
                         .multilineTextAlignment(.center)
                         .foregroundColor(AppColors.foregroundSecondary)
-
-                    Text("•")
-                        .font(
-                            Font.custom("Overused Grotesk", size: 14)
-                                .weight(.medium)
-                        )
-                        .multilineTextAlignment(.center)
-                        .foregroundColor(AppColors.foregroundSecondary)
-
-                    Text(revenueCatManager.hasUsedTrialBefore ? "Cancel anytime" : "7 days free, then \(paymentTermsText)")
-                        .font(
-                            Font.custom("Overused Grotesk", size: 14)
-                                .weight(.medium)
-                        )
-                        .multilineTextAlignment(.center)
-                        .foregroundColor(AppColors.foregroundSecondary)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 .frame(maxWidth: .infinity)
 
@@ -569,6 +528,11 @@ struct CustomPaywallSheet: View {
                 .environmentObject(toastManager)
         }
         .onAppear {
+            print("🎫 ======= PAYWALL APPEARED =======")
+            print("🎫 PAYWALL onAppear: isProUser=\(revenueCatManager.isProUser)")
+            print("🎫 PAYWALL onAppear: isDismissing=\(isDismissing)")
+            print("🎫 PAYWALL onAppear: hasUsedTrialBefore=\(revenueCatManager.hasUsedTrialBefore)")
+            print("🎫 PAYWALL onAppear: customerInfo=\(revenueCatManager.customerInfo != nil ? "loaded" : "nil")")
             Task {
                 await ensureOfferingsLoaded()
             }
@@ -592,19 +556,17 @@ struct CustomPaywallSheet: View {
 
                 await MainActor.run {
                     if hasActiveEntitlements {
-                        print("✅ Restore successful - active entitlements found")
+                        isDismissing = true // Prevent UI from showing "Manage Billing"
                         isPresented = false
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
                             NotificationCenter.default.post(name: .subscriptionSucceeded, object: nil)
                         }
                     } else {
-                        print("ℹ️ Restore completed - no active purchases found")
                         toastManager.showSubscriptionError(message: "No previous purchases found")
                     }
                 }
             } catch {
                 await MainActor.run {
-                    print("❌ Restore failed: \(error.localizedDescription)")
                     toastManager.showSubscriptionError(message: "Restore failed. Please try again.")
                 }
             }
@@ -612,28 +574,18 @@ struct CustomPaywallSheet: View {
     }
 
     private func handleStartFreeTrial() {
-        print("🎯 PAYWALL DEBUG: handleStartFreeTrial() called")
-        print("🎯 PAYWALL DEBUG: Current selectedPlan = \(selectedPlan)")
-        print("🎯 PAYWALL DEBUG: monthlyPackage = \(monthlyPackage?.storeProduct.productIdentifier ?? "nil")")
-        print("🎯 PAYWALL DEBUG: yearlyPackage = \(yearlyPackage?.storeProduct.productIdentifier ?? "nil")")
-        print("🎯 PAYWALL DEBUG: selectedPackage = \(selectedPackage?.storeProduct.productIdentifier ?? "nil")")
-
+        print("🎫 ======= handleStartFreeTrial CALLED =======")
         Task {
             await ensureOfferingsLoaded()
 
-            print("🎯 PAYWALL DEBUG: After ensureOfferingsLoaded - selectedPlan = \(selectedPlan)")
-            print("🎯 PAYWALL DEBUG: After ensureOfferingsLoaded - selectedPackage = \(selectedPackage?.storeProduct.productIdentifier ?? "nil")")
-
             guard let package = selectedPackage else {
+                print("🎫 PURCHASE: ❌ No package selected")
                 await MainActor.run {
-                    // Dismiss paywall first so toast appears on main view
+                    isDismissing = true // Prevent any UI state changes during dismissal
                     isPresented = false
-                    
-                    // Show error toast instead of blocking alert
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                        print("🎯 PAYWALL: Posting subscription error notification - no package available")
                         NotificationCenter.default.post(
-                            name: .subscriptionFailed, 
+                            name: .subscriptionFailed,
                             object: nil,
                             userInfo: ["errorMessage": "Subscription plans are not available. Please try again later."]
                         )
@@ -641,37 +593,33 @@ struct CustomPaywallSheet: View {
                 }
                 return
             }
-            
-            print("🎯 PAYWALL: Starting purchase for \(selectedPlan)")
+
+            print("🎫 PURCHASE: Starting purchase for package: \(package.identifier)")
             let result = await revenueCatManager.purchase(package: package)
-            
+            print("🎫 PURCHASE: Result - success=\(result.success), error=\(result.error?.localizedDescription ?? "none")")
+
             await MainActor.run {
                 if result.success {
-                    print("🎉 PAYWALL: Purchase successful!")
-                    print("✅ SUBSCRIPTION SUCCESS DEBUG: CustomPaywall purchase successful")
-                    
-                    // Dismiss paywall immediately so toast appears on main view
+                    print("🎫 PURCHASE: ✅ SUCCESS - Setting isDismissing=true, isPresented=false")
+                    // Dismiss paywall immediately and show success toast
+                    isDismissing = true // Prevent UI from showing "Manage Billing"
                     isPresented = false
-                    
-                    // Notify main view to show subscription success toast
+                    print("🎫 PURCHASE: Posting subscriptionSucceeded notification in 0.3s...")
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                        print("🎯 PAYWALL: Posting subscription success notification")
+                        print("🎫 PURCHASE: Posting subscriptionSucceeded notification NOW")
                         NotificationCenter.default.post(name: .subscriptionSucceeded, object: nil)
                     }
                 } else {
-                    print("❌ PAYWALL: Purchase failed")
-                    
                     if let error = result.error {
                         let nsError = error as NSError
-                        
+
                         // Check for user cancellation - don't show error dialog
                         let isUserCancellation = (nsError.domain == "SKErrorDomain" && nsError.code == 2) ||
                                                 (nsError.domain == "RevenueCat.ErrorDomain" && nsError.code == 1) ||
                                                 (nsError.domain == "SKErrorDomain" && nsError.code == 19) ||
                                                 error.localizedDescription.lowercased().contains("cancel")
-                        
+
                         if isUserCancellation {
-                            print("👤 PAYWALL: User cancelled")
                             return
                         }
                         
@@ -682,15 +630,12 @@ struct CustomPaywallSheet: View {
                         } else {
                             errorMessage = "Something went wrong with your subscription. Please try again later."
                         }
-                        
-                        // Dismiss paywall first so toast appears on main view
+
+                        isDismissing = true // Prevent any UI state changes during dismissal
                         isPresented = false
-                        
-                        // Show error toast instead of blocking alert
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                            print("🎯 PAYWALL: Posting subscription error notification")
                             NotificationCenter.default.post(
-                                name: .subscriptionFailed, 
+                                name: .subscriptionFailed,
                                 object: nil,
                                 userInfo: ["errorMessage": errorMessage]
                             )

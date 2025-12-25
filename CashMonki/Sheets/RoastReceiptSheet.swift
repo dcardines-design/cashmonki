@@ -6,37 +6,67 @@
 //
 
 import SwiftUI
-import Lottie
+import ImageIO
 
-struct SimpleRoastLottie: UIViewRepresentable {
-    func makeUIView(context: Context) -> LottieAnimationView {
-        let animationView = LottieAnimationView(name: "roast")
-        
-        // Jitter's actual animation curves and timing
-        animationView.loopMode = .loop
-        animationView.animationSpeed = 1.0 // Normal speed for precise timing
-        
-        // Apply Jitter's signature entrance with simplified animation
-        animationView.alpha = 0.0
-        animationView.transform = CGAffineTransform.identity.scaledBy(x: 0.8, y: 0.8)
-        
-        // Animate with Jitter's spring curve using UIView animation
-        UIView.animate(
-            withDuration: 0.5,
-            delay: 0.1,
-            options: [.curveEaseOut],
-            animations: {
-                animationView.transform = .identity
-                animationView.alpha = 1.0
+struct GIFAnimationView: UIViewRepresentable {
+    let gifName: String
+
+    func makeUIView(context: Context) -> UIView {
+        let containerView = UIView()
+        containerView.clipsToBounds = true
+
+        let imageView = UIImageView()
+        imageView.contentMode = .scaleAspectFill
+        imageView.clipsToBounds = true
+        imageView.translatesAutoresizingMaskIntoConstraints = false
+
+        containerView.addSubview(imageView)
+
+        NSLayoutConstraint.activate([
+            imageView.leadingAnchor.constraint(equalTo: containerView.leadingAnchor),
+            imageView.trailingAnchor.constraint(equalTo: containerView.trailingAnchor),
+            imageView.topAnchor.constraint(equalTo: containerView.topAnchor),
+            imageView.bottomAnchor.constraint(equalTo: containerView.bottomAnchor)
+        ])
+
+        // Load GIF from File Assets folder
+        if let gifPath = Bundle.main.path(forResource: gifName, ofType: "gif"),
+           let gifData = try? Data(contentsOf: URL(fileURLWithPath: gifPath)),
+           let source = CGImageSourceCreateWithData(gifData as CFData, nil) {
+
+            var images: [UIImage] = []
+            var totalDuration: Double = 0
+
+            let frameCount = CGImageSourceGetCount(source)
+
+            for i in 0..<frameCount {
+                if let cgImage = CGImageSourceCreateImageAtIndex(source, i, nil) {
+                    images.append(UIImage(cgImage: cgImage))
+
+                    // Get frame duration
+                    if let properties = CGImageSourceCopyPropertiesAtIndex(source, i, nil) as? [String: Any],
+                       let gifProperties = properties[kCGImagePropertyGIFDictionary as String] as? [String: Any] {
+                        if let delay = gifProperties[kCGImagePropertyGIFUnclampedDelayTime as String] as? Double, delay > 0 {
+                            totalDuration += delay
+                        } else if let delay = gifProperties[kCGImagePropertyGIFDelayTime as String] as? Double {
+                            totalDuration += delay
+                        } else {
+                            totalDuration += 0.1
+                        }
+                    }
+                }
             }
-        )
-        
-        animationView.play()
-        animationView.contentMode = .scaleAspectFit
-        return animationView
+
+            imageView.animationImages = images
+            imageView.animationDuration = totalDuration
+            imageView.animationRepeatCount = 0 // Loop forever
+            imageView.startAnimating()
+        }
+
+        return containerView
     }
-    
-    func updateUIView(_ uiView: LottieAnimationView, context: Context) {}
+
+    func updateUIView(_ uiView: UIView, context: Context) {}
 }
 
 struct RoastReceiptSheet: View {
@@ -44,18 +74,18 @@ struct RoastReceiptSheet: View {
     let roastMessage: String
     @State private var isFullHeight = false
     
-    // Placeholder roast messages
+    // Placeholder roast messages - Deadpool-style savage and sarcastic
     private static let placeholderRoasts = [
-        "₱500 on Grab? Amazing. Paying premium just to sit in traffic with aircon.",
-        "₱800 on coffee this week? Your caffeine addiction has its own credit score.",
-        "₱1,200 on food delivery? The delivery fee costs more than cooking lessons.",
-        "₱300 for bubble tea? That's some expensive sugar water with chewy bits.",
-        "₱2,000 on shopping? Your wallet is crying harder than your bank account.",
-        "₱150 on parking? You basically paid rent for your car to take a nap.",
-        "₱600 on a single meal? Hope it came with a side of financial wisdom.",
-        "₱400 on skincare? Your face better be glowing like your overspending habits.",
-        "₱250 on a movie ticket? Netflix is laughing at your life choices.",
-        "₱700 on a haircut? That better include a financial advisor consultation.",
+        "₱500 on Grab? Congrats, you paid extra to marinate in Manila traffic. At least the AC worked... probably.",
+        "₱800 on coffee this week? Your blood is literally 40% overpriced bean water at this point. Doctors hate this one trick.",
+        "₱1,200 on food delivery? The delivery guy knows your address better than your own mother. That's not sad at all.",
+        "₱300 for bubble tea? You paid for flavored milk with tiny choking hazards. Darwin would be so proud.",
+        "₱2,000 on shopping? Retail therapy isn't therapy, bestie. Your credit card just filed for emotional distress.",
+        "₱150 on parking? You paid your car's hourly wage to do absolutely nothing. It's living your dream.",
+        "₱600 on a single meal? I hope it was worth the three-week ramen diet that follows. Narrator: It wasn't.",
+        "₱400 on skincare? Your pores better be singing the national anthem at this price point.",
+        "₱250 on a movie ticket? For that price, the actors should've performed live in your living room.",
+        "₱700 on a haircut? Did they use scissors made of unicorn horns? Did a celebrity breathe near you?",
     ]
     
     init(isPresented: Binding<Bool>, roastMessage: String? = nil) {
@@ -71,15 +101,15 @@ struct RoastReceiptSheet: View {
                     .fill(Color.white.opacity(0.5))
                     .frame(width: 40, height: 6)
                     .padding(.top, 20)
-                
+
                 Spacer()
             }
-            
+
             // Header with close button
             VStack {
                 HStack {
                     Spacer()
-                    
+
                     Button(action: {
                         isPresented = false
                     }) {
@@ -93,11 +123,11 @@ struct RoastReceiptSheet: View {
                 }
                 .padding(.horizontal, 20)
                 .padding(.top, 20)
-                
+
                 Spacer()
             }
-            
-            // Main roast message content
+
+            // Main roast message content (text only)
             VStack(spacing: 0) {
                 Spacer()
 
@@ -113,14 +143,24 @@ struct RoastReceiptSheet: View {
 
                 Spacer()
 
-                // Lottie animation - flush at bottom
-                SimpleRoastLottie()
-                    .frame(height: 200)
+                // Spacer for GIF area
+                Color.clear.frame(height: 220)
             }
             .padding(.top, 60)
+
+            // GIF animation - fixed at bottom, full width, no padding
+            GeometryReader { geo in
+                VStack {
+                    Spacer()
+                    GIFAnimationView(gifName: "roast-animation-2")
+                        .frame(width: geo.size.width, height: 220)
+                        .clipped()
+                        .offset(y: 30)
+                }
+            }
+            .ignoresSafeArea(.all)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .ignoresSafeArea(.all)
         .background(
             GeometryReader { geometry in
                 LinearGradient(
@@ -140,6 +180,8 @@ struct RoastReceiptSheet: View {
                 }
             }
         )
+        .clipShape(UnevenRoundedRectangle(topLeadingRadius: 44, bottomLeadingRadius: 0, bottomTrailingRadius: 0, topTrailingRadius: 44))
+        .ignoresSafeArea(.all)
         .shadow(color: Color(red: 0.06, green: 0.09, blue: 0.16).opacity(0.18), radius: 24, x: 0, y: 24)
     }
     

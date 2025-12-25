@@ -753,7 +753,9 @@ extension HomePage {
     // MARK: - Receipt Analysis
     
     func analyzeReceiptImage(_ image: UIImage, source: AnalyzingSource = .scan) {
+        let functionStart = Date()
         print("🚀📸 ==== RECEIPT ANALYSIS STARTED ====")
+        print("🕐 DEBUG TIMING: analyzeReceiptImage called at \(functionStart)")
         print("📱 Source: \(source == .scan ? "CAMERA CAPTURE" : "PHOTO UPLOAD")")
         print("📐 Image size: \(image.size.width) x \(image.size.height)")
         print("🔍 Toast manager available: ✅")
@@ -764,17 +766,24 @@ extension HomePage {
         } else {
             print("   - Config returns: ❌ NIL")
         }
-        
-        // Start the toast animation
+
+        // PERFORMANCE: Show toast IMMEDIATELY before any other processing
+        // This ensures the UI shows feedback instantly
+        let toastShowStart = Date()
         toastManager.startReceiptAnalysis()
         print("🍞 Receipt analysis toast started")
+        print("🕐 DEBUG TIMING: Toast shown in \(String(format: "%.3f", Date().timeIntervalSince(toastShowStart) * 1000))ms")
+        print("🕐 DEBUG TIMING: Time from function call to toast: \(String(format: "%.3f", Date().timeIntervalSince(functionStart) * 1000))ms")
         
         isAnalyzingReceipt = true
         analyzingSource = source
         receiptAnalysisError = nil
-        
+
         let creationTime = Date()
+        print("🕐 DEBUG TIMING: Starting Task for API call...")
         Task {
+            let taskStart = Date()
+            print("🕐 DEBUG TIMING: Task started, delay from function start: \(String(format: "%.3f", taskStart.timeIntervalSince(functionStart) * 1000))ms")
             do {
                 let analysis = try await AIReceiptAnalyzer.shared.analyzeReceiptSecure(image: image, creationTime: creationTime)
                 await MainActor.run {
@@ -818,11 +827,19 @@ extension HomePage {
                     analyzingSource = nil
                     originalTileClicked = nil
                     
+                    // Check for rate limit error - show specific error message
+                    if case BackendAPIError.rateLimited = error {
+                        print("📊 HomePage: Backend rate limit hit")
+                        toastManager.failReceiptAnalysis(error: error) { }
+                        receiptAnalysisError = "⏳ Too many requests. Please wait a moment and try again."
+                        return
+                    }
+
                     // Use smart error handling that automatically detects network vs regular errors
                     toastManager.failReceiptAnalysis(error: error) {
                         // Handle failure completion if needed
                     }
-                    
+
                     // Provide specific error messages based on error type
                     if let receiptError = error as? ReceiptAIError {
                         switch receiptError {
@@ -891,5 +908,67 @@ extension HomePage {
                 }
             }
         }
+    }
+
+    // MARK: - Roast Message Generator
+
+    /// Generate a contextual roast message based on the transaction details
+    internal func generateRoastMessage(amount: String, merchant: String, category: String) -> String {
+        let categoryLower = category.lowercased()
+
+        // Category-specific roasts
+        let categoryRoasts: [String: [String]] = [
+            "food": [
+                "\(amount) on food at \(merchant)? Your stomach has expensive taste.",
+                "\(amount) at \(merchant)? Cooking at home called - it misses you.",
+                "Spent \(amount) eating out? Your kitchen appliances are collecting dust.",
+            ],
+            "coffee": [
+                "\(amount) on coffee? Your caffeine addiction has its own credit score.",
+                "\(amount) at \(merchant)? That's a lot of overpriced bean water.",
+                "Another \(amount) on coffee? At this rate, buy the whole café.",
+            ],
+            "transport": [
+                "\(amount) on \(merchant)? Paying premium just to sit in traffic with aircon.",
+                "\(amount) on transport? Your legs remember how to walk, right?",
+                "Spent \(amount) getting around? The sidewalk is free.",
+            ],
+            "shopping": [
+                "\(amount) on shopping? Your wallet is crying harder than your bank account.",
+                "\(amount) at \(merchant)? Did you really need that though?",
+                "Dropped \(amount) shopping? Retail therapy hits different when you check the receipt.",
+            ],
+            "entertainment": [
+                "\(amount) on entertainment? Hope it was more fun than checking your balance.",
+                "Spent \(amount) having fun? Your savings account is not amused.",
+                "\(amount) at \(merchant)? Your couch and Netflix subscription feel betrayed.",
+            ],
+            "subscriptions": [
+                "\(amount) on subscriptions? How many streaming services does one person need?",
+                "Another \(amount) subscription? You're collecting these like Pokémon.",
+                "\(amount) on recurring payments? Death by a thousand subscriptions.",
+            ],
+        ]
+
+        // Check if category matches any specific roasts
+        for (key, roasts) in categoryRoasts {
+            if categoryLower.contains(key) {
+                return roasts.randomElement() ?? roasts[0]
+            }
+        }
+
+        // Generic roasts for unmatched categories
+        let genericRoasts = [
+            "\(amount) at \(merchant)? Your financial advisor just felt a disturbance in the force.",
+            "Spent \(amount)? That's a lot of instant noodles you could've bought.",
+            "\(amount) gone just like that. Your savings account sends its regards.",
+            "\(amount) at \(merchant)? Bold move for someone who checks their balance with one eye closed.",
+            "Another \(amount) expense? Your money has commitment issues - it keeps leaving.",
+            "\(amount) on \(category.lowercased())? Future you is already drafting a strongly-worded letter.",
+            "Just dropped \(amount). Your budget spreadsheet is in shambles.",
+            "\(amount) at \(merchant)? Interesting financial strategy. Let's see how it plays out.",
+        ]
+
+        return genericRoasts.randomElement() ?? genericRoasts[0]
     }
 }

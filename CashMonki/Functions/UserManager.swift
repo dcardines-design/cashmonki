@@ -7,6 +7,7 @@
 
 import Foundation
 import SwiftUI
+import StoreKit
 
 #if canImport(FirebaseCore)
 import FirebaseCore
@@ -18,14 +19,17 @@ import FirebaseAuth
 
 class UserManager: ObservableObject {
     static let shared = UserManager()
-    
+
     @Published var currentUser: UserData
     @Published var isLoadingFromFirebase = false
     @Published var firebaseError: String?
+
+    // Track if we've requested an app review (persisted across sessions)
+    @AppStorage("hasRequestedAppReview") private var hasRequestedAppReview = false
     
-    /// Check if user has a valid profile (not default/guest user)
+    /// Check if user has a valid profile (not default user)
     var hasUserProfile: Bool {
-        return currentUser.name != "Guest User" && 
+        return currentUser.name != "Cashmonki User" &&
                currentUser.email != "guest@cashmonki.com" &&
                !currentUser.name.isEmpty
     }
@@ -39,7 +43,7 @@ class UserManager: ObservableObject {
         // Create default wallet structure for initial state with unique UUID
         let defaultWallet = AccountData(
             id: UUID(), // Always use unique UUIDs
-            name: "", // Empty name - will be set during onboarding
+            name: "Personal Wallet", // Default name - updated to "[Name]'s Wallet" during onboarding if name provided
             type: .personal,
             currency: .usd, // Temporary placeholder - will be updated during currency selection onboarding
             isDefault: true
@@ -48,7 +52,7 @@ class UserManager: ObservableObject {
         // Start with a default user - will be replaced by authentication or Firebase data
         self.currentUser = UserData(
             id: UUID(), // Dynamic user ID - will be updated when user authenticates
-            name: "Guest User",
+            name: "Cashmonki User",
             email: "guest@cashmonki.com",
             transactions: [],
             accounts: [defaultWallet],
@@ -286,7 +290,7 @@ class UserManager: ObservableObject {
         // Create default wallet for new users (name will be set based on user's name)
         let defaultWallet = AccountData(
             id: UUID(), // Always use unique UUIDs
-            name: "", // Will be set immediately after user creation
+            name: "Personal Wallet", // Default - updated to "[Name]'s Wallet" if name provided
             type: .personal,
             currency: .usd, // Temporary placeholder - will be updated during currency selection onboarding
             isDefault: true
@@ -400,7 +404,14 @@ class UserManager: ObservableObject {
         }
     }
     
+    /// CURRENT: Always false in no-auth flow
     private func checkFirebaseDisplayName() -> Bool {
+        // CURRENT: No-auth flow - no Firebase user to check
+        print("🔥 UserManager: No Firebase displayName (no-auth flow)")
+        return false
+
+        // FUTURE: Uncomment when re-enabling authentication
+        /*
         #if canImport(FirebaseAuth)
         if let firebaseUser = Auth.auth().currentUser,
            let displayName = firebaseUser.displayName {
@@ -412,6 +423,7 @@ class UserManager: ObservableObject {
         #endif
         print("🔥 UserManager: No Firebase displayName found")
         return false
+        */
     }
     
     private func checkUserHasCompleteName(_ name: String) -> Bool {
@@ -602,10 +614,10 @@ class UserManager: ObservableObject {
         // Extract first name from full name
         let firstName = fullName.trimmingCharacters(in: .whitespacesAndNewlines)
             .components(separatedBy: " ")
-            .first ?? fullName
-        
-        // Create personalized wallet name
-        let walletName = "\(firstName)'s Wallet"
+            .first ?? ""
+
+        // Create personalized wallet name, or "Personal Wallet" if no name
+        let walletName = firstName.isEmpty ? "Personal Wallet" : "\(firstName)'s Wallet"
         
         // Find and update the default wallet
         if let defaultWalletIndex = currentUser.accounts.firstIndex(where: { $0.isDefault }) {
@@ -669,11 +681,17 @@ class UserManager: ObservableObject {
         print("   - Onboarding state is device-specific and doesn't need cross-device sync")
     }
     
+    /// CURRENT: No-op in no-auth flow
     private func updateFirebaseDisplayName(_ name: String) {
+        // CURRENT: No-auth flow - no Firebase user to update
+        print("🔥 UserManager: Skipping Firebase displayName update (no-auth flow)")
+
+        // FUTURE: Uncomment when re-enabling authentication
+        /*
         #if canImport(FirebaseAuth)
         if let user = Auth.auth().currentUser {
             print("🔥 UserManager: Attempting to update Firebase displayName from '\(user.displayName ?? "nil")' to '\(name)'")
-            
+
             let changeRequest = user.createProfileChangeRequest()
             changeRequest.displayName = name
             changeRequest.commitChanges { error in
@@ -681,21 +699,21 @@ class UserManager: ObservableObject {
                     print("❌ UserManager: Failed to update Firebase displayName: \(error.localizedDescription)")
                 } else {
                     print("✅ UserManager: Successfully updated Firebase displayName to '\(name)'")
-                    
+
                     // Verify the update worked
                     DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
                         if let updatedUser = Auth.auth().currentUser {
                             print("🔍 UserManager: Verification - Firebase displayName is now: '\(updatedUser.displayName ?? "nil")'")
-                            
+
                             // Also check the components
                             if let displayName = updatedUser.displayName {
                                 let nameComponents = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
                                     .components(separatedBy: " ").filter { !$0.isEmpty }
                                 print("🔍 UserManager: Name components count: \(nameComponents.count)")
-                                
+
                                 if nameComponents.count >= 2 {
                                     print("✅ UserManager: Firebase displayName now has complete name - onboarding bypass should work")
-                                    
+
                                     // Update local user data to reflect Firebase changes
                                     DispatchQueue.main.async {
                                         self.currentUser.name = displayName
@@ -713,6 +731,7 @@ class UserManager: ObservableObject {
             print("❌ UserManager: No current Firebase user found for displayName update")
         }
         #endif
+        */
     }
     
     /// Use test user as fallback when no authenticated user exists (development only)
@@ -740,27 +759,25 @@ class UserManager: ObservableObject {
             return
         }
         
-        // No stored session - create new test user
-        let testUserId = UUID()
-        
-        print("👤 UserManager: No stored session found - creating new test user")
-        
+        // No stored session - create new local user (no-auth flow)
+        let newUserId = UUID()
+
+        print("👤 UserManager: No stored session found - creating new local user")
+
         setCurrentUser(
-            id: testUserId,
-            name: "Test User", 
-            email: "test@cashmonki.com"
+            id: newUserId,
+            name: "", // Empty name - user will enter during onboarding
+            email: "" // Empty email - no-auth flow
         )
-        
-        print("👤 UserManager: ✅ TEST USER CREATED FOR DEVELOPMENT")
-        print("📝 UserManager: User ID: \(testUserId.uuidString.prefix(8))...")
-        print("📧 UserManager: Email: test@cashmonki.com")
-        print("🏷️ UserManager: All transactions will be attributed to current test user")
-        print("⚠️ UserManager: This is a fallback - proper authentication should be used")
-        
+
+        print("👤 UserManager: ✅ NEW LOCAL USER CREATED")
+        print("📝 UserManager: User ID: \(newUserId.uuidString.prefix(8))...")
+        print("🏷️ UserManager: Name will be collected during onboarding")
+
         // Store this as the current user session
-        UserDefaults.standard.set(testUserId.uuidString, forKey: "currentUserId")
-        UserDefaults.standard.set("Test User", forKey: "currentUserName") 
-        UserDefaults.standard.set("test@cashmonki.com", forKey: "currentUserEmail")
+        UserDefaults.standard.set(newUserId.uuidString, forKey: "currentUserId")
+        UserDefaults.standard.set("", forKey: "currentUserName")
+        UserDefaults.standard.set("", forKey: "currentUserEmail")
     }
     
     /// Load specific user data from Firebase
@@ -796,10 +813,10 @@ class UserManager: ObservableObject {
         UserDefaults.standard.removeObject(forKey: "currentUserName")
         UserDefaults.standard.removeObject(forKey: "currentUserEmail")
         
-        // Reset to guest user
+        // Reset to default user
         currentUser = UserData(
             id: UUID(),
-            name: "Guest User",
+            name: "Cashmonki User",
             email: "guest@cashmonki.com",
             transactions: [],
             accounts: [],
@@ -873,8 +890,11 @@ class UserManager: ObservableObject {
         print("📊 UserManager: Current transaction count after add: \(currentUser.transactions.count)")
         print("🔔 UserManager: Sending objectWillChange notification...")
         print("💾 UserManager: Transaction saved locally")
-        
+
         objectWillChange.send()
+
+        // Request app review after 3 transactions (only once)
+        checkAndRequestAppReview()
         
         // Sync using the new sync manager
         print("🔄 UserManager: Triggering sync manager for transaction \(transaction.id.uuidString.prefix(8))...")
@@ -1273,7 +1293,95 @@ class UserManager: ObservableObject {
         currentUser.addAccount(account)
         print("✏️ UserManager: Updated account - \(account.name)")
     }
-    
+
+    // MARK: - Budget Management
+
+    func addBudget(_ budget: Budget) {
+        // Check if budget already exists for this category in this wallet
+        if let existingIndex = currentUser.budgets.firstIndex(where: {
+            $0.categoryId == budget.categoryId && $0.walletId == budget.walletId
+        }) {
+            // Replace existing budget
+            currentUser.budgets[existingIndex] = budget
+            print("🎯 UserManager: Replaced existing budget for \(budget.categoryName)")
+        } else {
+            currentUser.budgets.append(budget)
+            print("🎯 UserManager: Added new budget - \(budget.categoryName) \(budget.amount) \(budget.currency.rawValue)/\(budget.period.displayName)")
+        }
+
+        saveCurrentUserLocally()
+        objectWillChange.send()
+
+        // Sync to Firebase
+        syncToFirebase { success in
+            if success {
+                print("✅ UserManager: Budget synced to Firebase")
+            } else {
+                print("⚠️ UserManager: Budget sync to Firebase failed")
+            }
+        }
+    }
+
+    func updateBudget(_ budget: Budget) {
+        guard let index = currentUser.budgets.firstIndex(where: { $0.id == budget.id }) else {
+            print("⚠️ UserManager: Budget not found for update: \(budget.id)")
+            return
+        }
+
+        var updatedBudget = budget
+        updatedBudget.updatedAt = Date()
+        currentUser.budgets[index] = updatedBudget
+
+        saveCurrentUserLocally()
+        objectWillChange.send()
+
+        // Sync to Firebase
+        syncToFirebase { success in
+            if success {
+                print("✅ UserManager: Budget update synced to Firebase")
+            } else {
+                print("⚠️ UserManager: Budget update sync to Firebase failed")
+            }
+        }
+
+        print("✏️ UserManager: Updated budget - \(budget.categoryName)")
+    }
+
+    func deleteBudget(_ budget: Budget) {
+        deleteBudget(withId: budget.id)
+    }
+
+    func deleteBudget(withId id: UUID) {
+        guard let index = currentUser.budgets.firstIndex(where: { $0.id == id }) else {
+            print("⚠️ UserManager: Budget not found for deletion: \(id)")
+            return
+        }
+
+        let deletedBudget = currentUser.budgets.remove(at: index)
+
+        saveCurrentUserLocally()
+        objectWillChange.send()
+
+        // Sync to Firebase
+        syncToFirebase { success in
+            if success {
+                print("✅ UserManager: Budget deletion synced to Firebase")
+            } else {
+                print("⚠️ UserManager: Budget deletion sync to Firebase failed")
+            }
+        }
+
+        print("🗑️ UserManager: Deleted budget - \(deletedBudget.categoryName)")
+    }
+
+    func getBudgets(for walletId: UUID) -> [Budget] {
+        return currentUser.budgets.filter { $0.walletId == walletId && $0.isActive }
+    }
+
+    func getAllBudgets() -> [Budget] {
+        return currentUser.budgets.filter { $0.isActive }
+    }
+
     // MARK: - Data Access
     
     func getTransactions(for accountId: UUID? = nil) -> [Txn] {
@@ -2249,4 +2357,28 @@ class UserManager: ObservableObject {
     }
     
     // MARK: - User Profile Management
+
+    // MARK: - App Review Request
+
+    /// Request app review after user reaches 3 transactions (only once)
+    private func checkAndRequestAppReview() {
+        // Only request review once and when user has exactly 3 transactions
+        guard !hasRequestedAppReview,
+              currentUser.transactions.count == 3 else {
+            return
+        }
+
+        print("⭐ UserManager: User has 3 transactions, requesting app review...")
+
+        // Mark as requested before showing to prevent duplicate requests
+        hasRequestedAppReview = true
+
+        // Small delay to let the UI settle after adding transaction
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+            if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene {
+                SKStoreReviewController.requestReview(in: windowScene)
+                print("⭐ UserManager: App review request shown")
+            }
+        }
+    }
 }

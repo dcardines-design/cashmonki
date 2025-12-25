@@ -233,12 +233,14 @@ struct AppButton: View {
                     }
                 }
                 
-                // Title
-                Text(title)
-                    .font(AppFonts.overusedGroteskSemiBold(size: textSize))
-                    .fontWeight(.semibold)
-                    .foregroundColor(textColor)
-                    .underline(isTextUnderlined)
+                // Title (only show if not empty)
+                if !title.isEmpty {
+                    Text(title)
+                        .font(AppFonts.overusedGroteskSemiBold(size: textSize))
+                        .fontWeight(.semibold)
+                        .foregroundColor(textColor)
+                        .underline(isTextUnderlined)
+                }
                 
                 // Right Icon
                 if let rightIcon = rightIcon {

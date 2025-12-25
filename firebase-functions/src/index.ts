@@ -69,7 +69,7 @@ const upload = multer({
   }
 });
 
-// Middleware to verify Firebase Auth token
+// Middleware to verify Firebase Auth token (required)
 async function verifyAuth(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
   try {
     const authHeader = req.headers.authorization;
@@ -86,6 +86,25 @@ async function verifyAuth(req: AuthenticatedRequest, res: Response, next: NextFu
     logger.error('Auth verification failed:', error);
     res.status(401).json({ error: 'Invalid authentication token' });
     return;
+  }
+}
+
+// Middleware for optional Firebase Auth (allows unauthenticated requests for no-auth flow)
+async function optionalAuth(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      const idToken = authHeader.split('Bearer ')[1];
+      const decodedToken = await getAuth().verifyIdToken(idToken);
+      req.user = decodedToken;
+      logger.info('Optional auth: User authenticated');
+    } else {
+      logger.info('Optional auth: No auth token provided, proceeding without authentication');
+    }
+    next();
+  } catch (error) {
+    logger.warn('Optional auth: Token verification failed, proceeding without authentication');
+    next();
   }
 }
 
@@ -110,6 +129,55 @@ function checkRateLimit(userId: string, maxRequests: number = 10, windowMs: numb
 }
 
 // MARK: - Helper Functions
+
+// Format categories passed from iOS app (local storage) into text for AI prompt
+function formatPassedCategories(categories: any[]): string {
+  if (!categories || !Array.isArray(categories) || categories.length === 0) {
+    return '';
+  }
+
+  const expenseCategories: string[] = [];
+  const incomeCategories: string[] = [];
+
+  for (const category of categories) {
+    if (!category.isDeleted) {
+      const categoryName = category.name;
+      const subcategories = category.subcategories || [];
+
+      // Format: "Category Name (Subcategory1, Subcategory2)"
+      let categoryText = categoryName;
+      if (subcategories.length > 0) {
+        const subcategoryNames = subcategories.map((sub: any) => sub.name).join(', ');
+        categoryText += ` (${subcategoryNames})`;
+      }
+
+      if (category.type === 'income') {
+        incomeCategories.push(categoryText);
+      } else {
+        expenseCategories.push(categoryText);
+      }
+    }
+  }
+
+  let categoriesText = "Categories: Choose the most specific category from this list:\n\n";
+
+  if (expenseCategories.length > 0) {
+    categoriesText += "EXPENSE CATEGORIES:\n";
+    categoriesText += expenseCategories.join(', ');
+    categoriesText += "\n\n";
+  }
+
+  if (incomeCategories.length > 0) {
+    categoriesText += "INCOME CATEGORIES:\n";
+    categoriesText += incomeCategories.join(', ');
+    categoriesText += "\n\n";
+  }
+
+  categoriesText += "For subcategories (items in parentheses), use the specific subcategory name if it's a better match.";
+
+  logger.info(`Formatted ${categories.length} passed categories (${expenseCategories.length} expense, ${incomeCategories.length} income)`);
+  return categoriesText;
+}
 
 async function fetchUserCategories(userId: string): Promise<string> {
   try {
@@ -211,32 +279,53 @@ function getDefaultCategoriesText(): string {
 
 // MARK: - Receipt Analysis Endpoint
 
-app.post('/api/analyze-receipt', verifyAuth, async (req: AuthenticatedRequest, res: Response) => {
+app.post('/api/analyze-receipt', optionalAuth, async (req: AuthenticatedRequest, res: Response) => {
   const requestId = Math.random().toString(36).substr(2, 9);
-  
+
   // EMERGENCY DEBUG: Use console.log to force output
   console.log(`🚨 [${requestId}] Receipt analysis ENTRY POINT`);
   console.log(`🚨 [${requestId}] Headers:`, Object.keys(req.headers));
   console.log(`🚨 [${requestId}] Content-Type:`, req.headers['content-type']);
   console.log(`🚨 [${requestId}] Body type:`, typeof req.body);
   console.log(`🚨 [${requestId}] Body:`, req.body ? Object.keys(req.body) : 'NULL BODY');
-  
+
   logger.error(`🚨 EMERGENCY DEBUG [${requestId}] Receipt analysis started`);
-  
+
   try {
-    const userId = req.user.uid;
-    logger.error(`🚨 EMERGENCY DEBUG Receipt analysis requested by user: ${userId}`);
+    // Use user ID if authenticated, otherwise use IP address for rate limiting
+    const userId = req.user?.uid || req.ip || 'anonymous';
+    const isAuthenticated = !!req.user;
+    logger.info(`Receipt analysis requested by ${isAuthenticated ? 'authenticated user' : 'anonymous user'}: ${userId}`);
 
     // Rate limiting
-    if (!checkRateLimit(userId, 20, 3600000)) { // 20 requests per hour
-      return res.status(429).json({ 
+    const rateLimit = 50; // 50 requests/hour for all users
+    if (!checkRateLimit(userId, rateLimit, 3600000)) {
+      return res.status(429).json({
         error: 'Rate limit exceeded',
         message: 'Too many receipt analysis requests. Please try again in an hour.'
       });
     }
-    
-    // Fetch user's categories for personalized AI analysis
-    const userCategoriesText = await fetchUserCategories(userId);
+
+    // Determine which categories to use for AI analysis
+    // Priority: 1. Categories passed in request body (from iOS local storage)
+    //           2. Categories from Firestore (for authenticated users)
+    //           3. Default categories (fallback)
+    let userCategoriesText: string;
+    const passedCategories = req.body?.categories;
+
+    if (passedCategories && Array.isArray(passedCategories) && passedCategories.length > 0) {
+      // Use categories passed from iOS app (works for both auth and unauth users)
+      userCategoriesText = formatPassedCategories(passedCategories);
+      logger.info(`Using ${passedCategories.length} categories passed from iOS app`);
+    } else if (isAuthenticated) {
+      // Fetch from Firestore for authenticated users without passed categories
+      userCategoriesText = await fetchUserCategories(userId);
+      logger.info('Using categories from Firestore for authenticated user');
+    } else {
+      // Fall back to default categories
+      userCategoriesText = getDefaultCategoriesText();
+      logger.info('Using default categories (no passed categories, not authenticated)');
+    }
 
     // Debug request details
     logger.info(`📋 REQUEST DETAILS:`);
@@ -327,66 +416,18 @@ app.post('/api/analyze-receipt', verifyAuth, async (req: AuthenticatedRequest, r
       return res.status(500).json({ error: 'Receipt analysis service not available' });
     }
 
-    // Call OpenRouter API
-    logger.info('Calling OpenRouter API...');
-    const openRouterResponse = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-        'HTTP-Referer': 'https://cashmonki.app',
-        'X-Title': 'CashMonki Receipt Analyzer'
-      },
-      body: JSON.stringify({
-        model: 'openai/gpt-4o',
-        messages: [
-          {
-            role: 'user',
-            content: [
-              {
-                type: 'text',
-                text: `Analyze this receipt image and return ONLY valid JSON in this exact format:
-                {
-                  "merchant_name": "exact business name from receipt",
-                  "amount": 20.50,
-                  "currency": "USD",
-                  "date": "YYYY-MM-DD",
-                  "category": "category name",
-                  "items": [
-                    {"name": "item or service name", "price": 20.50, "quantity": 1}
-                  ],
-                  "confidence": 0.95
-                }
-                
-                If no date is visible on receipt, use:
-                "date": "TODAY"
-                
-                IMPORTANT:
-                - Return ONLY the JSON object, no other text
-                - Use numbers for amounts, not strings
-                - Date and time format: YYYY-MM-DD HH:MM (24-hour format) if time is available on receipt, or just YYYY-MM-DD if only date is shown
-                - Extract the EXACT timestamp from the receipt when available (e.g., "2024-11-16 14:30" for 2:30 PM)
-                - If only date is visible, use format: YYYY-MM-DD
-                - CRITICAL: If NO DATE is found on the receipt, return "TODAY" as the date value
-                - IMPORTANT: Always prioritize extracting time when visible on receipt. If no time found, the app will use creation time automatically.
-                
-                IMPORTANT CURRENCY DETECTION:
-                - Look for currency symbols: $, €, £, ¥, ₹, ₦, R, ₩, ₡, ₴, ₫, ₱, etc.
-                - Look for currency codes: USD, EUR, GBP, JPY, INR, NGN, ZAR, KRW, CRC, UAH, VND, PHP, etc.
-                - Look for currency names: "Dollar", "Euro", "Pound", "Yen", "Rupee", "Naira", "Dong", "Peso", etc.
-                - Common currencies: USD, EUR, GBP, CAD, AUD, JPY, CNY, INR, MXN, BRL, ZAR, NGN, KES, GHS, VND, PHP, THB, SGD, MYR, IDR, etc.
-                - Return the 3-letter ISO currency code (e.g., "USD" not "$", "EUR" not "€", "VND" not "₫")
-                - If no currency is visible, analyze the merchant/location context to guess currency
-                
-                CURRENCY-SPECIFIC NUMBER FORMATTING:
-                - For Vietnamese Dong (VND) receipts: Convert period-separated numbers to standard format
-                  Examples: "60.000" → 60000, "1.234.567" → 1234567, "23.450.000" → 23450000
-                - For VND amounts, periods are thousands separators, NOT decimal points
-                - Return clean numbers without formatting: 60000 instead of "60.000"
-                - If you see ₫ symbol or Vietnamese text, use VND currency code
-                - Vietnamese examples: "60.000 ₫" = 60000, "1.234.567 VND" = 1234567
-                
-                - Available categories (ONLY use these exact categories, do NOT create new ones):
+    // Determine if we have custom categories passed from the app
+    const hasCustomCategories = passedCategories && Array.isArray(passedCategories) && passedCategories.length > 0;
+
+    // Build category instruction - use ONLY custom categories if passed, otherwise use defaults
+    const categoryInstruction = hasCustomCategories
+      ? `CATEGORY SELECTION - CRITICAL:
+                ${userCategoriesText}
+
+                IMPORTANT: You MUST use ONLY the categories listed above. Do NOT use any other category names.
+                Choose the most specific category or subcategory that matches the receipt.
+                If no category matches well, use "Other".`
+      : `Available categories (ONLY use these exact categories, do NOT create new ones):
                   * Home: "Home", "Rent/Mortgage", "Property Tax", "Repairs"
                   * Utilities: "Utilities", "Electricity", "Water", "Internet"
                   * Food: "Food", "Groceries", "Snacks", "Meal Prep"
@@ -419,10 +460,71 @@ app.post('/api/analyze-receipt', verifyAuth, async (req: AuthenticatedRequest, r
                   * Other: "Other", "Fees", "Miscellaneous", "Uncategorized"
                 - IMPORTANT: ONLY use categories from the list above. Do NOT create or suggest new categories.
                 - Choose the MOST SPECIFIC subcategory that matches the receipt (e.g., "Groceries" instead of "Food")
-                - If uncertain, use the closest matching category or "Other"
-                
-                ${userCategoriesText}
-                
+                - If uncertain, use the closest matching category or "Other"`;
+
+    logger.info(`Using ${hasCustomCategories ? 'CUSTOM' : 'DEFAULT'} categories for AI prompt`);
+
+    // Call OpenRouter API
+    logger.info('Calling OpenRouter API...');
+    const openRouterResponse = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+        'HTTP-Referer': 'https://cashmonki.app',
+        'X-Title': 'CashMonki Receipt Analyzer'
+      },
+      body: JSON.stringify({
+        model: 'openai/gpt-4o',
+        messages: [
+          {
+            role: 'user',
+            content: [
+              {
+                type: 'text',
+                text: `Analyze this receipt image and return ONLY valid JSON in this exact format:
+                {
+                  "merchant_name": "exact business name from receipt",
+                  "amount": 20.50,
+                  "currency": "USD",
+                  "date": "YYYY-MM-DD",
+                  "category": "category name",
+                  "items": [
+                    {"name": "item or service name", "price": 20.50, "quantity": 1}
+                  ],
+                  "confidence": 0.95
+                }
+
+                If no date is visible on receipt, use:
+                "date": "TODAY"
+
+                IMPORTANT:
+                - Return ONLY the JSON object, no other text
+                - Use numbers for amounts, not strings
+                - Date and time format: YYYY-MM-DD HH:MM (24-hour format) if time is available on receipt, or just YYYY-MM-DD if only date is shown
+                - Extract the EXACT timestamp from the receipt when available (e.g., "2024-11-16 14:30" for 2:30 PM)
+                - If only date is visible, use format: YYYY-MM-DD
+                - CRITICAL: If NO DATE is found on the receipt, return "TODAY" as the date value
+                - IMPORTANT: Always prioritize extracting time when visible on receipt. If no time found, the app will use creation time automatically.
+
+                IMPORTANT CURRENCY DETECTION:
+                - Look for currency symbols: $, €, £, ¥, ₹, ₦, R, ₩, ₡, ₴, ₫, ₱, etc.
+                - Look for currency codes: USD, EUR, GBP, JPY, INR, NGN, ZAR, KRW, CRC, UAH, VND, PHP, etc.
+                - Look for currency names: "Dollar", "Euro", "Pound", "Yen", "Rupee", "Naira", "Dong", "Peso", etc.
+                - Common currencies: USD, EUR, GBP, CAD, AUD, JPY, CNY, INR, MXN, BRL, ZAR, NGN, KES, GHS, VND, PHP, THB, SGD, MYR, IDR, etc.
+                - Return the 3-letter ISO currency code (e.g., "USD" not "$", "EUR" not "€", "VND" not "₫")
+                - If no currency is visible, analyze the merchant/location context to guess currency
+
+                CURRENCY-SPECIFIC NUMBER FORMATTING:
+                - For Vietnamese Dong (VND) receipts: Convert period-separated numbers to standard format
+                  Examples: "60.000" → 60000, "1.234.567" → 1234567, "23.450.000" → 23450000
+                - For VND amounts, periods are thousands separators, NOT decimal points
+                - Return clean numbers without formatting: 60000 instead of "60.000"
+                - If you see ₫ symbol or Vietnamese text, use VND currency code
+                - Vietnamese examples: "60.000 ₫" = 60000, "1.234.567 VND" = 1234567
+
+                ${categoryInstruction}
+
                 Be accurate with numbers, dates, and especially CURRENCY detection. If unclear, use your best judgment and lower the confidence score.`
               },
               {
@@ -535,6 +637,129 @@ app.get('/api/app-config', verifyAuth, async (req: AuthenticatedRequest, res: Re
   } catch (error) {
     logger.error('App config error:', error);
     res.status(500).json({ error: 'Failed to load configuration' });
+  }
+});
+
+// MARK: - Roast Generation Endpoint
+
+app.post('/api/generate-roast', optionalAuth, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    // Use user ID if authenticated, otherwise use IP address for rate limiting
+    const userId = req.user?.uid || req.ip || 'anonymous';
+    const isAuthenticated = !!req.user;
+    logger.info(`Roast generation requested by ${isAuthenticated ? 'authenticated user' : 'anonymous user'}: ${userId}`);
+
+    // Rate limiting for roasts (more restrictive for unauthenticated)
+    const rateLimit = isAuthenticated ? 50 : 10; // 50/hour for auth, 10/hour for anon
+    if (!checkRateLimit(userId + '_roast', rateLimit, 3600000)) {
+      return res.status(429).json({
+        error: 'Rate limit exceeded',
+        message: 'Too many roast requests. Please try again later.'
+      });
+    }
+
+    const { amount, merchant, category, notes, lineItems, userName } = req.body;
+
+    if (!amount || !merchant) {
+      return res.status(400).json({ error: 'Missing required fields: amount, merchant' });
+    }
+
+    // Get OpenRouter API key from Firebase secrets
+    const apiKey = openRouterApiKey.value()?.trim();
+
+    if (!apiKey) {
+      logger.error('OpenRouter API key not configured for roast');
+      return res.status(500).json({ error: 'Roast service not available' });
+    }
+
+    // Build context string with optional notes and line items
+    const contextParts = [amount + ` at ` + merchant + ` for ` + (category || `stuff`)];
+    if (notes && notes.trim()) {
+      contextParts.push(`(notes: ` + notes + `)`);
+    }
+    // Add line items for extra roasting context
+    if (lineItems && Array.isArray(lineItems) && lineItems.length > 0) {
+      if (lineItems.length > 5) {
+        // Many items - summarize the receipt
+        const topItems = lineItems.slice(0, 3).map((item: any) => {
+          const name = item.name || item.description || 'item';
+          return name;
+        }).join(', ');
+        contextParts.push(`(${lineItems.length} items including: ` + topItems + `)`);
+      } else {
+        // Few items - list them all
+        const itemsSummary = lineItems.map((item: any) => {
+          const name = item.name || item.description || 'item';
+          const qty = item.quantity || 1;
+          return qty > 1 ? `${qty}x ${name}` : name;
+        }).join(', ');
+        contextParts.push(`(bought: ` + itemsSummary + `)`);
+      }
+    }
+    const purchaseContext = contextParts.join(` `);
+
+    // Call OpenRouter API with deadpan roast prompt
+    logger.info('Generating roast via OpenRouter...');
+    const openRouterResponse = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+        'HTTP-Referer': 'https://cashmonki.app',
+        'X-Title': 'CashMonki Receipt Roaster'
+      },
+      body: JSON.stringify({
+        model: 'openai/gpt-4o-mini',
+        messages: [
+          {
+            role: 'system',
+            content: `Generate a short, savage roast for a purchase. Target the behavior behind the purchase, not the person. Use simple, clear words. Tone is calm, deadpan, and quietly judgmental. No emojis, no slang, no insults, no moral lectures.
+
+Rules:
+- 100 characters or fewer
+- 1 to 2 short sentences
+- State the purchase and call out the real reason behind it (habit, boredom, impulse, avoidance)
+- No closers or one-word endings like "Again." "Anyway." "Sure." etc.
+- Plain language, no clever metaphors
+- Savagery level: 6.5/10
+
+Examples:
+"₱600 on delivery when you have food at home"
+"That coffee isn't energy, it's just a daily habit you won't admit to"
+"₱350 on snacks because you were bored, not hungry"`
+          },
+          {
+            role: 'user',
+            content: `Roast this purchase (100 chars max): ` + purchaseContext + ` [seed:${Date.now()}]`
+          }
+        ],
+        max_tokens: 200,
+        temperature: 1.0
+      })
+    });
+
+    if (!openRouterResponse.ok) {
+      const errorText = await openRouterResponse.text();
+      logger.error('OpenRouter roast API error:', errorText);
+      return res.status(500).json({ error: 'Roast generation failed' });
+    }
+
+    const openRouterData = await openRouterResponse.json() as any;
+    const roastText = openRouterData.choices[0]?.message?.content?.trim();
+
+    if (!roastText) {
+      return res.status(500).json({ error: 'No roast generated' });
+    }
+
+    logger.info(`Roast generated for user ${userId}: ${roastText.substring(0, 50)}...`);
+    res.json({ roast: roastText });
+
+  } catch (error) {
+    logger.error('Roast generation error:', error);
+    res.status(500).json({
+      error: 'Internal server error',
+      message: 'Failed to generate roast. Please try again.'
+    });
   }
 });
 

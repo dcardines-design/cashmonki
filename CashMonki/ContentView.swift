@@ -14,7 +14,7 @@ import UIKit
 import FirebaseAuth
 #endif
 
-enum Tab: Hashable { case home, transactions, settings }
+enum Tab: Hashable { case home, transactions, budgets, settings }
 
 struct NavbarFramePreferenceKey: PreferenceKey {
     static var defaultValue: CGRect = .zero
@@ -28,10 +28,22 @@ struct ContentView: View {
     @State private var primaryCurrency: Currency = .php
     @ObservedObject private var userManager = UserManager.shared
     @ObservedObject private var onboardingStateManager = OnboardingStateManager.shared
+    @ObservedObject private var revenueCatManager = RevenueCatManager.shared
     @EnvironmentObject private var toastManager: ToastManager
     @Environment(\.scenePhase) private var scenePhase
     @State private var showingOnboarding = false
     @State private var observersSetUp = false
+    @State private var hasShownTrialEndedToast = false
+    @State private var showingTrialEndedPaywall = false
+
+    // Receipt confirmation state (moved here so sheet shows on any tab)
+    @State private var showingReceiptConfirmation = false
+    @State private var pendingReceiptImage: UIImage?
+    @State private var pendingReceiptAnalysis: ReceiptAnalysis?
+
+    // Roast My Receipt feature (moved here so it works from any tab)
+    @AppStorage("isRoastReceiptEnabled") private var isRoastReceiptEnabled: Bool = false
+    @State private var roastSheetMessage: RoastMessage? = nil
 
     var body: some View {
         ZStack {
@@ -41,19 +53,40 @@ struct ContentView: View {
                 ZStack {
                     switch selectedTab {
                     case .home:
-                        HomePage(selectedTab: $selectedTab, primaryCurrency: $primaryCurrency)
+                        HomePage(
+                            selectedTab: $selectedTab,
+                            primaryCurrency: $primaryCurrency,
+                            showingReceiptConfirmation: $showingReceiptConfirmation,
+                            pendingReceiptImage: $pendingReceiptImage,
+                            pendingReceiptAnalysis: $pendingReceiptAnalysis
+                        )
                     case .transactions:
                         ReceiptsPage()
+                    case .budgets:
+                        BudgetsPage()
                     case .settings:
-                        SettingsPage(primaryCurrency: $primaryCurrency)
+                        SettingsPage(primaryCurrency: $primaryCurrency, selectedTab: $selectedTab)
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                
+
                 // Custom navigation bar
                 customNavigationBar
             }
+
+            // Blur overlay for roast sheet
+            if roastSheetMessage != nil {
+                Rectangle()
+                    .foregroundColor(.clear)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(.ultraThinMaterial)
+                    .background(Color.white.opacity(0.05))
+                    .ignoresSafeArea()
+                    .allowsHitTesting(false)
+                    .transition(.opacity)
+            }
         }
+        .animation(.easeOut(duration: 0.3), value: roastSheetMessage != nil)
         .ignoresSafeArea(.container, edges: .bottom)
         .preferredColorScheme(.light) // Force light mode - never change colors for dark mode
         .onAppear {
@@ -88,7 +121,12 @@ struct ContentView: View {
                     object: nil,
                     queue: .main
                 ) { notification in
-                    print("🎯 ContentView: Received subscription success notification")
+                    print("🎫 ======= SUBSCRIPTION SUCCESS NOTIFICATION =======")
+                    print("🎫 SUCCESS: Before - showingTrialEndedPaywall=\(self.showingTrialEndedPaywall), hasShownTrialEndedToast=\(self.hasShownTrialEndedToast)")
+                    // Ensure paywall is dismissed and stays dismissed
+                    self.showingTrialEndedPaywall = false
+                    self.hasShownTrialEndedToast = true // Prevent re-showing
+                    print("🎫 SUCCESS: After - showingTrialEndedPaywall=\(self.showingTrialEndedPaywall), hasShownTrialEndedToast=\(self.hasShownTrialEndedToast)")
                     self.toastManager.showSubscriptionSuccess()
                 }
 
@@ -121,7 +159,7 @@ struct ContentView: View {
         .onChange(of: scenePhase) { _, newPhase in
             print("🔍 ContentView: Scene phase changed to: \(newPhase)")
             print("🔍 ContentView: Authentication status: \(AuthenticationManager.shared.isAuthenticated)")
-            
+
             // Use smart resume logic when app becomes active
             if newPhase == .active {
                 print("🔍 ContentView: Scene became active - using smart resume")
@@ -131,6 +169,28 @@ struct ContentView: View {
                 } else {
                     print("⚠️ ContentView: User not authenticated - skipping onboarding check")
                 }
+
+                // Only check for lapsed paywall if user is NOT a pro subscriber
+                // This prevents re-showing paywall when returning from App Store purchase
+                print("🎫 SCENE ACTIVE: isProUser=\(revenueCatManager.isProUser), hasShownTrialEndedToast=\(hasShownTrialEndedToast)")
+                if !revenueCatManager.isProUser {
+                    print("🎫 SCENE ACTIVE: Triggering paywall check...")
+                    checkAndShowLapsedUserPaywall()
+                } else {
+                    print("🎫 SCENE ACTIVE: Skipping - user is Pro")
+                }
+            }
+        }
+        .onChange(of: revenueCatManager.customerInfo) { oldValue, newValue in
+            // When RevenueCat finishes loading customer info, check for lapsed trial
+            // Only check on initial load (nil -> non-nil) and only if not already a pro user
+            print("🎫 CUSTOMER INFO CHANGED: old=\(oldValue != nil ? "loaded" : "nil"), new=\(newValue != nil ? "loaded" : "nil")")
+            print("🎫 CUSTOMER INFO CHANGED: isProUser=\(revenueCatManager.isProUser), hasShownTrialEndedToast=\(hasShownTrialEndedToast)")
+            if oldValue == nil && newValue != nil && !revenueCatManager.isProUser {
+                print("🎫 CUSTOMER INFO: Triggering paywall check (initial load, not pro)...")
+                checkAndShowLapsedUserPaywall()
+            } else if oldValue == nil && newValue != nil && revenueCatManager.isProUser {
+                print("🎫 CUSTOMER INFO: Skipping - user is now Pro")
             }
         }
         .fullScreenCover(isPresented: $showingOnboarding) {
@@ -151,8 +211,109 @@ struct ContentView: View {
             )
             .environmentObject(toastManager)
         }
+        .fullScreenCover(isPresented: $showingTrialEndedPaywall) {
+            CustomPaywallSheet(isPresented: $showingTrialEndedPaywall)
+                .environmentObject(toastManager)
+        }
+        .sheet(isPresented: $showingReceiptConfirmation) {
+            if let image = pendingReceiptImage, let analysis = pendingReceiptAnalysis {
+                ReceiptConfirmationSheet(
+                    originalImage: image,
+                    analysis: analysis,
+                    primaryCurrency: primaryCurrency,
+                    onConfirm: { confirmedAnalysis, note in
+                        // Create transaction from confirmed analysis with currency conversion
+                        let categoryResult = CategoriesManager.shared.findCategoryOrSubcategory(by: confirmedAnalysis.category)
+                        let categoryId = categoryResult.category?.id ?? categoryResult.subcategory?.id
+
+                        // Determine if this is income based on category type
+                        let isIncome = categoryResult.category?.type == .income || categoryResult.subcategory?.type == .income
+
+                        let confirmedTransaction = CurrencyRateManager.shared.createTransaction(
+                            accountID: userManager.currentUser.id,
+                            walletID: AccountManager.shared.selectedSubAccountId,
+                            category: confirmedAnalysis.category,
+                            categoryId: categoryId,
+                            originalAmount: confirmedAnalysis.totalAmount,
+                            originalCurrency: confirmedAnalysis.currency,
+                            date: confirmedAnalysis.date,
+                            merchantName: confirmedAnalysis.merchantName,
+                            note: note,
+                            items: confirmedAnalysis.items,
+                            isIncome: isIncome,
+                            receiptImage: image
+                        )
+
+                        // Add transaction
+                        userManager.addTransaction(confirmedTransaction)
+
+                        // Show success toast
+                        toastManager.showSuccess("Transaction added!")
+
+                        // Prepare roast data before clearing
+                        let shouldShowRoast = isRoastReceiptEnabled
+                        let roastAmount = CurrencyPreferences.shared.formatPrimaryAmount(abs(confirmedTransaction.amount))
+                        let roastMerchant = confirmedAnalysis.merchantName
+                        let roastCategory = confirmedAnalysis.category
+                        let roastNotes = confirmedTransaction.note
+                        let roastUserName = UserManager.shared.currentUser.name
+                        let roastLineItems: [[String: Any]] = confirmedAnalysis.items.map { item in
+                            ["description": item.description, "quantity": item.quantity]
+                        }
+
+                        // Clear pending data
+                        pendingReceiptImage = nil
+                        pendingReceiptAnalysis = nil
+                        showingReceiptConfirmation = false
+
+                        // Trigger roast if enabled
+                        if shouldShowRoast {
+                            Task {
+                                do {
+                                    let aiRoast = try await BackendAPIService.shared.generateRoast(
+                                        amount: roastAmount,
+                                        merchant: roastMerchant,
+                                        category: roastCategory,
+                                        notes: roastNotes,
+                                        lineItems: roastLineItems,
+                                        userName: roastUserName
+                                    )
+                                    await MainActor.run {
+                                        roastSheetMessage = RoastMessage(message: aiRoast)
+                                    }
+                                } catch {
+                                    print("⚠️ AI roast failed: \(error)")
+                                    // Fallback: show a simple roast message
+                                    await MainActor.run {
+                                        roastSheetMessage = RoastMessage(message: "Spent \(roastAmount) at \(roastMerchant)? Bold choice. 💸")
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    onCancel: {
+                        pendingReceiptImage = nil
+                        pendingReceiptAnalysis = nil
+                        showingReceiptConfirmation = false
+                    }
+                )
+                .presentationDetents([.fraction(0.98)])
+                .presentationDragIndicator(.hidden)
+                .environmentObject(toastManager)
+            }
+        }
+        .sheet(item: $roastSheetMessage) { roast in
+            RoastReceiptSheet(isPresented: Binding(
+                get: { roastSheetMessage != nil },
+                set: { if !$0 { roastSheetMessage = nil } }
+            ), roastMessage: roast.message)
+                .presentationDetents([.fraction(0.65), .fraction(0.98)], selection: .constant(.fraction(0.65)))
+                .presentationDragIndicator(.hidden)
+                .presentationBackground(.clear)
+                .presentationBackgroundInteraction(.disabled)
+        }
     }
-    
+
     // MARK: - Helper Methods
     
     private func initializePrimaryCurrency() {
@@ -180,7 +341,10 @@ struct ContentView: View {
     private func checkOnboardingWithStateManager() {
         print("🎯 ContentView: ======= USING ONBOARDING STATE MANAGER =======")
         print("🎯 ContentView: Current state: \(onboardingStateManager.currentState)")
-        
+
+        // CURRENT: No-auth flow - skip Firebase auth check
+        // FUTURE: Uncomment when re-enabling authentication
+        /*
         #if canImport(FirebaseAuth)
         // CRITICAL FIX: Ensure Firebase auth state is loaded before checking onboarding
         if Auth.auth().currentUser != nil {
@@ -194,7 +358,8 @@ struct ContentView: View {
             return
         }
         #endif
-        
+        */
+
         let shouldShowOnboarding = onboardingStateManager.shouldShowOnboardingOnResume()
         
         print("🎯 ContentView: State manager decision: shouldShow = \(shouldShowOnboarding)")
@@ -209,7 +374,76 @@ struct ContentView: View {
         // Print debug info for troubleshooting
         print(onboardingStateManager.getDebugInfo())
     }
-    
+
+    // MARK: - Lapsed User Paywall
+
+    private func checkAndShowLapsedUserPaywall() {
+        print("🎫 ======= checkAndShowLapsedUserPaywall CALLED =======")
+        print("🎫 CHECK: hasShownTrialEndedToast=\(hasShownTrialEndedToast)")
+        print("🎫 CHECK: showingTrialEndedPaywall=\(showingTrialEndedPaywall)")
+        print("🎫 CHECK: isProUser=\(revenueCatManager.isProUser)")
+        print("🎫 CHECK: hasUsedTrialBefore=\(revenueCatManager.hasUsedTrialBefore)")
+
+        // Multiple guards to prevent re-showing paywall after subscription
+        guard !hasShownTrialEndedToast else {
+            print("🎫 ContentView: ❌ Skipping - already shown this session")
+            return
+        }
+
+        // Don't show if paywall is already showing
+        guard !showingTrialEndedPaywall else {
+            print("🎫 ContentView: ❌ Skipping - paywall already visible")
+            return
+        }
+
+        // CRITICAL: Check isProUser immediately - don't show paywall to subscribers
+        guard !revenueCatManager.isProUser else {
+            print("🎫 ContentView: ❌ Skipping - user is Pro")
+            hasShownTrialEndedToast = true // Prevent future checks this session
+            return
+        }
+
+        print("🎫 CHECK: All guards passed, running background check...")
+
+        // Run check in background to avoid blocking UI
+        Task {
+            // Small delay to ensure RevenueCat has loaded
+            try? await Task.sleep(nanoseconds: 100_000_000) // 0.1s
+
+            await MainActor.run {
+                print("🎫 ASYNC CHECK: hasShownTrialEndedToast=\(hasShownTrialEndedToast)")
+                print("🎫 ASYNC CHECK: showingTrialEndedPaywall=\(showingTrialEndedPaywall)")
+                print("🎫 ASYNC CHECK: isProUser=\(revenueCatManager.isProUser)")
+
+                // Double-check guards after delay (state may have changed)
+                guard !hasShownTrialEndedToast else {
+                    print("🎫 ASYNC: ❌ Skipping - already shown")
+                    return
+                }
+                guard !showingTrialEndedPaywall else {
+                    print("🎫 ASYNC: ❌ Skipping - already visible")
+                    return
+                }
+                guard !revenueCatManager.isProUser else {
+                    print("🎫 ASYNC: ❌ Skipping - user became Pro")
+                    hasShownTrialEndedToast = true
+                    return
+                }
+
+                let hasUsedTrial = RevenueCatManager.shared.hasUsedTrialBefore
+                print("🎫 ASYNC CHECK: hasUsedTrial=\(hasUsedTrial)")
+
+                if hasUsedTrial {
+                    print("🎫 ContentView: ✅ SHOWING PAYWALL - lapsed trial user")
+                    hasShownTrialEndedToast = true
+                    showingTrialEndedPaywall = true
+                } else {
+                    print("🎫 ContentView: ❌ Not showing - user hasn't used trial")
+                }
+            }
+        }
+    }
+
     // MARK: - Custom Navigation Bar
     
     private var customNavigationBar: some View {
@@ -255,7 +489,28 @@ struct ContentView: View {
             .frame(maxWidth: .infinity)
             .buttonStyle(PlainButtonStyle())
             .animation(nil, value: selectedTab)
-            
+
+            // Budgets tab
+            Button(action: { selectedTab = .budgets }) {
+                VStack(spacing: 2) {
+                    Image("horizontal-bar-chart-03")
+                        .renderingMode(.template)
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(width: 24, height: 24)
+                        .foregroundColor(selectedTab == .budgets ? AppColors.primary : AppColors.foregroundTertiary)
+                    Text("Budgets")
+                        .font(
+                            Font.custom("Overused Grotesk", size: 11)
+                                .weight(.semibold)
+                        )
+                        .foregroundColor(selectedTab == .budgets ? AppColors.primary : AppColors.foregroundTertiary)
+                }
+            }
+            .frame(maxWidth: .infinity)
+            .buttonStyle(PlainButtonStyle())
+            .animation(nil, value: selectedTab)
+
             // Profile tab
             Button(action: { selectedTab = .settings }) {
                 VStack(spacing: 2) {

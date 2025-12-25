@@ -108,41 +108,71 @@ class AIReceiptAnalyzer {
     
     /// Analyze receipt using secure backend (recommended for production)
     func analyzeReceiptSecure(image: UIImage, creationTime: Date = Date()) async throws -> ReceiptAnalysis {
+        let analysisStart = Date()
         print("🔒 Starting secure receipt analysis via backend...")
         print("📸 Image dimensions: \(image.size.width) x \(image.size.height)")
+        print("🕐 DEBUG TIMING: Analysis started at \(analysisStart)")
 
-        // Resize image more aggressively for backend (smaller = faster upload, less "message too long" errors)
-        let resizedImage = resizeImageForBackend(image)
+        // PERFORMANCE FIX: Move heavy image processing to background thread
+        // This prevents UI hanging during resize and compression
+        let finalImageData = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Data, Error>) in
+            DispatchQueue.global(qos: .userInitiated).async {
+                let processingStart = Date()
+                print("🕐 DEBUG TIMING: Image processing started on background thread")
 
-        // Use more aggressive compression for network transfer
-        // Start with 0.5 quality and reduce if still too large
-        var compressionQuality: CGFloat = 0.5
-        var imageData = resizedImage.jpegData(compressionQuality: compressionQuality)
+                // Resize image more aggressively for backend (smaller = faster upload, less "message too long" errors)
+                let resizedImage = self.resizeImageForBackend(image)
+                let resizeEnd = Date()
+                print("🕐 DEBUG TIMING: Resize took \(String(format: "%.3f", resizeEnd.timeIntervalSince(processingStart) * 1000))ms")
 
-        // If image is still too large (>500KB), compress more aggressively
-        let maxSizeBytes = 500_000 // 500KB limit for reliable network transfer
-        while let data = imageData, data.count > maxSizeBytes, compressionQuality > 0.1 {
-            compressionQuality -= 0.1
-            imageData = resizedImage.jpegData(compressionQuality: compressionQuality)
-            print("📐 Reducing compression to \(compressionQuality): \(data.count) bytes")
+                // Use more aggressive compression for network transfer
+                // Start with 0.5 quality and reduce if still too large
+                var compressionQuality: CGFloat = 0.5
+                var imageData = resizedImage.jpegData(compressionQuality: compressionQuality)
+
+                // If image is still too large (>500KB), compress more aggressively
+                let maxSizeBytes = 500_000 // 500KB limit for reliable network transfer
+                while let data = imageData, data.count > maxSizeBytes, compressionQuality > 0.1 {
+                    compressionQuality -= 0.1
+                    imageData = resizedImage.jpegData(compressionQuality: compressionQuality)
+                    print("📐 Reducing compression to \(compressionQuality): \(data.count) bytes")
+                }
+
+                let compressionEnd = Date()
+                print("🕐 DEBUG TIMING: Compression took \(String(format: "%.3f", compressionEnd.timeIntervalSince(resizeEnd) * 1000))ms")
+                print("🕐 DEBUG TIMING: Total image processing took \(String(format: "%.3f", compressionEnd.timeIntervalSince(processingStart) * 1000))ms")
+
+                guard let finalData = imageData else {
+                    continuation.resume(throwing: ReceiptAIError.imageProcessingFailed)
+                    return
+                }
+
+                print("📦 Final image size: \(finalData.count) bytes (\(String(format: "%.1f", Double(finalData.count) / 1024))KB) at \(String(format: "%.0f", compressionQuality * 100))% quality")
+                continuation.resume(returning: finalData)
+            }
         }
 
-        guard let finalImageData = imageData else {
-            throw ReceiptAIError.imageProcessingFailed
-        }
+        let processingDone = Date()
+        print("🕐 DEBUG TIMING: Image processing completed, elapsed: \(String(format: "%.3f", processingDone.timeIntervalSince(analysisStart) * 1000))ms")
 
-        print("📦 Final image size: \(finalImageData.count) bytes (\(String(format: "%.1f", Double(finalImageData.count) / 1024))KB) at \(String(format: "%.0f", compressionQuality * 100))% quality")
+        // Get local categories to pass to backend
+        let localCategories = getLocalCategoriesForBackend()
+        print("📂 Passing \(localCategories.count) local categories to backend")
 
-        // Use secure backend service
-        let backendResult = try await backendService.analyzeReceipt(imageData: finalImageData)
-        
+        // Use secure backend service with local categories
+        let apiStart = Date()
+        print("🕐 DEBUG TIMING: Starting API call to backend...")
+        let backendResult = try await backendService.analyzeReceipt(imageData: finalImageData, categories: localCategories)
+        let apiEnd = Date()
+        print("🕐 DEBUG TIMING: API call took \(String(format: "%.3f", apiEnd.timeIntervalSince(apiStart) * 1000))ms")
+
         // Convert backend result to ReceiptAnalysis
         // Parse detected currency from backend or fallback to user's primary currency
         let detectedCurrency = Currency.allCases.first { $0.rawValue.uppercased() == (backendResult.currency?.uppercased() ?? "") } ?? CurrencyPreferences.shared.primaryCurrency
-        
+
         print("💱 AIReceiptAnalyzer: Backend detected currency: '\(backendResult.currency ?? "none")'")
         print("💱 AIReceiptAnalyzer: Mapped to Currency enum: \(detectedCurrency.rawValue)")
-        
+
         let analysis = ReceiptAnalysis(
             merchantName: backendResult.merchantName,
             totalAmount: backendResult.amount,
@@ -153,11 +183,54 @@ class AIReceiptAnalyzer {
             items: backendResult.items.map { ReceiptItem(description: $0.name, quantity: $0.quantity, unitPrice: $0.price, totalPrice: $0.price * Double($0.quantity)) },
             rawText: "Processed via secure backend"
         )
-        
+
+        let totalDuration = Date().timeIntervalSince(analysisStart)
+        print("🕐 DEBUG TIMING: TOTAL ANALYSIS TIME: \(String(format: "%.3f", totalDuration * 1000))ms")
         print("✅ Secure receipt analysis completed: \(analysis.merchantName) - \(analysis.totalAmount)")
         return analysis
     }
-    
+
+    /// Get local categories from CategoriesManager in format suitable for backend
+    private func getLocalCategoriesForBackend() -> [[String: Any]] {
+        let allCategories = CategoriesManager.shared.categories
+        print("📂 DEBUG: CategoriesManager has \(allCategories.count) total categories")
+
+        // Debug: Print first few category names
+        let firstFew = allCategories.prefix(5).map { "\($0.name) (deleted: \($0.isDeleted))" }
+        print("📂 DEBUG: First 5 categories: \(firstFew)")
+
+        let result = allCategories.compactMap { category -> [String: Any]? in
+            guard !category.isDeleted else { return nil }
+
+            var categoryDict: [String: Any] = [
+                "name": category.name,
+                "type": category.type.rawValue,
+                "isDeleted": category.isDeleted
+            ]
+
+            // Include subcategories
+            let subcategories = category.subcategories.map { sub -> [String: Any] in
+                return [
+                    "name": sub.name,
+                    "type": sub.type.rawValue
+                ]
+            }
+            if !subcategories.isEmpty {
+                categoryDict["subcategories"] = subcategories
+            }
+
+            return categoryDict
+        }
+
+        print("📂 DEBUG: Returning \(result.count) non-deleted categories to backend")
+
+        // Debug: Print category names being sent
+        let categoryNames = result.compactMap { $0["name"] as? String }
+        print("📂 DEBUG: Category names being sent: \(categoryNames.joined(separator: ", "))")
+
+        return result
+    }
+
     /// Legacy direct API method (deprecated - use analyzeReceiptSecure instead)
     func analyzeReceipt(image: UIImage, creationTime: Date = Date(), completion: @escaping (Result<ReceiptAnalysis, Error>) -> Void) {
         print("⚠️ Using legacy direct API - consider switching to analyzeReceiptSecure()")

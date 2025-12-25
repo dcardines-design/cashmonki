@@ -22,15 +22,15 @@ struct CurrencyOnboardingView: View {
     @State private var isLocationDetected = false
     
     /// Check if current user is Gmail user
+    /// CURRENT: Always false in no-auth flow
     private var isGmailUser: Bool {
-        #if canImport(FirebaseAuth)
-        if let currentUser = Auth.auth().currentUser {
-            return currentUser.providerData.contains { $0.providerID == "google.com" }
-        }
+        // FUTURE: Uncomment when re-enabling authentication
+        // #if canImport(FirebaseAuth)
+        // if let currentUser = Auth.auth().currentUser {
+        //     return currentUser.providerData.contains { $0.providerID == "google.com" }
+        // }
+        // #endif
         return false
-        #else
-        return false
-        #endif
     }
     
     var body: some View {
@@ -127,7 +127,7 @@ struct CurrencyOnboardingView: View {
             Spacer()
             
             // Title
-            Text("Complete Setup")
+            Text("Get Started")
                 .font(AppFonts.overusedGroteskSemiBold(size: 17))
                 .foregroundColor(AppColors.foregroundPrimary)
             

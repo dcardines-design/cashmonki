@@ -203,40 +203,45 @@ class OnboardingStateManager: ObservableObject {
     /// Determine initial step for new users (progression = 0)
     private func determineInitialStep() -> OnboardingStep {
         print("🔢 Determining initial step for new user...")
-        
+
+        // CURRENT: No-auth flow - skip email, start at name collection
+        // FUTURE: Uncomment Firebase Auth check when re-enabling authentication
+        /*
         #if canImport(FirebaseAuth)
         // Check if this is a Google user with verified email
         if let currentUser = Auth.auth().currentUser {
             let isGoogleSignIn = currentUser.providerData.contains { $0.providerID == "google.com" }
-            
+
             if isGoogleSignIn {
                 print("🔢 Google user detected - checking current progression")
                 let currentProgress = UserManager.shared.currentUser.onboardingCompleted
-                
+
                 if currentProgress == 0 {
-                    print("🔢 Google user at step 0 - setting progression to 1 (email verified) and showing name collection")
-                    // For Google users, set progression to 1 (email verified) and show name collection
                     setOnboardingProgress(to: 1)
                     return .nameCollection
                 } else {
-                    print("🔢 Google user already has progression \(currentProgress) - determining step from progression")
-                    // User already has progression, determine step directly from number
                     switch currentProgress {
                     case 1: return .nameCollection
                     case 2: return .currencySelection
                     case 3: return .goalSelection
                     case 4: return .transactionAddition
-                    case 5: return .transactionAddition // Complete
+                    case 5: return .transactionAddition
                     default: return .emailConfirmation
                     }
                 }
             }
         }
         #endif
-        
+        */
+        // Set progression to 1 (email step skipped) so the flow works correctly
+        print("🔢 New user - skipping email, starting at name collection")
+        setOnboardingProgress(to: 1)
+        return .nameCollection
+
+        // FUTURE: Auth flow - uncomment when re-enabling authentication
         // Regular users start with email verification
-        print("🔢 Regular user - starting at email confirmation (step 1)")
-        return .emailConfirmation
+        // print("🔢 Regular user - starting at email confirmation (step 1)")
+        // return .emailConfirmation
     }
     
     /// Set user to specific onboarding progression number
@@ -416,14 +421,20 @@ class OnboardingStateManager: ObservableObject {
     // MARK: - Individual Gate Checks
     
     private func checkEmailVerificationGate() -> Bool {
+        // CURRENT: No-auth flow - always return true (email not required)
+        print("🔍 OnboardingStateManager: Email gate - no-auth flow, auto-passing")
+        return true
+
+        // FUTURE: Uncomment when re-enabling authentication
+        /*
         guard let currentUser = AuthenticationManager.shared.currentUser else {
             return false
         }
-        
+
         // Check if user is Google sign-in (Google users are auto-verified)
-        let isGoogleUser = currentUser.firebaseUID.hasPrefix("google_") || 
+        let isGoogleUser = currentUser.firebaseUID.hasPrefix("google_") ||
                           isGoogleSignInUser()
-        
+
         if isGoogleUser {
             // Gmail users automatically pass email verification
             print("🔍 OnboardingStateManager: Email gate - Gmail user auto-verified")
@@ -440,35 +451,44 @@ class OnboardingStateManager: ObservableObject {
             return true
             #endif
         }
+        */
     }
     
     /// Check if current user signed in with Google
+    /// CURRENT: Always false in no-auth flow
     private func isGoogleSignInUser() -> Bool {
-        #if canImport(FirebaseAuth)
-        if let currentUser = Auth.auth().currentUser {
-            return currentUser.providerData.contains { $0.providerID == "google.com" }
-        }
-        #endif
+        // FUTURE: Uncomment when re-enabling authentication
+        // #if canImport(FirebaseAuth)
+        // if let currentUser = Auth.auth().currentUser {
+        //     return currentUser.providerData.contains { $0.providerID == "google.com" }
+        // }
+        // #endif
         return false
     }
     
     private func checkNameCollectionGate() -> Bool {
-        guard let currentUser = AuthenticationManager.shared.currentUser else {
-            return false
+        // Check completion flag first (handles skip case)
+        let hasCompletedNameCollection = UserDefaults.standard.bool(forKey: "hasCompletedNameCollection")
+        if hasCompletedNameCollection {
+            print("🔍 OnboardingStateManager: Name gate - completed via flag (may have skipped)")
+            return true
         }
-        
-        // Simple check: if user has any name saved locally, they've completed name collection
-        // This checks user data (not Firebase data) as requested
-        let trimmedName = currentUser.name.trimmingCharacters(in: .whitespacesAndNewlines)
-        let hasLocalName = !trimmedName.isEmpty
-        
-        print("🔍 OnboardingStateManager: Name gate - '\(currentUser.name)' -> valid: \(hasLocalName)")
+
+        // Also check if user has a name (for legacy users)
+        let userName = UserManager.shared.currentUser.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let hasLocalName = !userName.isEmpty
+
+        print("🔍 OnboardingStateManager: Name gate - '\(userName)' -> valid: \(hasLocalName)")
+        print("   - Completion flag: \(hasCompletedNameCollection)")
         print("   - Local name exists: \(hasLocalName)")
-        
+
         return hasLocalName
     }
     
+    /// CURRENT: Always false in no-auth flow
     private func checkFirebaseDisplayName() -> Bool {
+        // FUTURE: Uncomment when re-enabling authentication
+        /*
         #if canImport(FirebaseAuth)
         if let firebaseUser = Auth.auth().currentUser,
            let displayName = firebaseUser.displayName {
@@ -476,19 +496,20 @@ class OnboardingStateManager: ObservableObject {
             let nameComponents = trimmedName.components(separatedBy: " ").filter { !$0.isEmpty }
             let hasMultipleWords = nameComponents.count >= 2
             let hasContent = !trimmedName.isEmpty && trimmedName.count >= 1
-            
-            let isMeaningfulSingleName = nameComponents.count == 1 && 
+
+            let isMeaningfulSingleName = nameComponents.count == 1 &&
                                        trimmedName.count >= 1 &&
-                                       !trimmedName.contains("@") && 
+                                       !trimmedName.contains("@") &&
                                        !trimmedName.contains("+")
-            
+
             let hasValidFirebaseName = hasContent && (hasMultipleWords || isMeaningfulSingleName)
-            
+
             print("🔥 OnboardingStateManager: Firebase displayName: '\(displayName)' -> valid: \(hasValidFirebaseName)")
             return hasValidFirebaseName
         }
         #endif
-        print("🔥 OnboardingStateManager: No Firebase displayName found")
+        */
+        print("🔥 OnboardingStateManager: No Firebase displayName (no-auth flow)")
         return false
     }
     

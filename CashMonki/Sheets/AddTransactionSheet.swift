@@ -61,14 +61,14 @@ struct AddTransactionSheet: View {
                         showingCurrencyPicker = true
                     }, size: .md, focusBinding: $isAmountFocused)
 
-                    // Merchant Name Field
-                    AppInputField.merchant(text: $merchantName, size: .md, focusBinding: $isMerchantFocused)
+                    // Category Field
+                    AppInputField.categoryById(selectedCategoryId: $selectedCategoryId, size: .md)
 
                     // Date Field with Time
                     AppInputField.date(title: "Date", dateValue: $date, components: [.date, .hourAndMinute], size: .md)
 
-                    // Category Field
-                    AppInputField.categoryById(selectedCategoryId: $selectedCategoryId, size: .md)
+                    // Merchant Name Field
+                    AppInputField.merchant(text: $merchantName, size: .md, focusBinding: $isMerchantFocused)
                     
                     // Note Field
                     AppInputField.text(

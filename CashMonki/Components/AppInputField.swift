@@ -751,7 +751,12 @@ extension AppInputField {
     static func categoryById(selectedCategoryId: Binding<UUID?>, size: Size = .md, transactionAmount: Double? = nil) -> some View {
         CategoryByIdInputField(selectedCategoryId: selectedCategoryId, size: size, transactionAmount: transactionAmount)
     }
-    
+
+    /// Creates a budget category selection field (parent expense categories only)
+    static func budgetCategory(selectedCategoryId: Binding<UUID?>, selectedCategoryName: Binding<String>, size: Size = .md) -> some View {
+        BudgetCategoryInputField(selectedCategoryId: selectedCategoryId, selectedCategoryName: selectedCategoryName, size: size)
+    }
+
     static func currency(selectedCurrency: Binding<Currency>, size: Size = .md, title: String = "Currency") -> some View {
         CurrencyInputField(selectedCurrency: selectedCurrency, size: size, title: title)
     }
@@ -936,13 +941,110 @@ struct CategoryByIdInputField: View {
     }
 }
 
+// MARK: - Budget Category Input Field
+
+struct BudgetCategoryInputField: View {
+    @Binding var selectedCategoryId: UUID?
+    @Binding var selectedCategoryName: String
+    let size: AppInputField.Size
+
+    @State private var showingCategoryPicker = false
+    @ObservedObject private var categoriesManager = CategoriesManager.shared
+
+    private var selectedCategoryEmoji: String {
+        guard let categoryId = selectedCategoryId else { return "" }
+
+        let result = categoriesManager.findCategoryOrSubcategoryById(categoryId)
+        if let category = result?.category {
+            return category.emoji
+        } else if let subcategory = result?.subcategory {
+            return subcategory.emoji
+        }
+        return TxnCategoryIcon.emojiFor(category: selectedCategoryName)
+    }
+
+    private var displayName: String {
+        guard let categoryId = selectedCategoryId else { return "" }
+
+        let result = categoriesManager.findCategoryOrSubcategoryById(categoryId)
+        if let category = result?.category {
+            return category.name
+        } else if let subcategory = result?.subcategory {
+            return subcategory.name
+        }
+        return selectedCategoryName
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Category")
+                .font(.custom("OverusedGrotesk-Medium", size: 16))
+                .foregroundStyle(AppColors.foregroundSecondary)
+
+            Button(action: {
+                showingCategoryPicker = true
+            }) {
+                HStack(spacing: 8) {
+                    // Show emoji if category is selected
+                    if selectedCategoryId != nil && !selectedCategoryEmoji.isEmpty {
+                        Text(selectedCategoryEmoji)
+                            .font(.system(size: 18))
+                    }
+
+                    Text(selectedCategoryId == nil ? "Select Category" : displayName)
+                        .font(AppFonts.overusedGroteskMedium(size: size.fontSize))
+                        .foregroundStyle(selectedCategoryId == nil ? AppColors.foregroundSecondary : AppColors.foregroundPrimary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+
+                    AppIcon(
+                        assetName: "chevron-right",
+                        fallbackSystemName: "chevron.right"
+                    )
+                    .foregroundStyle(AppColors.primary)
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, size.verticalPadding)
+                .background(AppColors.surfacePrimary)
+                .cornerRadius(10)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10)
+                        .inset(by: 0.5)
+                        .stroke(Color.clear, lineWidth: 1)
+                )
+            }
+        }
+        .sheet(isPresented: $showingCategoryPicker) {
+            CategoryPickerSheet(
+                selectedCategoryId: $selectedCategoryId,
+                isPresented: $showingCategoryPicker,
+                expenseOnly: true  // Only show expense categories for budgets
+            )
+            .presentationDetents([.fraction(0.98)])
+            .presentationDragIndicator(.hidden)
+            .presentationBackground(.thinMaterial)
+            .presentationCornerRadius(20)
+        }
+        .onChange(of: selectedCategoryId) { _, newId in
+            // Update the category name when selection changes
+            if let categoryId = newId {
+                let result = categoriesManager.findCategoryOrSubcategoryById(categoryId)
+                if let category = result?.category {
+                    selectedCategoryName = category.name
+                } else if let subcategory = result?.subcategory {
+                    selectedCategoryName = subcategory.name
+                }
+            }
+        }
+    }
+}
+
 struct CurrencyInputField: View {
     @Binding var selectedCurrency: Currency
     let size: AppInputField.Size
     let title: String
-    
+
     @State private var showingCurrencyPicker = false
-    
+
     var body: some View {
         VStack(alignment: .leading, spacing: size.titleSpacing) {
             if !self.title.isEmpty {
@@ -950,7 +1052,7 @@ struct CurrencyInputField: View {
                     .font(size.titleFont)
                     .foregroundColor(AppColors.foregroundSecondary)
             }
-            
+
             Button(action: {
                 showingCurrencyPicker = true
             }) {

@@ -28,30 +28,34 @@ class BackendAPIService: ObservableObject {
     // MARK: - Receipt Analysis (OpenRouter Proxy)
     
     /// Analyze receipt through secure backend proxy using JSON
-    func analyzeReceipt(imageData: Data) async throws -> BackendReceiptAnalysisResult {
+    func analyzeReceipt(imageData: Data, categories: [[String: Any]]? = nil) async throws -> BackendReceiptAnalysisResult {
         print("🔒 BACKEND: Starting secure receipt analysis...")
-        
+
         // Validate image data
         guard !imageData.isEmpty else {
             print("❌ BACKEND: Image data is empty")
             throw BackendAPIError.invalidResponse
         }
-        
+
         // Convert to base64 - simple and reliable
         let base64Image = imageData.base64EncodedString()
         print("🔒 BACKEND: Converted image to base64: \(base64Image.count) chars")
-        
+
         var request = URLRequest(url: URL(string: "\(baseURL)/analyze-receipt")!)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        
+
         // Add Firebase ID token for authentication
         if let idToken = await getCurrentFirebaseIDToken() {
             request.setValue("Bearer \(idToken)", forHTTPHeaderField: "Authorization")
         }
-        
-        // Create simple JSON payload
-        let payload = ["image": base64Image]
+
+        // Create JSON payload with image and optional categories
+        var payload: [String: Any] = ["image": base64Image]
+        if let categories = categories {
+            payload["categories"] = categories
+            print("🔒 BACKEND: Including \(categories.count) local categories in request")
+        }
         let jsonData = try JSONSerialization.data(withJSONObject: payload)
         request.httpBody = jsonData
         
@@ -192,6 +196,79 @@ class BackendAPIService: ObservableObject {
         return nil
     }
     
+    // MARK: - Roast Generation (OpenRouter Proxy)
+
+    /// Generate a sassy roast message for a receipt using AI
+    func generateRoast(amount: String, merchant: String, category: String, notes: String? = nil, lineItems: [[String: Any]]? = nil, userName: String? = nil) async throws -> String {
+        print("🔥 BACKEND: Generating roast message...")
+
+        var request = URLRequest(url: URL(string: "\(baseURL)/generate-roast")!)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        // Add Firebase ID token for authentication
+        if let idToken = await getCurrentFirebaseIDToken() {
+            request.setValue("Bearer \(idToken)", forHTTPHeaderField: "Authorization")
+        }
+
+        // Create payload with transaction details
+        var payload: [String: Any] = [
+            "amount": amount,
+            "merchant": merchant,
+            "category": category
+        ]
+        if let notes = notes, !notes.isEmpty {
+            payload["notes"] = notes
+        }
+        if let lineItems = lineItems, !lineItems.isEmpty {
+            payload["lineItems"] = lineItems
+        }
+        if let userName = userName, !userName.isEmpty, userName != "Cashmonki User" {
+            payload["userName"] = userName
+        }
+        let jsonData = try JSONSerialization.data(withJSONObject: payload)
+        request.httpBody = jsonData
+
+        do {
+            let (data, response) = try await session.data(for: request)
+
+            guard let httpResponse = response as? HTTPURLResponse else {
+                throw BackendAPIError.invalidResponse
+            }
+
+            print("🔥 BACKEND: Roast response status: \(httpResponse.statusCode)")
+
+            switch httpResponse.statusCode {
+            case 200...299:
+                if let result = try? JSONDecoder().decode(RoastResponse.self, from: data) {
+                    print("✅ BACKEND: Roast generated successfully")
+                    return result.roast
+                } else if let responseString = String(data: data, encoding: .utf8) {
+                    // Try to parse as raw string if not JSON
+                    return responseString
+                }
+                throw BackendAPIError.invalidResponse
+
+            case 401:
+                throw BackendAPIError.unauthorized
+
+            case 429:
+                throw BackendAPIError.rateLimited
+
+            case 500...599:
+                throw BackendAPIError.serverError
+
+            default:
+                print("❌ BACKEND: Unexpected roast response: \(httpResponse.statusCode)")
+                throw BackendAPIError.unexpectedError(httpResponse.statusCode)
+            }
+
+        } catch {
+            print("❌ BACKEND: Roast generation failed: \(error)")
+            throw error
+        }
+    }
+
     private func getFirebaseProjectId() -> String? {
         guard let url = Bundle.main.url(forResource: "GoogleService-Info", withExtension: "plist"),
               let plistData = try? Data(contentsOf: url),
@@ -242,6 +319,10 @@ struct BackendReceiptItem: Codable {
     let name: String
     let price: Double
     let quantity: Int
+}
+
+struct RoastResponse: Codable {
+    let roast: String
 }
 
 struct AppConfiguration: Codable {

@@ -35,7 +35,8 @@ struct OnboardingTransactionView: View {
     @State private var hasCompletedAction = false
     @State private var hasSkipped = false
     @State private var isDismissing = false
-    @State private var hasShownWelcomeToast = false // Prevent multiple toast calls
+    // FUTURE: Uncomment when re-enabling welcome toast
+    // @State private var hasShownWelcomeToast = false
     
     // Receipt confirmation state
     @State private var showingReceiptConfirmation = false
@@ -48,15 +49,15 @@ struct OnboardingTransactionView: View {
     @EnvironmentObject private var toastManager: ToastManager
     
     /// Check if current user is Gmail user
+    /// CURRENT: Always false in no-auth flow
     private var isGmailUser: Bool {
-        #if canImport(FirebaseAuth)
-        if let currentUser = Auth.auth().currentUser {
-            return currentUser.providerData.contains { $0.providerID == "google.com" }
-        }
+        // FUTURE: Uncomment when re-enabling authentication
+        // #if canImport(FirebaseAuth)
+        // if let currentUser = Auth.auth().currentUser {
+        //     return currentUser.providerData.contains { $0.providerID == "google.com" }
+        // }
+        // #endif
         return false
-        #else
-        return false
-        #endif
     }
     
     private var canContinue: Bool {
@@ -295,7 +296,7 @@ struct OnboardingTransactionView: View {
             Spacer()
             
             // Title
-            Text("Complete Setup")
+            Text("Get Started")
                 .font(AppFonts.overusedGroteskSemiBold(size: 17))
                 .foregroundColor(AppColors.foregroundPrimary)
             
@@ -338,31 +339,19 @@ struct OnboardingTransactionView: View {
     // MARK: - Action Handlers
     
     private func handleUploadAction() {
-        // Check daily usage limit before proceeding
-        guard dailyUsageManager.canUseReceiptAnalysis() else {
-            print("📊 OnboardingTransactionView: Upload blocked - daily limit reached")
-            showingUsageLimitModal = true
-            return
-        }
-        
+        // No daily limit check during onboarding - let users experience the app
         currentPhotoSource = .upload
         isDirectPhotoPickerPresented = true
     }
-    
+
     private func handleScanAction() {
-        // Check daily usage limit before proceeding
-        guard dailyUsageManager.canUseReceiptAnalysis() else {
-            print("📊 OnboardingTransactionView: Scan blocked - daily limit reached")
-            showingUsageLimitModal = true
-            return
-        }
-        
+        // No daily limit check during onboarding - let users experience the app
         print("📸 OnboardingTransactionView: Scan action triggered")
-        
+
         #if targetEnvironment(simulator)
         print("📸 OnboardingTransactionView: Running in simulator - camera may not work properly")
         #endif
-        
+
         currentPhotoSource = .camera
         print("📸 OnboardingTransactionView: About to present camera")
         isCameraPresented = true
@@ -472,19 +461,8 @@ struct OnboardingTransactionView: View {
         // Call completion handler after animation completes
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { // Slightly longer than animation
             onComplete()
-            
-            // Show welcome toast only once when completing onboarding
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { // Allow sheet to fully dismiss first
-                if !hasShownWelcomeToast, let firstName = AuthenticationManager.shared.currentUser?.name.components(separatedBy: " ").first {
-                    hasShownWelcomeToast = true
-                    print("🎉 OnboardingTransactionView: Showing welcome toast for: \(firstName)")
-                    toastManager.showWelcome(firstName)
-                } else {
-                    print("🚫 OnboardingTransactionView: Welcome toast already shown or no user name")
-                }
-            }
-            
             print("✅ OnboardingTransactionView: Onboarding completed successfully")
+            // Note: Welcome toast removed - paywall shows after onboarding instead
         }
     }
 }
