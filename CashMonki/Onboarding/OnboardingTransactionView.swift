@@ -79,26 +79,26 @@ struct OnboardingTransactionView: View {
                     VStack(spacing: 16) {
                         ActionTile(
                             icon: "upload-01",
-                            title: "Upload",
-                            subtitle: "Upload a receipt and we'll get the details",
+                            title: "Upload Receipt",
+                            subtitle: "We'll read and fill in the details",
                             onTap: {
                                 handleUploadAction()
                             }
                         )
-                        
+
                         ActionTile(
                             icon: "scan",
-                            title: "Scan", 
-                            subtitle: "Scan a receipt and we'll get the details",
+                            title: "Scan Receipt",
+                            subtitle: "We'll read and fill in the details",
                             onTap: {
                                 handleScanAction()
                             }
                         )
-                        
+
                         ActionTile(
                             icon: "plus",
-                            title: "Add",
-                            subtitle: "Add transaction details manually"
+                            title: "Add Manually",
+                            subtitle: "You fill in the details yourself"
                         ) {
                             handleAddAction()
                         }

@@ -1587,15 +1587,19 @@ struct AccountData: Identifiable, Codable, Equatable {
     var type: AccountType
     var currency: Currency
     var isDefault: Bool
+    var balance: Double?
+    var showBalance: Bool
     let createdAt: Date
     var updatedAt: Date
-    
+
     init(
         id: UUID = UUID(),
         name: String,
         type: AccountType = .personal,
         currency: Currency = .php,
         isDefault: Bool = false,
+        balance: Double? = nil,
+        showBalance: Bool = false,
         createdAt: Date = Date(),
         updatedAt: Date = Date()
     ) {
@@ -1604,6 +1608,8 @@ struct AccountData: Identifiable, Codable, Equatable {
         self.type = type
         self.currency = currency
         self.isDefault = isDefault
+        self.balance = balance
+        self.showBalance = showBalance
         self.createdAt = createdAt
         self.updatedAt = updatedAt
     }
@@ -2330,6 +2336,47 @@ enum Currency: String, CaseIterable, Codable {
         case .try_: return "₺ - TRY"
         case .aed: return "د.إ - AED"
         }
+    }
+
+    /// Full currency name for display and search
+    var fullName: String {
+        switch self {
+        case .php: return "Philippine Peso"
+        case .usd: return "US Dollar"
+        case .gbp: return "British Pound"
+        case .eur: return "Euro"
+        case .cad: return "Canadian Dollar"
+        case .jpy: return "Japanese Yen"
+        case .aud: return "Australian Dollar"
+        case .brl: return "Brazilian Real"
+        case .sgd: return "Singapore Dollar"
+        case .zar: return "South African Rand"
+        case .cny: return "Chinese Yuan"
+        case .inr: return "Indian Rupee"
+        case .krw: return "South Korean Won"
+        case .mxn: return "Mexican Peso"
+        case .chf: return "Swiss Franc"
+        case .nok: return "Norwegian Krone"
+        case .sek: return "Swedish Krona"
+        case .dkk: return "Danish Krone"
+        case .hkd: return "Hong Kong Dollar"
+        case .nzd: return "New Zealand Dollar"
+        case .thb: return "Thai Baht"
+        case .myr: return "Malaysian Ringgit"
+        case .idr: return "Indonesian Rupiah"
+        case .vnd: return "Vietnamese Dong"
+        case .rub: return "Russian Ruble"
+        case .pln: return "Polish Zloty"
+        case .czk: return "Czech Koruna"
+        case .huf: return "Hungarian Forint"
+        case .try_: return "Turkish Lira"
+        case .aed: return "UAE Dirham"
+        }
+    }
+
+    /// Searchable display name with flag, code, and full name
+    var searchableDisplayName: String {
+        return "\(flag) \(rawValue) - \(fullName)"
     }
 }
 

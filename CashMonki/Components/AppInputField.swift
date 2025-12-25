@@ -88,7 +88,8 @@ struct AppInputField: View {
     let showCurrencyTicker: Bool
     @Binding var selectedCurrency: String
     let onCurrencyTap: (() -> Void)?
-    
+    let isCurrencyDisabled: Bool
+
     // Amount input properties
     let isAmountField: Bool
     let textColor: Color?
@@ -260,6 +261,7 @@ struct AppInputField: View {
         showCurrencyTicker: Bool = false,
         selectedCurrency: Binding<String> = .constant("USD"),
         onCurrencyTap: (() -> Void)? = nil,
+        isCurrencyDisabled: Bool = false,
         isAmountField: Bool = false,
         textColor: Color? = nil,
         isSecureField: Bool = false,
@@ -290,6 +292,7 @@ struct AppInputField: View {
         self.showCurrencyTicker = showCurrencyTicker
         self._selectedCurrency = selectedCurrency
         self.onCurrencyTap = onCurrencyTap
+        self.isCurrencyDisabled = isCurrencyDisabled
         self.isAmountField = isAmountField
         self.textColor = textColor
         self.isSecureField = isSecureField
@@ -560,19 +563,23 @@ struct AppInputField: View {
     private var currencyTickerView: some View {
         if showCurrencyTicker {
             Button(action: {
-                onCurrencyTap?()
+                if !isCurrencyDisabled {
+                    onCurrencyTap?()
+                }
             }) {
                 HStack(spacing: 4) {
                     Text(selectedCurrency)
                         .font(AppFonts.overusedGroteskMedium(size: size.fontSize))
                         .foregroundColor(AppColors.foregroundPrimary)
-                    
+
                     Image(systemName: "chevron.down")
                         .font(.system(size: 12, weight: .medium))
                         .foregroundColor(AppColors.foregroundSecondary)
                 }
             }
             .buttonStyle(PlainButtonStyle())
+            .opacity(isCurrencyDisabled ? 0.5 : 1.0)
+            .disabled(isCurrencyDisabled)
         }
     }
     
@@ -705,9 +712,9 @@ extension AppInputField {
     }
     
     /// Creates an amount input field with currency support
-    static func amount(text: Binding<String>, selectedCurrency: Binding<String>, onCurrencyTap: @escaping () -> Void = {}, size: Size = .md, textColor: Color? = nil, focusBinding: FocusState<Bool>.Binding? = nil) -> AppInputField {
+    static func amount(title: String = "Amount", text: Binding<String>, selectedCurrency: Binding<String>, onCurrencyTap: @escaping () -> Void = {}, size: Size = .md, textColor: Color? = nil, focusBinding: FocusState<Bool>.Binding? = nil, isCurrencyDisabled: Bool = false) -> AppInputField {
         AppInputField(
-            title: "Amount",
+            title: title,
             text: text,
             placeholder: "0.00",
             isRequired: true,
@@ -716,6 +723,7 @@ extension AppInputField {
             showCurrencyTicker: true,
             selectedCurrency: selectedCurrency,
             onCurrencyTap: onCurrencyTap,
+            isCurrencyDisabled: isCurrencyDisabled,
             isAmountField: true,
             textColor: textColor,
             externalFocusBinding: focusBinding
@@ -1057,12 +1065,12 @@ struct CurrencyInputField: View {
                 showingCurrencyPicker = true
             }) {
                 HStack(alignment: .center, spacing: 12) {
-                    // Currency Flag and Symbol - Code format
+                    // Currency Flag, Symbol, Code and Name
                     HStack(spacing: 8) {
                         Text(selectedCurrency.flag)
                             .font(.system(size: 20))
-                        
-                        Text("\(selectedCurrency.symbol) - \(selectedCurrency.rawValue)")
+
+                        Text("\(selectedCurrency.symbol) \(selectedCurrency.rawValue) - \(selectedCurrency.fullName)")
                             .font(AppFonts.overusedGroteskMedium(size: size.fontSize))
                             .foregroundColor(AppColors.foregroundPrimary)
                     }

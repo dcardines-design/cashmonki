@@ -952,9 +952,9 @@ struct SettingsPage: View {
                     .padding(.leading, 52)
 
                 settingsRow(
-                    title: "Rate CashMonki",
-                    subtitle: "5 stars = Good money karma... 🙈",
-                    icon: "⭐"
+                    title: "Rate Cashmonki",
+                    subtitle: "Make a developer smile today (please)",
+                    icon: "🙈"
                 ) {
                     requestAppReview()
                 }

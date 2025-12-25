@@ -179,25 +179,31 @@ class AccountManager: ObservableObject {
         type: SubAccountType,
         currency: Currency = .php,
         color: Color? = nil,
-        makeDefault: Bool = false
+        makeDefault: Bool = false,
+        balance: Double? = nil,
+        showBalance: Bool = false
     ) {
         print("🔧 AccountManager: WALLET CREATION DEBUG - Starting wallet creation")
         print("   📝 Name: '\(name)'")
         print("   🎨 Type: \(type.displayName)")
         print("   💰 Currency: \(currency.rawValue)")
         print("   🔵 Make default: \(makeDefault)")
+        print("   💵 Balance: \(balance ?? 0)")
+        print("   👁️ Show balance: \(showBalance)")
         print("   👤 User: \(userManager.currentUser.name) (\(userManager.currentUser.email))")
         print("   🏦 Current wallet count: \(userManager.currentUser.accounts.count)")
-        
+
         let colorHex = color?.toHex() ?? type.defaultColor.toHex()
-        
+
         let newAccount = SubAccount(
             parentUserId: userManager.currentUser.id,
             name: name,
             type: type,
             currency: currency,
             colorHex: colorHex,
-            isDefault: makeDefault
+            isDefault: makeDefault,
+            balance: balance,
+            showBalance: showBalance
         )
         
         print("🆔 AccountManager: Created wallet with ID: \(newAccount.id.uuidString)")
@@ -295,7 +301,9 @@ class AccountManager: ObservableObject {
             name: account.name,
             type: account.type == .personal ? .personal : .business,
             currency: account.currency,
-            isDefault: account.isDefault
+            isDefault: account.isDefault,
+            balance: account.balance,
+            showBalance: account.showBalance
         )
         
         userManager.modifyAccount(accountData)

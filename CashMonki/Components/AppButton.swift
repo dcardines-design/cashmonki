@@ -10,9 +10,10 @@ enum ButtonHierarchy {
 }
 
 enum ButtonSize {
-    case medium     // med - 24px text, 30px icons
-    case small      // sm - 20px text, 28px icons  
-    case extraSmall // xs - 18px text, 24px icons
+    case medium           // med - 24px text, 30px icons
+    case small            // sm - 20px text, 28px icons
+    case extraSmall       // xs - 18px text, 24px icons
+    case doubleExtraSmall // 2xs - 18px text, 14px h-padding, 10px v-padding
 }
 
 enum ButtonState {
@@ -27,14 +28,26 @@ struct AppButton: View {
     // MARK: - Properties
     let title: String
     let action: () -> Void
-    
+
     var hierarchy: ButtonHierarchy = .primary
     var size: ButtonSize = .medium
     var state: ButtonState = .active
     var leftIcon: String? = nil
     var rightIcon: String? = nil
     var isEnabled: Bool = true
-    
+    var iconColorOverride: Color? = nil  // Optional override for icon color
+
+    // MARK: - Custom SVG Icon Names (UIImage doesn't detect SVGs in asset catalogs)
+    private static let customIconNames: Set<String> = [
+        "plus",
+        "arrow-narrow-left",
+        "edit-02",
+        "clock-refresh",
+        "horizontal-bar-chart-03",
+        "chevron-left",
+        "chevron-right"
+    ]
+
     // MARK: - Internal State
     @State private var isPressed: Bool = false
     
@@ -50,6 +63,7 @@ struct AppButton: View {
         case .medium: return 24
         case .small: return 20
         case .extraSmall: return 18
+        case .doubleExtraSmall: return 18
         }
     }
     
@@ -57,7 +71,8 @@ struct AppButton: View {
         switch size {
         case .medium: return 30
         case .small: return 28
-        case .extraSmall: return 24
+        case .extraSmall: return 40  // 40 * 0.6 = 24px actual
+        case .doubleExtraSmall: return 40  // 40 * 0.6 = 24px actual
         }
     }
     
@@ -65,6 +80,7 @@ struct AppButton: View {
         switch size {
         case .medium, .small: return 14
         case .extraSmall: return 12
+        case .doubleExtraSmall: return 10
         }
     }
     
@@ -73,6 +89,7 @@ struct AppButton: View {
         case .medium: return 24
         case .small: return 18
         case .extraSmall: return 16
+        case .doubleExtraSmall: return 14
         }
     }
     
@@ -81,6 +98,7 @@ struct AppButton: View {
         case .medium: return 14
         case .small: return 12
         case .extraSmall: return 12
+        case .doubleExtraSmall: return 10
         }
     }
     
@@ -131,26 +149,46 @@ struct AppButton: View {
         switch (hierarchy, buttonState) {
         case (.primary, _):
             return AppColors.backgroundWhite
-            
+
         case (.secondary, .active), (.secondary, .hover), (.secondary, .pressed):
-            return AppColors.foregroundPrimary
+            return AppColors.foregroundPrimary  // Black text for secondary
         case (.secondary, .disabled):
-            return AppColors.foregroundPrimary // Same as pressed state
-            
+            return AppColors.foregroundTertiary
+
         case (.tertiary, .active), (.tertiary, .hover), (.tertiary, .pressed):
             return AppColors.foregroundPrimary
         case (.tertiary, .disabled):
             return AppColors.foregroundPrimary // Same as pressed state
-            
+
         case (.ghost, .active), (.ghost, .hover), (.ghost, .pressed):
             return AppColors.foregroundPrimary
         case (.ghost, .disabled):
             return AppColors.foregroundPrimary // Same as pressed state
-            
+
         case (.text, .active), (.text, .hover), (.text, .pressed):
             return AppColors.foregroundPrimary
         case (.text, .disabled):
             return AppColors.foregroundPrimary // Same as pressed state
+        }
+    }
+
+    private var iconColor: Color {
+        // Use override if provided
+        if let override = iconColorOverride {
+            return buttonState == .disabled ? AppColors.foregroundTertiary : override
+        }
+
+        switch (hierarchy, buttonState) {
+        case (.primary, _):
+            return AppColors.backgroundWhite
+
+        case (.secondary, .active), (.secondary, .hover), (.secondary, .pressed):
+            return AppColors.primary  // Purple icons for secondary
+        case (.secondary, .disabled):
+            return AppColors.foregroundTertiary
+
+        default:
+            return textColor  // All other cases use same color as text
         }
     }
     
@@ -221,15 +259,16 @@ struct AppButton: View {
                 // Left Icon
                 if let leftIcon = leftIcon {
                     // Try custom asset first, fallback to system icon
-                    if UIImage(named: leftIcon) != nil {
+                    if Self.customIconNames.contains(leftIcon) || UIImage(named: leftIcon) != nil {
                         Image(leftIcon)
+                            .renderingMode(.template)
                             .resizable()
                             .frame(width: iconSize * 0.6, height: iconSize * 0.6)
-                            .foregroundColor(textColor)
+                            .foregroundColor(iconColor)
                     } else {
                         Image(systemName: leftIcon)
                             .font(.system(size: iconSize * 0.6, weight: .medium))
-                            .foregroundColor(textColor)
+                            .foregroundColor(iconColor)
                     }
                 }
                 
@@ -245,15 +284,16 @@ struct AppButton: View {
                 // Right Icon
                 if let rightIcon = rightIcon {
                     // Try custom asset first, fallback to system icon
-                    if UIImage(named: rightIcon) != nil {
+                    if Self.customIconNames.contains(rightIcon) || UIImage(named: rightIcon) != nil {
                         Image(rightIcon)
+                            .renderingMode(.template)
                             .resizable()
                             .frame(width: iconSize * 0.6, height: iconSize * 0.6)
-                            .foregroundColor(textColor)
+                            .foregroundColor(iconColor)
                     } else {
                         Image(systemName: rightIcon)
                             .font(.system(size: iconSize * 0.6, weight: .medium))
-                            .foregroundColor(textColor)
+                            .foregroundColor(iconColor)
                     }
                 }
             }

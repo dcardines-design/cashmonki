@@ -640,32 +640,19 @@ class UserManager: ObservableObject {
         }
     }
     
-    /// Update the primary currency for the user's default account
+    /// Update the primary currency preference (does NOT change wallet currencies)
     func updatePrimaryCurrency(_ currency: Currency) {
-        print("🔄 UserManager: Updating primary currency...")
-        print("💰 UserManager: New currency: \(currency.rawValue) (\(currency.displayName))")
+        print("🔄 UserManager: Updating primary currency preference...")
+        print("💰 UserManager: New display currency: \(currency.rawValue) (\(currency.displayName))")
         print("🏆 UserManager: Currency symbol: \(currency.symbol)")
-        
-        // Update the default account's currency
-        if let defaultAccountIndex = currentUser.accounts.firstIndex(where: { $0.isDefault }) {
-            let oldCurrency = currentUser.accounts[defaultAccountIndex].currency
-            currentUser.accounts[defaultAccountIndex].currency = currency
-            objectWillChange.send()
-            
-            print("✅ UserManager: Primary currency updated from \(oldCurrency.rawValue) to \(currency.rawValue)")
-            print("🏦 UserManager: Default account currency changed successfully")
-            
-            // Sync to Firebase if available
-            syncToFirebase { success in
-                if success {
-                    print("🔥 UserManager: Currency change synced to Firebase")
-                } else {
-                    print("⚠️ UserManager: Currency change sync to Firebase failed")
-                }
-            }
-        } else {
-            print("⚠️ UserManager: No default account found to update currency")
-        }
+
+        // NOTE: We do NOT change the wallet's currency here!
+        // Wallets keep their original currency - only the DISPLAY converts to primary currency
+        // This preserves the wallet's native currency for accurate conversion
+
+        print("✅ UserManager: Primary currency preference updated to \(currency.rawValue)")
+        print("💡 UserManager: Wallet currencies unchanged - display will convert as needed")
+        objectWillChange.send()
     }
     
     /// Update user's onboarding progression number

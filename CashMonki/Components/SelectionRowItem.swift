@@ -50,7 +50,7 @@ extension SelectionRowItem {
     ) -> SelectionRowItem {
         SelectionRowItem(
             icon: currency.flag,
-            title: "\(currency.symbol) – \(currency.rawValue)",
+            title: "\(currency.symbol) \(currency.rawValue) - \(currency.fullName)",
             isSelected: isSelected,
             onTap: onTap
         )

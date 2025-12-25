@@ -68,8 +68,11 @@ struct BudgetCard: View {
         if percentUsed > 1.0 {
             return AppColors.destructiveForeground  // Red - over budget
         }
+        if percentUsed >= 0.75 {
+            return Color(hex: "FF9E15") ?? AppColors.accentOrange  // Orange - 75-100%
+        }
         if percentUsed >= 0.5 {
-            return Color(hex: "FF9E15") ?? AppColors.accentOrange  // Orange - 50-100%
+            return Color(hex: "FFCC00") ?? .yellow  // Yellow - 50-75%
         }
         return AppColors.successForeground  // Green - under 50%
     }
@@ -140,11 +143,11 @@ struct BudgetCard: View {
                     // Status text
                     if isOverBudget {
                         Text("\(currencyPrefs.formatPrimaryAmount(abs(remainingAmount))) over budget")
-                            .font(AppFonts.overusedGroteskMedium(size: 14))
+                            .font(AppFonts.overusedGroteskMedium(size: 16))
                             .foregroundStyle(AppColors.destructiveForeground)
                     } else {
                         Text("\(currencyPrefs.formatPrimaryAmount(remainingAmount)) left")
-                            .font(AppFonts.overusedGroteskMedium(size: 14))
+                            .font(AppFonts.overusedGroteskMedium(size: 16))
                             .foregroundStyle(AppColors.foregroundTertiary)
                     }
                 }

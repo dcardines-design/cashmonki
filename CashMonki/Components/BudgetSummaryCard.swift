@@ -16,16 +16,6 @@ struct BudgetSummaryCard: View {
     private let budgetManager = BudgetManager.shared
     private let rateManager = CurrencyRateManager.shared
 
-    // MARK: - Category Colors (matching transactions breakdown)
-
-    private let categoryColors: [Color] = [
-        Color(hex: "DE4706") ?? AppColors.destructiveForeground,  // Top 1
-        Color(hex: "FF6C29") ?? AppColors.destructiveForeground,  // Top 2
-        Color(hex: "FFA100") ?? AppColors.accentOrange,           // Top 3
-        Color(hex: "F7CD07") ?? AppColors.accentOrange,           // Top 4
-        AppColors.linePrimary                                      // Others
-    ]
-
     // MARK: - Budget Data
 
     private struct BudgetData: Identifiable {
@@ -34,7 +24,6 @@ struct BudgetSummaryCard: View {
         let emoji: String
         let spent: Double
         let budget: Double
-        let color: Color
 
         var spentPercentage: Double {
             guard budget > 0 else { return 0 }
@@ -45,25 +34,50 @@ struct BudgetSummaryCard: View {
     // MARK: - Computed Properties
 
     private var budgetDataList: [BudgetData] {
-        // Sort by spent amount (highest first) to assign colors by ranking
+        // Sort by spent amount (highest first)
         let sortedBudgets = budgets.sorted {
             getSpentAmount(for: $0) > getSpentAmount(for: $1)
         }
 
-        return sortedBudgets.enumerated().map { index, budget in
+        return sortedBudgets.map { budget in
             let spent = getSpentAmount(for: budget)
             let budgetAmount = getBudgetAmount(for: budget)
-            let colorIndex = min(index, categoryColors.count - 1)
 
             return BudgetData(
                 id: budget.id,
                 categoryName: budget.categoryName,
                 emoji: TxnCategoryIcon.emojiFor(category: budget.categoryName),
                 spent: spent,
-                budget: budgetAmount,
-                color: categoryColors[colorIndex]
+                budget: budgetAmount
             )
         }
+    }
+
+    /// Returns top 4 budgets + "Others" row if there are more than 4
+    private var displayBudgetDataList: [BudgetData] {
+        let allData = budgetDataList
+
+        if allData.count <= 4 {
+            return allData
+        }
+
+        // Top 4 items
+        let top4 = Array(allData.prefix(4))
+
+        // Combine remaining into "Others"
+        let remaining = Array(allData.dropFirst(4))
+        let othersSpent = remaining.reduce(0) { $0 + $1.spent }
+        let othersBudget = remaining.reduce(0) { $0 + $1.budget }
+
+        let othersRow = BudgetData(
+            id: UUID(),
+            categoryName: "Others",
+            emoji: "",
+            spent: othersSpent,
+            budget: othersBudget
+        )
+
+        return top4 + [othersRow]
     }
 
     private var totalSpent: Double {
@@ -75,17 +89,76 @@ struct BudgetSummaryCard: View {
     }
 
     private var periodLabel: String {
+        let calendar = Calendar.current
+        let now = Date()
+        let formatter = DateFormatter()
+
         switch displayPeriod {
         case .daily:
-            return "Total budget today"
+            if calendar.isDateInToday(date) {
+                return "Total budget today"
+            } else if calendar.isDateInYesterday(date) {
+                return "Total budget yesterday"
+            } else {
+                formatter.dateFormat = "MMM d"
+                return "Total budget \(formatter.string(from: date))"
+            }
+
         case .weekly:
-            return "Total budget this week"
+            let currentWeek = calendar.component(.weekOfYear, from: now)
+            let currentYear = calendar.component(.yearForWeekOfYear, from: now)
+            let dateWeek = calendar.component(.weekOfYear, from: date)
+            let dateYear = calendar.component(.yearForWeekOfYear, from: date)
+
+            if currentWeek == dateWeek && currentYear == dateYear {
+                return "Total budget this week"
+            } else if currentWeek - 1 == dateWeek && currentYear == dateYear {
+                return "Total budget last week"
+            } else {
+                // Show week date range
+                let weekStart = calendar.date(from: calendar.dateComponents([.yearForWeekOfYear, .weekOfYear], from: date)) ?? date
+                let weekEnd = calendar.date(byAdding: .day, value: 6, to: weekStart) ?? date
+                formatter.dateFormat = "MMM d"
+                return "Total budget \(formatter.string(from: weekStart)) - \(formatter.string(from: weekEnd))"
+            }
+
         case .monthly:
-            return "Total budget this month"
+            let currentMonth = calendar.component(.month, from: now)
+            let currentYear = calendar.component(.year, from: now)
+            let dateMonth = calendar.component(.month, from: date)
+            let dateYear = calendar.component(.year, from: date)
+
+            if currentMonth == dateMonth && currentYear == dateYear {
+                return "Total budget this month"
+            } else if (currentMonth - 1 == dateMonth && currentYear == dateYear) ||
+                      (currentMonth == 1 && dateMonth == 12 && currentYear - 1 == dateYear) {
+                return "Total budget last month"
+            } else {
+                formatter.dateFormat = "MMM yyyy"
+                return "Total budget \(formatter.string(from: date))"
+            }
+
         case .quarterly:
-            return "Total budget this quarter"
+            let currentQuarter = ((calendar.component(.month, from: now) - 1) / 3) + 1
+            let currentYear = calendar.component(.year, from: now)
+            let dateQuarter = ((calendar.component(.month, from: date) - 1) / 3) + 1
+            let dateYear = calendar.component(.year, from: date)
+
+            if currentQuarter == dateQuarter && currentYear == dateYear {
+                return "Total budget this quarter"
+            } else {
+                return "Total budget Q\(dateQuarter) \(dateYear)"
+            }
+
         case .yearly:
-            return "Total budget this year"
+            let currentYear = calendar.component(.year, from: now)
+            let dateYear = calendar.component(.year, from: date)
+
+            if currentYear == dateYear {
+                return "Total budget this year"
+            } else {
+                return "Total budget \(dateYear)"
+            }
         }
     }
 
@@ -124,7 +197,7 @@ struct BudgetSummaryCard: View {
                         .font(AppFonts.overusedGroteskMedium(size: 18))
                         .foregroundStyle(.secondary)
 
-                    // Total amounts
+                    // Total amounts (spent / total budget)
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
                         Text(currencyPrefs.formatPrimaryAmount(totalSpent))
                             .font(AppFonts.overusedGroteskSemiBold(size: 34))
@@ -146,9 +219,9 @@ struct BudgetSummaryCard: View {
                 segmentedProgressBar
             }
 
-            // Budget breakdown list
+            // Budget breakdown list (top 4 + Others)
             VStack(spacing: 16) {
-                ForEach(budgetDataList) { data in
+                ForEach(displayBudgetDataList) { data in
                     budgetRow(data: data)
                 }
             }
@@ -158,30 +231,39 @@ struct BudgetSummaryCard: View {
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 
-    // MARK: - Segmented Progress Bar
+    // MARK: - Progress Bar
+
+    private var progressBarColor: Color {
+        guard totalBudget > 0 else { return AppColors.successForeground }
+        let percentage = totalSpent / totalBudget
+
+        if percentage > 1.0 {
+            return AppColors.destructiveForeground  // Over budget - red
+        } else if percentage >= 0.75 {
+            return AppColors.accentOrange           // 75-100% - orange
+        } else {
+            return AppColors.successForeground      // Under 75% - green
+        }
+    }
 
     private var segmentedProgressBar: some View {
         GeometryReader { geometry in
-            HStack(spacing: 2) {
-                ForEach(budgetDataList) { data in
-                    let proportion = totalSpent > 0 ? data.spent / totalSpent : 0
-                    let width = proportion * geometry.size.width
+            HStack(spacing: 0) {
+                // Filled portion (single color based on status)
+                let usedProportion = totalBudget > 0 ? min(totalSpent / totalBudget, 1.0) : 0
+                let filledWidth = geometry.size.width * usedProportion
 
-                    if width > 0 {
-                        RoundedRectangle(cornerRadius: 4)
-                            .fill(data.color)
-                            .frame(width: max(0, width - 1))
-                    }
+                if filledWidth > 0 {
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(progressBarColor)
+                        .frame(width: filledWidth)
                 }
 
-                // Fill remaining space if totalSpent < totalBudget
-                let usedProportion = totalBudget > 0 ? min(totalSpent / totalBudget, 1.0) : 0
-                let remainingWidth = geometry.size.width * (1.0 - usedProportion)
+                // Remaining space with striped pattern
+                let remainingWidth = geometry.size.width - filledWidth
 
                 if remainingWidth > 2 {
-                    RoundedRectangle(cornerRadius: 4)
-                        .fill(AppColors.linePrimary)
-                        .frame(width: remainingWidth)
+                    stripedRemainingBar(width: remainingWidth)
                 }
             }
         }
@@ -189,18 +271,37 @@ struct BudgetSummaryCard: View {
         .clipShape(RoundedRectangle(cornerRadius: 4))
     }
 
+    // MARK: - Striped Remaining Bar
+
+    private func stripedRemainingBar(width: CGFloat) -> some View {
+        let stripeWidth: CGFloat = 4
+        let spacing: CGFloat = 4
+        let stripeUnit = stripeWidth + spacing  // 8px per stripe unit
+        // Calculate stripe count to fill the entire width (add extra to ensure full coverage)
+        let stripeCount = Int(ceil(width / stripeUnit)) + 1
+
+        return HStack(spacing: spacing) {
+            ForEach(0..<stripeCount, id: \.self) { _ in
+                Rectangle()
+                    .foregroundColor(.clear)
+                    .frame(width: stripeWidth, height: 20)
+                    .background(Color(hex: "DCE2F4") ?? AppColors.linePrimary)
+                    .cornerRadius(4)
+            }
+        }
+        .frame(width: width, alignment: .trailing)  // Align to trailing edge
+        .clipped()
+    }
+
     // MARK: - Budget Row
 
     private func budgetRow(data: BudgetData) -> some View {
         HStack(spacing: 8) {
-            // Color indicator
-            RoundedRectangle(cornerRadius: 2)
-                .fill(data.color)
-                .frame(width: 4, height: 24)
-
-            // Emoji
-            Text(data.emoji)
-                .font(.system(size: 16))
+            // Emoji (hidden for "Others" row)
+            if !data.emoji.isEmpty {
+                Text(data.emoji)
+                    .font(.system(size: 16))
+            }
 
             // Category name
             Text(data.categoryName)

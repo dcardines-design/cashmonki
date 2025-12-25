@@ -33,11 +33,7 @@ struct ActionTile: View {
             Button(action: onTap) {
                 HStack(alignment: .center, spacing: 18) {
                     // Icon
-                    AppIcon(assetName: icon, fallbackSystemName: icon)
-                        .font(
-                            Font.custom("Overused Grotesk", size: 18)
-                                .weight(.medium)
-                        )
+                    AppIcon(assetName: icon, fallbackSystemName: icon, size: 34)
                         .foregroundColor(AppColors.accentBackground)
                     
                     // Title and Subtitle

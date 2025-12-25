@@ -10,30 +10,30 @@ import SwiftUI
 struct SimpleReceiptToast: View {
     @Binding var isShowing: Bool
     @State private var analysisState: AnalysisState = .analyzing
-    @State private var randomBlurb: String = SimpleReceiptToast.analyzingBlurbs.randomElement() ?? "Oh, this is gonna be good..."
+    @State private var randomBlurb: String = SimpleReceiptToast.analyzingBlurbs.randomElement() ?? "Crunching the numbers..."
 
-    // 20 random blurbs shown during receipt analysis (Deadpool energy)
+    // 20 random blurbs shown during receipt analysis
     private static let analyzingBlurbs = [
-        "Oh, this is gonna be good...",
-        "Your wallet called. It's crying.",
-        "No judgment. Okay, some judgment.",
-        "What do we have here... 👀",
-        "Bold purchases. Questionable timing.",
-        "Your bank account just flinched.",
-        "Interesting strategy there...",
-        "Seen worse. Not by much though.",
-        "Ah yes, the classic 'treat yourself' purchase.",
-        "Someone likes to live dangerously.",
-        "Your future self is typing a strongly worded letter.",
-        "Doing some light financial stalking...",
-        "This is going to be interesting...",
-        "Calculating the damage...",
-        "Your money had a good run.",
-        "Reading between the line items...",
-        "Someone's been busy...",
-        "So many questions here...",
-        "Brb, alerting your accountant.",
-        "Well well well..."
+        "Ooh, what do we have here...",
+        "Reading the fine print...",
+        "Crunching the numbers...",
+        "This looks interesting...",
+        "Decoding your purchase...",
+        "Let's see what we've got...",
+        "Doing the math...",
+        "Almost got it...",
+        "Making sense of this...",
+        "One moment...",
+        "Processing...",
+        "Scanning away...",
+        "On the case...",
+        "Working on it...",
+        "Getting the details...",
+        "Breaking it down...",
+        "Analyzing...",
+        "Reading...",
+        "Just a sec...",
+        "Hmm, interesting..."
     ]
 
     enum AnalysisState {

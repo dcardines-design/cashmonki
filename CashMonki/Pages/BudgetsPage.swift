@@ -16,7 +16,14 @@ struct BudgetsPage: View {
     @ObservedObject private var currencyPrefs = CurrencyPreferences.shared
     @EnvironmentObject var toastManager: ToastManager
 
-    @State private var selectedPeriodFilter: BudgetPeriod = .monthly
+    @State private var selectedPeriodFilter: BudgetPeriod = {
+        // Load cached period from UserDefaults
+        if let cachedValue = UserDefaults.standard.string(forKey: "cachedBudgetPeriod"),
+           let period = BudgetPeriod(rawValue: cachedValue) {
+            return period
+        }
+        return .monthly
+    }()
     @State private var dateOffset: Int = 0  // 0 = current period, -1 = previous, etc.
     @State private var showingAddBudget: Bool = false
     @State private var selectedBudgetForEdit: Budget?
@@ -100,12 +107,17 @@ struct BudgetsPage: View {
 
     // MARK: - Computed Properties
 
-    /// Get all budgets for selected wallet (shown across all periods with conversion)
+    /// Get budgets for selected wallet filtered by period visibility
     private var budgetsForWallet: [Budget] {
         guard let walletId = accountManager.selectedSubAccountId else {
             return []
         }
-        return userManager.getBudgets(for: walletId)
+        let allBudgets = userManager.getBudgets(for: walletId)
+
+        // Filter: show budget if applyToAllPeriods is true, OR if budget.period matches selected tab
+        return allBudgets.filter { budget in
+            budget.applyToAllPeriods || budget.period == selectedPeriodFilter
+        }
     }
 
     // MARK: - Body
@@ -119,19 +131,21 @@ struct BudgetsPage: View {
             dateNavigationSection
 
             // Budgets content
-            ScrollView(showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 24) {
-                    if budgetsForWallet.isEmpty {
-                        emptyStateView
-                    } else {
+            if budgetsForWallet.isEmpty {
+                emptyStateView
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 20)
+            } else {
+                ScrollView(showsIndicators: false) {
+                    VStack(alignment: .leading, spacing: 24) {
                         budgetListView
                     }
+                    .padding(.horizontal, 16)
+                    .padding(.top, 0)
+                    .padding(.bottom, 20)
                 }
-                .padding(.horizontal, 16)
-                .padding(.top, 0)
-                .padding(.bottom, 20)
+                .background(AppColors.surfacePrimary)
             }
-            .background(AppColors.surfacePrimary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(AppColors.surfacePrimary)
@@ -190,20 +204,44 @@ struct BudgetsPage: View {
     // MARK: - Period Tabs Section (like month tabs in transactions)
 
     private var periodTabsSection: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 16) {
-                ForEach(BudgetPeriod.allCases, id: \.self) { period in
-                    AppTab(
-                        title: period.displayName,
-                        action: {
-                            selectedPeriodFilter = period
-                            dateOffset = 0  // Reset to current when switching tabs
-                        },
-                        state: selectedPeriodFilter == period ? .selected : .inactive
-                    )
+        ScrollViewReader { proxy in
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 16) {
+                    ForEach(Array(BudgetPeriod.allCases.enumerated()), id: \.element) { index, period in
+                        AppTab(
+                            title: period.displayName,
+                            action: {
+                                selectedPeriodFilter = period
+                                dateOffset = 0  // Reset to current when switching tabs
+                            },
+                            state: selectedPeriodFilter == period ? .selected : .inactive
+                        )
+                        .id("period_\(index)")
+                    }
+                }
+                .padding(.horizontal, 16)
+            }
+            .onAppear {
+                // Scroll to selected period on appear
+                if let index = BudgetPeriod.allCases.firstIndex(of: selectedPeriodFilter) {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                        withAnimation(.easeInOut(duration: 0.3)) {
+                            proxy.scrollTo("period_\(index)", anchor: .center)
+                        }
+                    }
                 }
             }
-            .padding(.horizontal, 16)
+            .onChange(of: selectedPeriodFilter) { _, newPeriod in
+                // Cache the selected period
+                UserDefaults.standard.set(newPeriod.rawValue, forKey: "cachedBudgetPeriod")
+
+                // Scroll to the newly selected period
+                if let index = BudgetPeriod.allCases.firstIndex(of: newPeriod) {
+                    withAnimation(.easeInOut(duration: 0.3)) {
+                        proxy.scrollTo("period_\(index)", anchor: .center)
+                    }
+                }
+            }
         }
         .padding(.top, 12)
         .padding(.bottom, 0)
@@ -226,8 +264,9 @@ struct BudgetsPage: View {
                 title: "",
                 action: { dateOffset -= 1 },
                 hierarchy: .secondary,
-                size: .extraSmall,
-                leftIcon: "chevron.left"
+                size: .doubleExtraSmall,
+                leftIcon: "chevron-left",
+                iconColorOverride: AppColors.foregroundPrimary
             )
             .frame(width: 80)
 
@@ -245,15 +284,16 @@ struct BudgetsPage: View {
                 title: "",
                 action: { dateOffset += 1 },
                 hierarchy: .secondary,
-                size: .extraSmall,
-                leftIcon: "chevron.right",
-                isEnabled: dateOffset < 0
+                size: .doubleExtraSmall,
+                leftIcon: "chevron-right",
+                isEnabled: dateOffset < 0,
+                iconColorOverride: AppColors.foregroundPrimary
             )
             .frame(width: 80)
         }
         .padding(.horizontal, 16)
-        .padding(.top, 16)
-        .padding(.bottom, 16)
+        .padding(.top, 18)
+        .padding(.bottom, 26)
         .background(AppColors.surfacePrimary)
     }
 
@@ -277,16 +317,18 @@ struct BudgetsPage: View {
                 leftIcon: "plus"
             )
 
-            // Individual Budget Cards
-            ForEach(budgetsForWallet, id: \.id) { budget in
-                BudgetCard(
-                    budget: budget,
-                    displayPeriod: selectedPeriodFilter,
-                    date: selectedDate,
-                    onMenuTap: {
-                        showingBudgetMenu = budget
-                    }
-                )
+            // Individual Budget Cards (grouped with 14px spacing)
+            VStack(spacing: 14) {
+                ForEach(budgetsForWallet, id: \.id) { budget in
+                    BudgetCard(
+                        budget: budget,
+                        displayPeriod: selectedPeriodFilter,
+                        date: selectedDate,
+                        onMenuTap: {
+                            showingBudgetMenu = budget
+                        }
+                    )
+                }
             }
         }
     }
@@ -294,33 +336,49 @@ struct BudgetsPage: View {
     // MARK: - Empty State View
 
     private var emptyStateView: some View {
-        VStack(alignment: .center, spacing: 16) {
-            Image(systemName: "chart.bar.doc.horizontal")
-                .font(.system(size: 48))
-                .foregroundStyle(AppColors.foregroundTertiary)
+        VStack(alignment: .center, spacing: 40) {
+            Spacer()
 
-            Text("No Budgets")
-                .font(AppFonts.overusedGroteskSemiBold(size: 20))
-                .foregroundStyle(AppColors.foregroundPrimary)
+            VStack(spacing: 18) {
+                Image("file-question-02")
+                    .resizable()
+                    .frame(width: 40, height: 40)
 
-            Text("Create a budget to track your spending by category.")
-                .font(AppFonts.overusedGroteskMedium(size: 16))
-                .foregroundStyle(AppColors.foregroundSecondary)
-                .multilineTextAlignment(.center)
+                VStack(spacing: 8) {
+                    Text("No Budgets")
+                        .font(AppFonts.overusedGroteskSemiBold(size: 20))
+                        .multilineTextAlignment(.center)
+                        .foregroundStyle(AppColors.foregroundPrimary)
+                        .frame(maxWidth: .infinity, alignment: .top)
+
+                    Text("Create a budget to track your spending by category")
+                        .font(AppFonts.overusedGroteskMedium(size: 16))
+                        .multilineTextAlignment(.center)
+                        .foregroundStyle(AppColors.foregroundSecondary)
+                        .frame(maxWidth: .infinity, alignment: .top)
+                }
+            }
 
             AppButton(
                 title: "Add Budget",
                 action: { showingAddBudget = true },
                 hierarchy: .primary,
-                size: .extraSmall
+                size: .doubleExtraSmall,
+                leftIcon: "plus"
             )
-            .padding(.top, 8)
+
+            Spacer()
         }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 60)
-        .padding(.horizontal, 20)
-        .background(AppColors.backgroundWhite)
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .padding(.horizontal, 40)
+        .padding(.vertical, 14)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+        .background(AppColors.surfacePrimary)
+        .cornerRadius(24)
+        .overlay(
+            RoundedRectangle(cornerRadius: 24)
+                .inset(by: 0.5)
+                .stroke(AppColors.line1stLine, style: StrokeStyle(lineWidth: 1, dash: [4, 4]))
+        )
     }
 }
 
@@ -411,7 +469,7 @@ struct EditBudgetSheet: View {
                     // Period Selector
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Budget Period")
-                            .font(AppFonts.overusedGroteskMedium(size: 14))
+                            .font(AppFonts.overusedGroteskMedium(size: 16))
                             .foregroundStyle(AppColors.foregroundSecondary)
 
                         FlowLayout(spacing: 10) {
@@ -420,6 +478,7 @@ struct EditBudgetSheet: View {
                             }
                         }
                     }
+                    .frame(maxWidth: .infinity, alignment: .leading)
 
                     // Calculate for all periods toggle
                     calculateForAllPeriodsSection
@@ -474,7 +533,7 @@ struct EditBudgetSheet: View {
             }
         }) {
             Text(period.displayName)
-                .font(AppFonts.overusedGroteskMedium(size: 18))
+                .font(AppFonts.overusedGroteskMedium(size: 16))
                 .foregroundStyle(isSelected ? AppColors.primary : AppColors.foregroundSecondary)
                 .padding(.horizontal, 16)
                 .padding(.vertical, 10)
@@ -491,7 +550,7 @@ struct EditBudgetSheet: View {
     private var calculateForAllPeriodsSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Calculate for all periods?")
-                .font(AppFonts.overusedGroteskMedium(size: 14))
+                .font(AppFonts.overusedGroteskMedium(size: 16))
                 .foregroundStyle(AppColors.foregroundSecondary)
 
             HStack(spacing: 10) {
@@ -503,6 +562,7 @@ struct EditBudgetSheet: View {
                 }
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func yesNoChip(label: String, isSelected: Bool, action: @escaping () -> Void) -> some View {
@@ -512,9 +572,9 @@ struct EditBudgetSheet: View {
             }
         }) {
             Text(label)
-                .font(AppFonts.overusedGroteskMedium(size: 18))
-                .frame(maxWidth: .infinity)
+                .font(AppFonts.overusedGroteskMedium(size: 16))
                 .foregroundStyle(isSelected ? AppColors.primary : AppColors.foregroundSecondary)
+                .padding(.horizontal, 16)
                 .padding(.vertical, 10)
                 .background(isSelected ? Color(red: 0.33, green: 0.18, blue: 1).opacity(0.1) : Color.clear)
                 .background(isSelected ? .white : AppColors.surfacePrimary)
@@ -525,9 +585,9 @@ struct EditBudgetSheet: View {
     }
 
     private var estimatesSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Estimated budgets")
-                .font(AppFonts.overusedGroteskMedium(size: 14))
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Estimated Budgets")
+                .font(AppFonts.overusedGroteskMedium(size: 16))
                 .foregroundStyle(AppColors.foregroundSecondary)
 
             VStack(spacing: 8) {
@@ -544,7 +604,20 @@ struct EditBudgetSheet: View {
     }
 
     private func estimateRow(for period: BudgetPeriod) -> some View {
-        let estimatedAmount = BudgetManager.shared.convertAmount(parsedAmount, from: selectedPeriod, to: period)
+        // First convert amount to primary currency if needed
+        let amountInPrimaryCurrency: Double
+        if selectedCurrency != currencyPrefs.primaryCurrency {
+            amountInPrimaryCurrency = CurrencyRateManager.shared.convertAmount(
+                parsedAmount,
+                from: selectedCurrency,
+                to: currencyPrefs.primaryCurrency
+            )
+        } else {
+            amountInPrimaryCurrency = parsedAmount
+        }
+
+        // Then convert the period
+        let estimatedAmount = BudgetManager.shared.convertAmount(amountInPrimaryCurrency, from: selectedPeriod, to: period)
 
         return HStack {
             Text(period.displayName)

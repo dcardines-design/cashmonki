@@ -34,8 +34,9 @@ struct CurrencyPickerSheet: View {
             #endif
             
             let filtered = searchText.isEmpty ? Currency.allCases : Currency.allCases.filter { currency in
-                currency.displayName.localizedCaseInsensitiveContains(searchText) ||
-                currency.rawValue.localizedCaseInsensitiveContains(searchText)
+                currency.searchableDisplayName.localizedCaseInsensitiveContains(searchText) ||
+                currency.rawValue.localizedCaseInsensitiveContains(searchText) ||
+                currency.fullName.localizedCaseInsensitiveContains(searchText)
             }
             
             cachedCurrencies = filtered

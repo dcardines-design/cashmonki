@@ -14,48 +14,52 @@ struct ToastView: View {
     @Binding var isShowing: Bool
     let showFailedOverlay: Bool
     let scanningBlurb: String  // Random blurb passed in for scanning toasts
+    var onDismiss: (() -> Void)? = nil  // Optional dismiss callback for drag gesture
     @State private var animationOpacity: Double = 1.0
+    @State private var dragOffset: CGFloat = 0
 
-    // 20 random blurbs shown during receipt analysis (Deadpool energy)
+    // 20 random blurbs shown during receipt analysis
     static let analyzingBlurbs = [
-        "Oh, this is gonna be good... 👀",
-        "Your wallet called. It's crying. 👀",
-        "No judgment. Okay, some judgment. 👀",
-        "What do we have here... 👀",
-        "Bold purchases. Questionable timing. 👀",
-        "Your bank account just flinched. 👀",
-        "Interesting strategy there... 👀",
-        "Seen worse. Not by much though. 👀",
-        "Ah yes, the classic 'treat yourself' purchase. 👀",
-        "Someone likes to live dangerously. 👀",
-        "Your future self is typing a strongly worded letter. 👀",
-        "Doing some light financial stalking... 👀",
-        "This is going to be interesting... 👀",
-        "Calculating the damage... 👀",
-        "Your money had a good run. 👀",
-        "Reading between the line items... 👀",
-        "Someone's been busy... 👀",
-        "So many questions here... 👀",
-        "Brb, alerting your accountant. 👀",
-        "Well well well... 👀"
+        "Ooh, what do we have here...",
+        "Reading the fine print...",
+        "Crunching the numbers...",
+        "This looks interesting...",
+        "Decoding your purchase...",
+        "Let's see what we've got...",
+        "Doing the math...",
+        "Almost got it...",
+        "Making sense of this...",
+        "One moment...",
+        "Processing...",
+        "Scanning away...",
+        "On the case...",
+        "Working on it...",
+        "Getting the details...",
+        "Breaking it down...",
+        "Analyzing...",
+        "Reading...",
+        "Just a sec...",
+        "Hmm, interesting..."
     ]
 
     // Convenience initializer without scanningBlurb (for non-scanning toasts)
-    init(message: String, type: ToastType, isShowing: Binding<Bool>, showFailedOverlay: Bool) {
+    init(message: String, type: ToastType, isShowing: Binding<Bool>, showFailedOverlay: Bool, onDismiss: (() -> Void)? = nil) {
         self.message = message
         self.type = type
         self._isShowing = isShowing
         self.showFailedOverlay = showFailedOverlay
         self.scanningBlurb = ToastView.analyzingBlurbs.randomElement() ?? "Oh, this is gonna be good..."
+        self.onDismiss = onDismiss
     }
 
     // Full initializer with explicit scanningBlurb
-    init(message: String, type: ToastType, isShowing: Binding<Bool>, showFailedOverlay: Bool, scanningBlurb: String) {
+    init(message: String, type: ToastType, isShowing: Binding<Bool>, showFailedOverlay: Bool, scanningBlurb: String, onDismiss: (() -> Void)? = nil) {
         self.message = message
         self.type = type
         self._isShowing = isShowing
         self.showFailedOverlay = showFailedOverlay
         self.scanningBlurb = scanningBlurb
+        self.onDismiss = onDismiss
     }
 
     private var subtitleText: String {
@@ -276,6 +280,35 @@ struct ToastView: View {
         .cornerRadius(10)
         .shadow(color: Color(red: 0.06, green: 0.09, blue: 0.16).opacity(0.18), radius: 24, x: 0, y: 24)
         .padding(.horizontal, 15)
+        .offset(y: dragOffset)
+        .gesture(
+            // Only allow drag dismiss for non-scanning toasts
+            type != .scanning ?
+            DragGesture()
+                .onChanged { value in
+                    // Only allow dragging up (negative values)
+                    if value.translation.height < 0 {
+                        dragOffset = value.translation.height
+                    }
+                }
+                .onEnded { value in
+                    // If dragged up more than 50 points, dismiss
+                    if value.translation.height < -50 {
+                        withAnimation(.easeOut(duration: 0.2)) {
+                            dragOffset = -200 // Animate off screen
+                        }
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                            onDismiss?()
+                        }
+                    } else {
+                        // Snap back
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                            dragOffset = 0
+                        }
+                    }
+                }
+            : nil
+        )
         .transition(.move(edge: .top))
         .onAppear {
             // Auto-dismiss is now handled by ToastManager only
@@ -812,7 +845,8 @@ struct WindowToastView: View {
                         set: { _ in toastManager.dismiss() }
                     ),
                     showFailedOverlay: toast.showFailedOverlay,
-                    scanningBlurb: toast.scanningBlurb
+                    scanningBlurb: toast.scanningBlurb,
+                    onDismiss: { toastManager.dismiss() }
                 )
                 .allowsHitTesting(true)
                 .padding(.top, safeAreaTop + 8)
@@ -875,7 +909,8 @@ struct ToastOverlay: ViewModifier {
                             set: { _ in toastManager.dismiss() }
                         ),
                         showFailedOverlay: toast.showFailedOverlay,
-                        scanningBlurb: toast.scanningBlurb
+                        scanningBlurb: toast.scanningBlurb,
+                        onDismiss: { toastManager.dismiss() }
                     )
                     .onAppear {
                         print("🍞 UI: ToastView appeared on screen!")

@@ -58,6 +58,8 @@ struct SubAccount: Identifiable, Codable, Hashable {
     let customIcon: String?        // Optional custom icon
     var isDefault: Bool
     var isActive: Bool
+    var balance: Double?           // Optional manual balance
+    var showBalance: Bool          // Show balance in preview
     let createdAt: Date
     var updatedAt: Date
     
@@ -88,7 +90,9 @@ struct SubAccount: Identifiable, Codable, Hashable {
         colorHex: String? = nil,
         customIcon: String? = nil,
         isDefault: Bool = false,
-        isActive: Bool = true
+        isActive: Bool = true,
+        balance: Double? = nil,
+        showBalance: Bool = false
     ) {
         self.id = id
         self.parentUserId = parentUserId
@@ -99,6 +103,8 @@ struct SubAccount: Identifiable, Codable, Hashable {
         self.customIcon = customIcon
         self.isDefault = isDefault
         self.isActive = isActive
+        self.balance = balance
+        self.showBalance = showBalance
         self.createdAt = Date()
         self.updatedAt = Date()
     }
@@ -115,7 +121,9 @@ extension UserData {
                 name: accountData.name,
                 type: convertAccountTypeToSubAccountType(accountData.type),
                 currency: accountData.currency,
-                isDefault: accountData.isDefault
+                isDefault: accountData.isDefault,
+                balance: accountData.balance,
+                showBalance: accountData.showBalance
             )
         }
     }
@@ -158,9 +166,11 @@ extension UserData {
             name: subAccount.name,
             type: convertSubAccountTypeToAccountType(subAccount.type),
             currency: subAccount.currency,
-            isDefault: subAccount.isDefault
+            isDefault: subAccount.isDefault,
+            balance: subAccount.balance,
+            showBalance: subAccount.showBalance
         )
-        
+
         // If this is the first account, make it default
         var newAccount = accountData
         if accounts.isEmpty {
@@ -260,5 +270,16 @@ extension SubAccount {
             currency: .php,
             colorHex: "#08AD93" // Green color
         )
+    }
+
+    /// Computes the current balance based on starting balance + sum of transactions
+    /// - Parameter transactions: All transactions to filter by this wallet
+    /// - Returns: The computed current balance (starting balance + transaction sum)
+    func currentBalance(transactions: [Txn]) -> Double {
+        let startingBalance = balance ?? 0
+        let transactionTotal = transactions
+            .filter { $0.walletID == self.id }
+            .reduce(0) { $0 + $1.amount }
+        return startingBalance + transactionTotal
     }
 }

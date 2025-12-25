@@ -211,7 +211,7 @@ extension HomePage {
                     },
                     hierarchy: .tertiary,
                     size: .extraSmall,
-                    rightIcon: "chevron.right"
+                    rightIcon: "chevron-right"
                 )
                 .padding(.horizontal, 16)
                 .padding(.vertical, 12)

@@ -132,7 +132,7 @@ struct AddBudgetSheet: View {
     private var periodSelectorSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Budget Period")
-                .font(AppFonts.overusedGroteskMedium(size: 14))
+                .font(AppFonts.overusedGroteskMedium(size: 16))
                 .foregroundStyle(AppColors.foregroundSecondary)
 
             FlowLayout(spacing: 10) {
@@ -141,6 +141,7 @@ struct AddBudgetSheet: View {
                 }
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func periodChip(_ period: BudgetPeriod) -> some View {
@@ -152,7 +153,7 @@ struct AddBudgetSheet: View {
             }
         }) {
             Text(period.displayName)
-                .font(AppFonts.overusedGroteskMedium(size: 18))
+                .font(AppFonts.overusedGroteskMedium(size: 16))
                 .foregroundStyle(isSelected ? AppColors.primary : AppColors.foregroundSecondary)
                 .padding(.horizontal, 16)
                 .padding(.vertical, 10)
@@ -169,7 +170,7 @@ struct AddBudgetSheet: View {
     private var calculateForAllPeriodsSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Calculate for all periods?")
-                .font(AppFonts.overusedGroteskMedium(size: 14))
+                .font(AppFonts.overusedGroteskMedium(size: 16))
                 .foregroundStyle(AppColors.foregroundSecondary)
 
             HStack(spacing: 10) {
@@ -181,6 +182,7 @@ struct AddBudgetSheet: View {
                 }
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func yesNoChip(label: String, isSelected: Bool, action: @escaping () -> Void) -> some View {
@@ -190,9 +192,9 @@ struct AddBudgetSheet: View {
             }
         }) {
             Text(label)
-                .font(AppFonts.overusedGroteskMedium(size: 18))
-                .frame(maxWidth: .infinity)
+                .font(AppFonts.overusedGroteskMedium(size: 16))
                 .foregroundStyle(isSelected ? AppColors.primary : AppColors.foregroundSecondary)
+                .padding(.horizontal, 16)
                 .padding(.vertical, 10)
                 .background(isSelected ? Color(red: 0.33, green: 0.18, blue: 1).opacity(0.1) : Color.clear)
                 .background(isSelected ? .white : AppColors.surfacePrimary)
@@ -205,9 +207,9 @@ struct AddBudgetSheet: View {
     // MARK: - Estimates Section
 
     private var estimatesSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Estimated budgets")
-                .font(AppFonts.overusedGroteskMedium(size: 14))
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Estimated Budgets")
+                .font(AppFonts.overusedGroteskMedium(size: 16))
                 .foregroundStyle(AppColors.foregroundSecondary)
 
             VStack(spacing: 8) {
@@ -224,7 +226,20 @@ struct AddBudgetSheet: View {
     }
 
     private func estimateRow(for period: BudgetPeriod) -> some View {
-        let estimatedAmount = BudgetManager.shared.convertAmount(parsedAmount, from: selectedPeriod, to: period)
+        // First convert amount to primary currency if needed
+        let amountInPrimaryCurrency: Double
+        if selectedCurrency != currencyPrefs.primaryCurrency {
+            amountInPrimaryCurrency = CurrencyRateManager.shared.convertAmount(
+                parsedAmount,
+                from: selectedCurrency,
+                to: currencyPrefs.primaryCurrency
+            )
+        } else {
+            amountInPrimaryCurrency = parsedAmount
+        }
+
+        // Then convert the period
+        let estimatedAmount = BudgetManager.shared.convertAmount(amountInPrimaryCurrency, from: selectedPeriod, to: period)
 
         return HStack {
             Text(period.displayName)

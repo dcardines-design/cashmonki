@@ -10,6 +10,7 @@ import SwiftUI
 struct AccountSelectorButton: View {
     @ObservedObject var userManager = UserManager.shared
     @ObservedObject var accountManager = AccountManager.shared
+    @ObservedObject var currencyPrefs = CurrencyPreferences.shared  // Observe for currency changes
     @State private var showingAccountPicker = false
     @State private var isPressed = false
     
@@ -22,7 +23,7 @@ struct AccountSelectorButton: View {
             showingAccountPicker = true
             print("🔘 AccountSelectorButton: State set to: \(showingAccountPicker)")
         }) {
-            HStack(alignment: .center, spacing: 4) {
+            HStack(alignment: .center, spacing: 12) {
                 // Wallet avatar with initials
                 Circle()
                     .fill(AppColors.walletAvatar)
@@ -32,40 +33,39 @@ struct AccountSelectorButton: View {
                             .font(AppFonts.overusedGroteskSemiBold(size: 16))
                             .foregroundColor(.white)
                     )
-                
-                HStack(alignment: .top, spacing: 4) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        // First row: Wallet icon + "Wallet" text
+
+                VStack(alignment: .leading, spacing: 2) {
+                    // Wallet name
+                    if let currentAccount = accountManager.currentSubAccount {
+                        Text(currentAccount.name)
+                            .font(AppFonts.overusedGroteskSemiBold(size: 16))
+                            .foregroundColor(AppColors.foregroundPrimary)
+                    } else {
+                        let fallbackName = userManager.currentUser.subAccounts.first?.name ?? "Personal"
+                        Text(fallbackName)
+                            .font(AppFonts.overusedGroteskSemiBold(size: 16))
+                            .foregroundColor(AppColors.foregroundPrimary)
+                    }
+
+                    // Second row: Wallet icon + Balance (only if balance exists)
+                    if let currentAccount = accountManager.currentSubAccount ?? userManager.currentUser.subAccounts.first,
+                       currentAccount.balance != nil {
                         HStack(alignment: .center, spacing: 4) {
                             Image("wallet-03")
                                 .resizable()
                                 .renderingMode(.template)
-                                .frame(width: 12, height: 12)
+                                .frame(width: 14, height: 14)
                                 .foregroundColor(Color(hex: "A0A6B8") ?? AppColors.foregroundSecondary)
-                            
-                            Text("Wallet")
+
+                            Text(formatWalletBalance(account: currentAccount))
                                 .font(AppFonts.overusedGroteskMedium(size: 14))
                                 .foregroundColor(AppColors.foregroundSecondary)
                         }
-                        
-                        // Second row: Dynamic wallet name flush with icon left edge
-                        if let currentAccount = accountManager.currentSubAccount {
-                            Text(currentAccount.name)
-                                .font(AppFonts.overusedGroteskMedium(size: 16))
-                                .foregroundColor(AppColors.foregroundPrimary)
-                        } else {
-                            // Fallback to first available wallet or create default
-                            let fallbackName = userManager.currentUser.subAccounts.first?.name ?? "Personal"
-                            Text(fallbackName)
-                                .font(AppFonts.overusedGroteskMedium(size: 16))
-                                .foregroundColor(AppColors.foregroundPrimary)
-                        }
                     }
                 }
-                .padding(4)
-                
+
                 Spacer()
-                
+
                 // Dropdown arrow - 24px size with #72788A color
                 Image("chevron-selector-vertical")
                     .resizable()
@@ -75,7 +75,7 @@ struct AccountSelectorButton: View {
             }
             .padding(.leading, 10)
             .padding(.trailing, 18)
-            .padding(.vertical, 8)
+            .padding(.vertical, 10)
         }
         .frame(maxWidth: .infinity, alignment: .center)
         .background(isPressed ? AppColors.surfacePrimary : .white)
@@ -109,12 +109,56 @@ struct AccountSelectorButton: View {
             print("🔄 AccountSelectorButton: showingAccountPicker changed to \(newValue)")
         }
     }
+
+    // Format wallet balance for display (computed: starting balance + transactions, converted to primary currency)
+    private func formatWalletBalance(account: SubAccount) -> String {
+        // Only show balance if user has set a starting balance
+        guard let startingBalance = account.balance else { return "" }
+
+        if !account.showBalance {
+            return "********"
+        }
+
+        let primaryCurrency = currencyPrefs.primaryCurrency
+
+        // Debug logging
+        print("💰 formatWalletBalance: account.currency=\(account.currency.rawValue), primaryCurrency=\(primaryCurrency.rawValue), startingBalance=\(startingBalance)")
+
+        // Convert starting balance from wallet currency to primary currency FIRST
+        let startingBalanceInPrimary: Double
+        if account.currency != primaryCurrency {
+            startingBalanceInPrimary = CurrencyRateManager.shared.convertAmount(startingBalance, from: account.currency, to: primaryCurrency)
+            print("💰 formatWalletBalance: Converted \(startingBalance) \(account.currency.rawValue) → \(startingBalanceInPrimary) \(primaryCurrency.rawValue)")
+        } else {
+            startingBalanceInPrimary = startingBalance
+            print("💰 formatWalletBalance: No conversion needed (same currency)")
+        }
+
+        // Transaction amounts are ALREADY in primary currency (converted when primary changed)
+        let transactions = userManager.currentUser.transactions
+        let transactionTotal = transactions
+            .filter { $0.walletID == account.id }
+            .reduce(0) { $0 + $1.amount }
+
+        // Now both are in primary currency - safe to add
+        let displayBalance = startingBalanceInPrimary + transactionTotal
+
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal
+        formatter.minimumFractionDigits = 0
+        formatter.maximumFractionDigits = 2
+        formatter.groupingSeparator = ","
+
+        let formattedAmount = formatter.string(from: NSNumber(value: displayBalance)) ?? "\(displayBalance)"
+        return "\(primaryCurrency.symbol)\(formattedAmount)"
+    }
 }
 
 struct AccountPickerSheet: View {
     @ObservedObject var userManager = UserManager.shared
     @ObservedObject var accountManager = AccountManager.shared
     @ObservedObject var revenueCatManager = RevenueCatManager.shared
+    @ObservedObject var currencyPrefs = CurrencyPreferences.shared  // Observe for currency changes
     @Binding var isPresented: Bool
     @State private var showingAddWallet = false
     @State private var showingEditWallet = false
@@ -157,11 +201,38 @@ struct AccountPickerSheet: View {
                     ForEach(userManager.currentUser.subAccounts, id: \.id) { account in
                         let isSelected = accountManager.selectedSubAccountId == account.id
                         let _ = print("🔍 AccountPickerSheet: Account '\(account.name)' (ID: \(account.id.uuidString.prefix(8))) - Selected: \(isSelected) (SelectedID: \(accountManager.selectedSubAccountId?.uuidString.prefix(8) ?? "nil"))")
-                        
+
+                        // Compute current balance properly:
+                        // 1. Convert starting balance to primary currency
+                        // 2. Add transaction total (already in primary currency)
+                        let primaryCurrency = currencyPrefs.primaryCurrency
+                        let transactions = userManager.currentUser.transactions
+                        let computedBalance: Double? = {
+                            guard let startingBalance = account.balance else { return nil }
+
+                            // Convert starting balance to primary currency
+                            let startingInPrimary: Double
+                            if account.currency != primaryCurrency {
+                                startingInPrimary = CurrencyRateManager.shared.convertAmount(startingBalance, from: account.currency, to: primaryCurrency)
+                            } else {
+                                startingInPrimary = startingBalance
+                            }
+
+                            // Transaction amounts are already in primary currency
+                            let transactionTotal = transactions
+                                .filter { $0.walletID == account.id }
+                                .reduce(0) { $0 + $1.amount }
+
+                            return startingInPrimary + transactionTotal
+                        }()
+
                         AccountOptionRow(
                             icon: .initials(account.initials),
                             iconColor: account.color,
                             name: account.name,
+                            balance: computedBalance,
+                            currency: primaryCurrency,  // Balance is already converted to primary
+                            showBalanceInPreview: account.showBalance,
                             showSettings: true,
                             isSelected: isSelected,
                             onTap: {
@@ -187,20 +258,22 @@ struct AccountPickerSheet: View {
         .sheet(isPresented: $showingAddWallet) {
             AddWalletSheet(
                 isPresented: $showingAddWallet,
-                onSave: { walletName in
+                onSave: { walletName, balance, currency, showBalance in
                     print("Creating new wallet: \(walletName)")
-                    
+
                     // Create the actual wallet using AccountManager
                     accountManager.createSubAccount(
                         name: walletName,
                         type: .personal, // Default to personal type
-                        currency: .php,  // Default to PHP
+                        currency: currency,
                         color: nil,      // Let it use default color
-                        makeDefault: false
+                        makeDefault: false,
+                        balance: balance,
+                        showBalance: showBalance
                     )
-                    
+
                     print("✅ Wallet '\(walletName)' created successfully")
-                    
+
                     // Force UI refresh after account creation
                     DispatchQueue.main.async {
                         accountManager.objectWillChange.send()
@@ -299,13 +372,43 @@ struct AccountOptionRow: View {
     let icon: AccountIcon
     let iconColor: Color
     let name: String
+    let balance: Double?
+    let currency: Currency
+    let showBalanceInPreview: Bool
     let showSettings: Bool
     let isSelected: Bool
     let onTap: () -> Void
     let onSettingsTap: (() -> Void)?
-    
+
     @State private var isPressed = false
-    
+
+    // Format balance for display (converted to primary currency)
+    private var balanceText: String {
+        guard let balance = balance else { return "" }
+
+        if !showBalanceInPreview {
+            return "********"
+        }
+
+        // Convert to primary currency if different
+        let primaryCurrency = CurrencyPreferences.shared.primaryCurrency
+        let displayBalance: Double
+        if currency != primaryCurrency {
+            displayBalance = CurrencyRateManager.shared.convertAmount(balance, from: currency, to: primaryCurrency)
+        } else {
+            displayBalance = balance
+        }
+
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal
+        formatter.minimumFractionDigits = 0
+        formatter.maximumFractionDigits = 2
+        formatter.groupingSeparator = ","
+
+        let formattedAmount = formatter.string(from: NSNumber(value: displayBalance)) ?? "\(displayBalance)"
+        return "\(primaryCurrency.symbol)\(formattedAmount)"
+    }
+
     var body: some View {
         Button(action: onTap) {
             HStack(spacing: 12) {
@@ -327,13 +430,22 @@ struct AccountOptionRow: View {
                             }
                         }
                     )
-                
-                Text(name)
-                    .font(AppFonts.overusedGroteskSemiBold(size: 16))
-                    .foregroundColor(.primary)
-                
+
+                // Name and balance
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(name)
+                        .font(AppFonts.overusedGroteskSemiBold(size: 16))
+                        .foregroundColor(.primary)
+
+                    if balance != nil {
+                        Text(balanceText)
+                            .font(AppFonts.overusedGroteskMedium(size: 14))
+                            .foregroundColor(AppColors.foregroundSecondary)
+                    }
+                }
+
                 Spacer()
-                
+
                 if showSettings {
                     Button(action: {
                         onSettingsTap?()
@@ -375,6 +487,9 @@ extension AccountOptionRow {
         self.icon = icon
         self.iconColor = iconColor
         self.name = name
+        self.balance = nil
+        self.currency = .php
+        self.showBalanceInPreview = true
         self.showSettings = showSettings
         self.isSelected = isSelected
         self.onTap = onTap
