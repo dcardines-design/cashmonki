@@ -74,18 +74,18 @@ struct RoastReceiptSheet: View {
     let roastMessage: String
     @State private var isFullHeight = false
     
-    // Placeholder roast messages - Deadpool-style savage and sarcastic
+    // Placeholder roast messages - brutally mean and unhinged
     private static let placeholderRoasts = [
-        "₱500 on Grab? Congrats, you paid extra to marinate in Manila traffic. At least the AC worked... probably.",
-        "₱800 on coffee this week? Your blood is literally 40% overpriced bean water at this point. Doctors hate this one trick.",
-        "₱1,200 on food delivery? The delivery guy knows your address better than your own mother. That's not sad at all.",
-        "₱300 for bubble tea? You paid for flavored milk with tiny choking hazards. Darwin would be so proud.",
-        "₱2,000 on shopping? Retail therapy isn't therapy, bestie. Your credit card just filed for emotional distress.",
-        "₱150 on parking? You paid your car's hourly wage to do absolutely nothing. It's living your dream.",
-        "₱600 on a single meal? I hope it was worth the three-week ramen diet that follows. Narrator: It wasn't.",
-        "₱400 on skincare? Your pores better be singing the national anthem at this price point.",
-        "₱250 on a movie ticket? For that price, the actors should've performed live in your living room.",
-        "₱700 on a haircut? Did they use scissors made of unicorn horns? Did a celebrity breathe near you?",
+        "₱500 on Grab because walking is for people with their life together. Your couch misses you already.",
+        "₱800 on coffee this week? At this point your blood type is just 'iced latte'. Your organs are planning an intervention.",
+        "₱1,200 on delivery? The rider knows your order by heart now. He's seen you in pajamas more than your family has.",
+        "₱300 on bubble tea again? You're not treating yourself, you're funding a tapioca addiction you refuse to acknowledge.",
+        "₱2,000 on shopping for clothes you'll wear once, photograph, then exile to the closet void. The landfill thanks you in advance.",
+        "₱150 on parking? You paid your car to sit there and judge your life choices. At least someone's relaxing.",
+        "₱600 on one meal? Your wallet just sent a distress signal. Your future self is already planning the instant noodle recovery arc.",
+        "₱400 on skincare for a face that only sees phone screen glow. Bold investment for someone who hasn't touched grass this week.",
+        "₱250 for a movie? At that price they should've let you direct it. Hope you at least stayed awake.",
+        "₱700 haircut? They could've just burned your money in front of you for the same emotional experience.",
     ]
     
     init(isPresented: Binding<Bool>, roastMessage: String? = nil) {
@@ -134,7 +134,7 @@ struct RoastReceiptSheet: View {
                 // Roast text
                 Text(roastMessage)
                     .font(
-                        Font.custom("Overused Grotesk", size: isFullHeight ? 34 : 28)
+                        Font.custom("Overused Grotesk", size: isFullHeight ? 30 : 28)
                             .weight(.semibold)
                     )
                     .multilineTextAlignment(.center)

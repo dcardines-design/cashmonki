@@ -65,6 +65,11 @@ struct OnboardingFlow: View {
             print("🔥 TRANSITION DEBUG: Step changed from \(oldValue) to \(newValue)")
             print("🔥 TRANSITION DEBUG: isNavigatingForward: \(isNavigatingForward)")
             print("🔥 TRANSITION DEBUG: SwiftUI should trigger transition animation now...")
+
+            // Track step completion when moving forward
+            if isNavigatingForward {
+                PostHogManager.shared.trackOnboardingStep(oldValue.rawValue, stepNumber: oldValue.stepNumber)
+            }
         }
         .onAppear {
             print("🎆 OnboardingFlow: ======= ONBOARDING FLOW START =======")
@@ -94,6 +99,12 @@ struct OnboardingFlow: View {
             }
             
             print("🎆 OnboardingFlow: ======= ONBOARDING FLOW READY =======")
+
+            // Track onboarding started
+            PostHogManager.shared.capture(.onboardingStarted, properties: [
+                "is_new_registration": isNewRegistration,
+                "starting_step": currentStep.rawValue
+            ])
         }
         .fullScreenCover(isPresented: $showingPaywall, onDismiss: {
             // When paywall is dismissed, complete onboarding and show welcome
@@ -742,6 +753,12 @@ struct OnboardingFlow: View {
         // Check if user subscribed
         let isProUser = RevenueCatManager.shared.isProUser
         print("🏁 OnboardingFlow: User is Pro: \(isProUser)")
+
+        // Track onboarding completed
+        PostHogManager.shared.capture(.onboardingCompleted, properties: [
+            "subscribed": isProUser,
+            "currency": selectedCurrency.rawValue
+        ])
 
         // Call onComplete to dismiss onboarding and transition to main app
         print("🏁 OnboardingFlow: Calling onComplete callback...")

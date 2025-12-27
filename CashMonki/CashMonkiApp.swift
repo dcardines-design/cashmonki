@@ -16,6 +16,9 @@ import FirebaseCore
 #if canImport(FirebaseAuth)
 import FirebaseAuth
 #endif
+#if canImport(PostHog)
+import PostHog
+#endif
 
 @main
 struct CashMonkiApp: App {
@@ -197,6 +200,9 @@ struct CashMonkiApp: App {
                     print("💰 CashMonkiApp: Pre-initializing RevenueCat during welcome screen...")
                     initializeRevenueCat()
 
+                    // Initialize PostHog analytics synchronously
+                    initializePostHog()
+
                     // Debug: Check if custom fonts are loaded
                     #if DEBUG
                     AppFonts.debugAvailableFonts()
@@ -298,17 +304,26 @@ struct CashMonkiApp: App {
                         print("   - Updated showingOnboarding: \(showingOnboarding)")
                         print("   - Updated isNewUser: \(isNewUser)")
                         
-                        // Identify user to RevenueCat
+                        // Identify user to RevenueCat and PostHog
                         if let userId = authManager.currentUser?.id.uuidString {
                             Task {
                                 await RevenueCatManager.shared.identifyUser(userId: userId)
                             }
+
+                            // Identify user to PostHog with email and name
+                            PostHogManager.shared.identifyWithEmail(
+                                userId: userId,
+                                email: authManager.currentUser?.email ?? "",
+                                name: authManager.currentUser?.name
+                            )
                         }
                     } else {
                         print("🔄 CashMonkiApp: User logged out")
                         Task {
                             await RevenueCatManager.shared.logoutUser()
                         }
+                        // Reset PostHog session on logout
+                        PostHogManager.shared.reset()
                         showingOnboarding = false
                         isNewUser = false
                     }
@@ -386,7 +401,36 @@ struct CashMonkiApp: App {
             print("✅ CashMonkiApp: RevenueCat initialization complete (background)")
         }
     }
-    
+
+        
+    // MARK: - PostHog Initialization
+
+    private func initializePostHog() {
+        print("📊 CashMonkiApp: Initializing PostHog...")
+
+        let POSTHOG_API_KEY = "phc_YmNi6WRjwuuMWO1Ghu9tXQZiGdD43Pv9wmcnjSTFvj8"
+        let POSTHOG_HOST = "https://us.i.posthog.com"
+
+        let config = PostHogConfig(apiKey: POSTHOG_API_KEY, host: POSTHOG_HOST)
+        config.captureApplicationLifecycleEvents = true
+        config.captureScreenViews = true
+        config.sessionReplay = true
+        config.sessionReplayConfig.screenshotMode = true
+
+        #if DEBUG
+        config.debug = true
+        #endif
+
+        PostHogSDK.shared.setup(config)
+
+        // Capture test event and flush immediately
+        PostHogSDK.shared.capture("app_launched")
+        PostHogSDK.shared.capture("test_event")
+        PostHogSDK.shared.flush()
+
+        print("✅ CashMonkiApp: PostHog initialized and test events sent!")
+    }
+
     // MARK: - Onboarding State Management
     
     private func checkOnboardingWithStateManager() {

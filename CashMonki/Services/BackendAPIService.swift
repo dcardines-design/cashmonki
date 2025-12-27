@@ -82,8 +82,9 @@ class BackendAPIService: ObservableObject {
                     
                     // Try different date formats that the backend might return
                     let formatters: [DateFormatter] = [
-                        createBackendDateFormatter("yyyy-MM-dd"),  // "2025-12-08"
+                        createBackendDateFormatter("yyyy-MM-dd HH:mm"),  // "2025-12-08 17:08" (24-hour, no seconds)
                         createBackendDateFormatter("yyyy-MM-dd HH:mm:ss"),  // "2025-12-08 14:30:00"
+                        createBackendDateFormatter("yyyy-MM-dd"),  // "2025-12-08" (date only)
                         createBackendDateFormatter("yyyy-MM-dd'T'HH:mm:ss'Z'"),  // ISO format
                         createBackendDateFormatter("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'")  // ISO with milliseconds
                     ]

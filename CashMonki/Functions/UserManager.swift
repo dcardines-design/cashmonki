@@ -101,21 +101,50 @@ class UserManager: ObservableObject {
     // MARK: - User Authentication & Session Management
     
     /// Restore user session from stored data or fallback to test user
+    /// LOCAL-FIRST: Always loads from local storage first, Firebase is for future sync only
     func restoreUserSession() {
         print("🔄 UserManager: RESTORE SESSION DEBUG - Starting session restoration")
-        
-        // Check if we have an authenticated user from Firebase Auth
+        print("📱 UserManager: LOCAL-FIRST MODE - Loading from device storage")
+
+        // STEP 1: Try to load from local storage FIRST (this is the primary data source)
+        if let localUser = loadCurrentUserLocally() {
+            print("✅ UserManager: LOCAL DATA FOUND - Using local storage as primary source")
+            print("   👤 User: \(localUser.name)")
+            print("   📧 Email: \(localUser.email)")
+            print("   📊 Transactions: \(localUser.transactions.count)")
+            print("   🏦 Wallets: \(localUser.accounts.count)")
+
+            // Use the locally stored user data
+            self.currentUser = localUser
+            self.objectWillChange.send()
+
+            // Trigger AccountManager refresh
+            DispatchQueue.main.async {
+                AccountManager.shared.objectWillChange.send()
+            }
+
+            print("💾 UserManager: Session restored from LOCAL STORAGE")
+            print("🚫 UserManager: Skipping Firebase load - transactions are local-only")
+
+            // Notify that loading is complete
+            NotificationCenter.default.post(name: NSNotification.Name("UserManagerFirebaseLoadComplete"), object: nil)
+            return
+        }
+
+        print("💾 UserManager: No local data found - setting up user profile")
+
+        // STEP 2: No local data - check if we have an authenticated user from Firebase Auth
         if let authenticatedUser = AuthenticationManager.shared.currentUser {
             print("🔧 UserManager: Using authenticated user from Firebase Auth")
             print("👤 UserManager: User: \(authenticatedUser.name)")
             print("📧 UserManager: Email: \(authenticatedUser.email)")
-            
+
             setCurrentUser(
                 id: authenticatedUser.id,
                 name: authenticatedUser.name,
                 email: authenticatedUser.email
             )
-            
+
             // Store authenticated user session
             UserDefaults.standard.set(authenticatedUser.id.uuidString, forKey: "currentUserId")
             UserDefaults.standard.set(authenticatedUser.name, forKey: "currentUserName")
@@ -123,73 +152,20 @@ class UserManager: ObservableObject {
         } else {
             // Fallback to test user for development
             print("🔧 UserManager: No authenticated user, using test user for development")
-            print("🔧 UserManager: This will check for stored session or create new test user")
             useTestUser()
         }
-        
-        // IMMEDIATELY load authenticated user's transactions from Firebase on app start
-        print("🚀 UserManager: IMMEDIATELY loading transactions for current user: \(currentUser.name)")
-        print("📧 UserManager: User email: \(currentUser.email)")
-        print("⚡ UserManager: This ensures we get existing data WITHOUT timestamp manipulation")
-        
-        // Use Firebase UID for consistent Firebase operations
-        let firebaseUserID = AuthenticationManager.shared.currentUser?.firebaseUID ?? currentUser.id.uuidString
-        firestore.fetchTransactions(userId: firebaseUserID) { result in
-            DispatchQueue.main.async {
-                switch result {
-                case .success(let transactions):
-                    if transactions.isEmpty {
-                        print("📭 UserManager: No transactions found in Firebase for user: \(self.currentUser.name)")
-                        print("👋 UserManager: NEW USER - Starting with empty transaction list")
-                        
-                        // For new users, just start with empty transactions
-                        self.currentUser.transactions = []
-                        self.objectWillChange.send()
-                        print("✨ UserManager: New user \(self.currentUser.name) ready with empty transaction list")
-                    } else {
-                        print("✅ UserManager: STARTUP LOAD - Loaded \(transactions.count) existing transactions from Firebase")
-                        
-                        // Show original timestamps to prove no manipulation
-                        if let mostRecent = transactions.first {
-                            print("📅 UserManager: Most recent transaction from DB:")
-                            print("   - Category: \(mostRecent.category)")
-                            print("   - Amount: ₱\(mostRecent.amount)")
-                            print("   - Original DATE: \(mostRecent.date)")
-                            print("   - Original CREATED AT: \(mostRecent.createdAt)")
-                            print("✅ UserManager: Timestamps are ORIGINAL from database")
-                        }
-                        
-                        // Replace local transactions with Firebase data (no timestamp modification)
-                        self.currentUser.transactions = Array(Set(transactions)) // Deduplicate
-                        print("📊 UserManager: Local transaction count now: \(self.currentUser.transactions.count)")
-                        print("💰 UserManager: Dante's current balance: ₱\(String(format: "%.2f", self.currentUser.userBalance))")
-                        
-                        // Trigger UI update for UserManager and AccountManager
-                        self.objectWillChange.send()
-                        
-                        // Also trigger AccountManager refresh to ensure account filtering works
-                        DispatchQueue.main.async {
-                            AccountManager.shared.objectWillChange.send()
-                        }
-                        
-                        print("🔄 UserManager: Triggered UI refresh for both UserManager and AccountManager")
-                        print("🏢 UserManager: Account filtering should now work properly")
-                        
-                        // Complete initial load but don't auto-start sync manager
-                        // Sync will be manual via Settings button
-                        // self.completeInitialLoad()
-                    }
-                    
-                case .failure(let error):
-                    print("❌ UserManager: Failed to load transactions on startup: \(error)")
-                    print("🚫 UserManager: AUTO-CREATION DISABLED - Use '👤 Create Dante' button manually")
-                    print("💡 UserManager: This prevents creating new transactions with current timestamps")
-                    
-                    // Don't auto-start sync manager - will be manual via Settings
-                    // self.completeInitialLoad()
-                }
-            }
-        }
+
+        // STEP 3: New user with no local data - start with empty transactions
+        print("👋 UserManager: NEW USER - Starting with empty transaction list")
+        print("📱 UserManager: Transactions will be stored locally on this device")
+        self.currentUser.transactions = []
+        self.objectWillChange.send()
+
+        // Save the new user to local storage immediately
+        saveCurrentUserLocally()
+
+        // Notify that loading is complete
+        NotificationCenter.default.post(name: NSNotification.Name("UserManagerFirebaseLoadComplete"), object: nil)
         
         // Comment out the dynamic session restore to prevent ID conflicts during development
         /*
@@ -917,9 +893,14 @@ class UserManager: ObservableObject {
             )
         }
         
+        // LOCAL-ONLY MODE: Firebase sync disabled for now
+        // TODO: Re-enable when data sync feature is implemented
+        print("📱 UserManager: Transaction saved locally only (Firebase sync disabled)")
+
+        /*
         // Enable automatic sync for transaction creation
         syncManager?.syncTransaction(transactionToSync, operation: .create)
-        
+
         // FALLBACK: Also save directly to Firebase to ensure transaction is persisted
         // This provides redundancy in case sync manager is not yet initialized
         // Use Firebase UID for consistent Firebase operations
@@ -935,7 +916,8 @@ class UserManager: ObservableObject {
                 }
             }
         }
-        
+        */
+
         print("✅ UserManager: ADD TRANSACTION COMPLETED")
         print("📈 UserManager: Current balance: ₱\(String(format: "%.2f", currentUser.userBalance))")
     }
@@ -1210,12 +1192,18 @@ class UserManager: ObservableObject {
         let firebaseUserID = AuthenticationManager.shared.currentUser?.firebaseUID ?? currentUser.id.uuidString
         
         currentUser.removeTransaction(withId: id)
+        saveCurrentUserLocally()
         objectWillChange.send()
-        
+
+        // LOCAL-ONLY MODE: Firebase sync disabled for now
+        // TODO: Re-enable when data sync feature is implemented
+        print("📱 UserManager: Transaction deleted locally only (Firebase sync disabled)")
+
+        /*
         // Enable automatic sync for transaction deletion
         if let transaction = transaction {
             syncManager?.syncTransaction(transaction, operation: .delete)
-            
+
             // FALLBACK: Also delete directly from Firebase
             firestore.deleteTransaction(transactionId: id.uuidString, userId: firebaseUserID) { result in
                 switch result {
@@ -1231,17 +1219,24 @@ class UserManager: ObservableObject {
         } else {
             print("⚠️ UserManager: Could not find transaction to sync deletion")
         }
-        
+        */
+
         print("🗑️ UserManager: Removed transaction with ID \(id)")
     }
     
     func updateTransaction(_ transaction: Txn) {
         currentUser.updateTransaction(transaction)
+        saveCurrentUserLocally()
         objectWillChange.send()
-        
+
+        // LOCAL-ONLY MODE: Firebase sync disabled for now
+        // TODO: Re-enable when data sync feature is implemented
+        print("📱 UserManager: Transaction updated locally only (Firebase sync disabled)")
+
+        /*
         // Enable automatic sync for transaction updates
         syncManager?.syncTransaction(transaction, operation: .update)
-        
+
         // FALLBACK: Also save directly to Firebase
         // Use Firebase UID for consistent Firebase operations
         let firebaseUserID = AuthenticationManager.shared.currentUser?.firebaseUID ?? currentUser.id.uuidString
@@ -1256,7 +1251,8 @@ class UserManager: ObservableObject {
                 }
             }
         }
-        
+        */
+
         print("✏️ UserManager: Updated transaction - \(transaction.category) \(transaction.amount)")
     }
     
@@ -1345,6 +1341,13 @@ class UserManager: ObservableObject {
         }
 
         let deletedBudget = currentUser.budgets.remove(at: index)
+
+        // Track budget deletion in PostHog
+        PostHogManager.shared.capture(.budgetDeleted, properties: [
+            "category": deletedBudget.categoryName,
+            "amount": deletedBudget.amount,
+            "period": deletedBudget.period.rawValue
+        ])
 
         saveCurrentUserLocally()
         objectWillChange.send()
@@ -1922,12 +1925,17 @@ class UserManager: ObservableObject {
         
         do {
             let encoded = try JSONEncoder().encode(currentUser)
-            
+
             // Use Firebase UID for consistent storage key
             let firebaseUID = AuthenticationManager.shared.currentUser?.firebaseUID ?? currentUser.id.uuidString
             let key = "currentUser_firebase_\(firebaseUID)"
-            
+
             UserDefaults.standard.set(encoded, forKey: key)
+
+            // CRITICAL: Store Firebase UID separately for recovery after app restart
+            // This allows us to find the correct storage key before Firebase Auth loads
+            UserDefaults.standard.set(firebaseUID, forKey: "last_authenticated_firebase_uid")
+
             UserDefaults.standard.synchronize()
             
             print("✅ UserManager: User data saved successfully to local storage")
@@ -1956,21 +1964,44 @@ class UserManager: ObservableObject {
     
     /// Load user data from local storage
     private func loadCurrentUserLocally() -> UserData? {
-        // For backward compatibility, try multiple possible keys
-        let possibleKeys = [
+        print("💾 UserManager: Attempting to load user data from local storage...")
+
+        // STEP 1: Get the Firebase UID (try live auth first, then stored fallback)
+        let firebaseUID: String? = AuthenticationManager.shared.currentUser?.firebaseUID
+            ?? UserDefaults.standard.string(forKey: "last_authenticated_firebase_uid")
+
+        // STEP 2: Try the primary key format (matches how we save)
+        if let uid = firebaseUID {
+            let primaryKey = "currentUser_firebase_\(uid)"
+            print("💾 UserManager: Trying primary key: \(primaryKey)")
+
+            if let data = UserDefaults.standard.data(forKey: primaryKey),
+               let user = try? JSONDecoder().decode(UserData.self, from: data) {
+                print("✅ UserManager: Loaded user data from local storage (key: \(primaryKey))")
+                print("   👤 User: \(user.name)")
+                print("   📊 Transactions: \(user.transactions.count)")
+                print("   🏦 Wallets: \(user.accounts.count)")
+                return user
+            }
+        } else {
+            print("⚠️ UserManager: No Firebase UID available for primary key lookup")
+        }
+
+        // STEP 3: Fallback to legacy keys for backward compatibility
+        let legacyKeys = [
             "currentUser_\(currentUser.id.uuidString)",
-            "currentUser", // Legacy key
-            "userData" // Another possible legacy key
+            "currentUser",
+            "userData"
         ]
-        
-        for key in possibleKeys {
+
+        for key in legacyKeys {
             if let data = UserDefaults.standard.data(forKey: key),
                let user = try? JSONDecoder().decode(UserData.self, from: data) {
-                print("💾 UserManager: Loaded user data from local storage (key: \(key))")
+                print("💾 UserManager: Loaded user data from legacy key: \(key)")
                 return user
             }
         }
-        
+
         print("💾 UserManager: No local user data found")
         return nil
     }

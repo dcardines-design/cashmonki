@@ -445,6 +445,15 @@ struct EditTransactionSheet: View {
                 userEnteredCurrency: selectedCurrency // Keep for backward compatibility
             )
         
+        // Track transaction edit in PostHog
+        PostHogManager.shared.capture(.transactionEdited, properties: [
+            "amount": abs(updatedTransaction.amount),
+            "currency": updatedTransaction.primaryCurrency.rawValue,
+            "category": updatedTransaction.category,
+            "is_income": updatedTransaction.amount > 0,
+            "has_note": updatedTransaction.note != nil && !updatedTransaction.note!.isEmpty
+        ])
+
         // Call the update callback
         print("🔥 SAVE TRANSACTION - About to call onTransactionUpdate callback")
         print("🔥 SAVE TRANSACTION - Final category: '\(updatedTransaction.category)'")
@@ -467,9 +476,17 @@ struct EditTransactionSheet: View {
     }
     
     private func deleteTransaction() {
+        // Track transaction deletion in PostHog
+        PostHogManager.shared.capture(.transactionDeleted, properties: [
+            "amount": abs(transaction.amount),
+            "currency": transaction.primaryCurrency.rawValue,
+            "category": transaction.category,
+            "is_income": transaction.amount > 0
+        ])
+
         // Call the delete callback - parent will handle closing sheets and showing toast
         onTransactionDelete?(transaction)
-        
+
         if let onDismiss = onDismiss {
             onDismiss()
         } else {

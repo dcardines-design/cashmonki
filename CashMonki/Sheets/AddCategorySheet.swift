@@ -179,6 +179,15 @@ struct AddCategorySheet: View {
         
         if success {
             print("✅ Successfully created category: \(trimmedName) with emoji: \(selectedEmoji), parent: \(selectedParentCategory ?? "None")")
+
+            // Track category creation in PostHog
+            PostHogManager.shared.capture(.categoryCreated, properties: [
+                "name": trimmedName,
+                "emoji": selectedEmoji,
+                "type": currentTab.rawValue,
+                "has_parent": selectedParentCategory != nil,
+                "parent_category": selectedParentCategory ?? ""
+            ])
             
             // Verify the category was created with correct type
             if let createdCategory = categoriesManager.findCategory(by: trimmedName) {

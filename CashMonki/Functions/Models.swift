@@ -1541,8 +1541,8 @@ struct UserData: Identifiable, Codable {
     // MARK: - Custom Codable Implementation
     
     enum CodingKeys: String, CodingKey {
-        case id, name, email, accounts, budgets, createdAt, updatedAt, goals, onboardingCompleted, enableFirebaseSync
-        // Note: transactions excluded because Txn contains UIImage which isn't Codable
+        case id, name, email, accounts, budgets, createdAt, updatedAt, goals, onboardingCompleted, enableFirebaseSync, transactions
+        // Note: Txn has custom Codable that excludes UIImage, so transactions can now be encoded
     }
     
     init(from decoder: Decoder) throws {
@@ -1560,7 +1560,8 @@ struct UserData: Identifiable, Codable {
         enableFirebaseSync = try container.decodeIfPresent(Bool.self, forKey: .enableFirebaseSync) ?? true
         // Backward compatibility - budgets may not exist in older data
         budgets = try container.decodeIfPresent([Budget].self, forKey: .budgets) ?? []
-        transactions = [] // Initialize empty, will be loaded separately
+        // Load transactions locally (Txn has custom Codable that excludes UIImage)
+        transactions = try container.decodeIfPresent([Txn].self, forKey: .transactions) ?? []
     }
     
     func encode(to encoder: Encoder) throws {
@@ -1575,7 +1576,8 @@ struct UserData: Identifiable, Codable {
         try container.encode(onboardingCompleted, forKey: .onboardingCompleted)
         try container.encode(enableFirebaseSync, forKey: .enableFirebaseSync)
         try container.encode(budgets, forKey: .budgets)
-        // Note: transactions not encoded due to UIImage
+        // Save transactions locally (Txn has custom Codable that excludes UIImage)
+        try container.encode(transactions, forKey: .transactions)
     }
 }
 

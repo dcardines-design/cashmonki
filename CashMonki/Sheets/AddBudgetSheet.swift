@@ -269,6 +269,15 @@ struct AddBudgetSheet: View {
             applyToAllPeriods: applyToAllPeriods
         )
 
+        // Track budget creation in PostHog
+        PostHogManager.shared.capture(.budgetCreated, properties: [
+            "category": selectedCategoryName,
+            "amount": parsedAmount,
+            "currency": selectedCurrency.rawValue,
+            "period": selectedPeriod.rawValue,
+            "apply_to_all_periods": applyToAllPeriods
+        ])
+
         onSave(budget)
         isPresented = false
     }

@@ -533,6 +533,13 @@ struct CustomPaywallSheet: View {
             print("🎫 PAYWALL onAppear: isDismissing=\(isDismissing)")
             print("🎫 PAYWALL onAppear: hasUsedTrialBefore=\(revenueCatManager.hasUsedTrialBefore)")
             print("🎫 PAYWALL onAppear: customerInfo=\(revenueCatManager.customerInfo != nil ? "loaded" : "nil")")
+
+            // Track paywall view in PostHog
+            PostHogManager.shared.trackPaywallViewed(
+                source: "app",
+                hasUsedTrial: revenueCatManager.hasUsedTrialBefore
+            )
+
             Task {
                 await ensureOfferingsLoaded()
             }
@@ -601,6 +608,13 @@ struct CustomPaywallSheet: View {
             await MainActor.run {
                 if result.success {
                     print("🎫 PURCHASE: ✅ SUCCESS - Setting isDismissing=true, isPresented=false")
+
+                    // Track subscription started in PostHog
+                    PostHogManager.shared.capture(.subscriptionStarted, properties: [
+                        "plan": selectedPlan == .yearly ? "yearly" : "monthly",
+                        "price": package.storeProduct.localizedPriceString
+                    ])
+
                     // Dismiss paywall immediately and show success toast
                     isDismissing = true // Prevent UI from showing "Manage Billing"
                     isPresented = false

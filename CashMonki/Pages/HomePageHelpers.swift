@@ -822,7 +822,10 @@ extension HomePage {
                     if let receiptError = error as? ReceiptAIError {
                         print("❌ Specific receipt error: \(receiptError)")
                     }
-                    
+
+                    // Track receipt scan failure
+                    PostHogManager.shared.trackReceiptScan(success: false, errorMessage: error.localizedDescription)
+
                     isAnalyzingReceipt = false
                     analyzingSource = nil
                     originalTileClicked = nil

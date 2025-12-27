@@ -125,8 +125,12 @@ class RevenueCatManager: NSObject, ObservableObject {
 
         print("🔑 RevenueCat: Configuring with API key: \(apiKey.prefix(15))...")
 
-        // Configure RevenueCat
-        Purchases.logLevel = .debug
+        // Configure RevenueCat - use .error to suppress verbose debug logging
+        #if DEBUG
+        Purchases.logLevel = .warn  // Show warnings in debug builds
+        #else
+        Purchases.logLevel = .error  // Only errors in production
+        #endif
 
         let configuration = Configuration.Builder(withAPIKey: apiKey)
             .with(purchasesAreCompletedBy: .revenueCat, storeKitVersion: .storeKit2)

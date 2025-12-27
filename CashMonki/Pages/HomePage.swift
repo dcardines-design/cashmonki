@@ -34,10 +34,10 @@ struct HomePage: View {
     @ObservedObject internal var dailyUsageManager = DailyUsageManager.shared
     @EnvironmentObject var toastManager: ToastManager
 
-    @State internal var rangeSelection: RangeSelection = .day
-    @State internal var rangeSelectionIndex: Int = 0  // Default to "24H"
-    @State internal var chartFilter: ChartFilter = .expense
-    @State internal var chartType: ChartType = .line
+    @State internal var rangeSelection: RangeSelection = Self.loadCachedRangeSelection()
+    @State internal var rangeSelectionIndex: Int = Self.loadCachedRangeSelectionIndex()
+    @State internal var chartFilter: ChartFilter = Self.loadCachedChartFilter()
+    @State internal var chartType: ChartType = Self.loadCachedChartType()
     @State internal var isAddPresented: Bool = false
     @State internal var isCustomPhotoPickerPresented: Bool = false
     @State internal var isDirectPhotoPickerPresented: Bool = false
@@ -98,6 +98,58 @@ struct HomePage: View {
     internal enum ChartType: String, CaseIterable, Identifiable {
         case line = "Line", bar = "Bar"
         var id: String { rawValue }
+    }
+
+    // MARK: - Tab Caching
+
+    private static let chartFilterCacheKey = "cached_chart_filter"
+    private static let rangeSelectionCacheKey = "cached_range_selection"
+    private static let chartTypeCacheKey = "cached_chart_type"
+
+    private static func loadCachedChartFilter() -> ChartFilter {
+        if let cached = UserDefaults.standard.string(forKey: chartFilterCacheKey),
+           let filter = ChartFilter(rawValue: cached) {
+            return filter
+        }
+        return .expense // Default
+    }
+
+    private static func saveChartFilter(_ filter: ChartFilter) {
+        UserDefaults.standard.set(filter.rawValue, forKey: chartFilterCacheKey)
+    }
+
+    private static func loadCachedRangeSelection() -> RangeSelection {
+        if let cached = UserDefaults.standard.string(forKey: rangeSelectionCacheKey),
+           let range = RangeSelection(rawValue: cached) {
+            return range
+        }
+        return .day // Default to 24H
+    }
+
+    private static func loadCachedRangeSelectionIndex() -> Int {
+        let range = loadCachedRangeSelection()
+        switch range {
+        case .day: return 0
+        case .week: return 1
+        case .month: return 2
+        case .quarter: return 3
+        }
+    }
+
+    private static func saveRangeSelection(_ range: RangeSelection) {
+        UserDefaults.standard.set(range.rawValue, forKey: rangeSelectionCacheKey)
+    }
+
+    private static func loadCachedChartType() -> ChartType {
+        if let cached = UserDefaults.standard.string(forKey: chartTypeCacheKey),
+           let type = ChartType(rawValue: cached) {
+            return type
+        }
+        return .line // Default
+    }
+
+    private static func saveChartType(_ type: ChartType) {
+        UserDefaults.standard.set(type.rawValue, forKey: chartTypeCacheKey)
     }
 
     // MARK: - Main Content View
@@ -369,6 +421,7 @@ struct HomePage: View {
             currencyPrefs: currencyPrefs,
             rangeSelection: rangeSelection,
             chartFilter: chartFilter,
+            chartType: chartType,
             lastKnownTransactionCount: $lastKnownTransactionCount,
             lastTransactionHash: $lastTransactionHash,
             lastRangeSelection: $lastRangeSelection,
@@ -735,6 +788,7 @@ struct HomePage: View {
         let currencyPrefs: CurrencyPreferences
         let rangeSelection: RangeSelection
         let chartFilter: ChartFilter
+        let chartType: ChartType
         let lastKnownTransactionCount: Binding<Int>
         let lastTransactionHash: Binding<Int>
         let lastRangeSelection: Binding<RangeSelection>
@@ -762,11 +816,16 @@ struct HomePage: View {
                         updateCachedTotalsIfNeeded()
                     }
                 }
-                .onChange(of: rangeSelection) { _, _ in
+                .onChange(of: rangeSelection) { _, newValue in
                     updateCachedTotalsIfNeeded()
+                    HomePage.saveRangeSelection(newValue)
                 }
-                .onChange(of: chartFilter) { _, _ in
+                .onChange(of: chartFilter) { _, newValue in
                     updateCachedTotalsIfNeeded()
+                    HomePage.saveChartFilter(newValue)
+                }
+                .onChange(of: chartType) { _, newValue in
+                    HomePage.saveChartType(newValue)
                 }
                 .onChange(of: currencyPrefs.primaryCurrency) { [self] oldValue, newValue in
                     print("🔍 CURRENCY DEBUG: 🚨 PRIMARY CURRENCY CHANGED!")

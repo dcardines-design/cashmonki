@@ -13,11 +13,10 @@ struct ReceiptAnalyzingToast: View {
     @State private var analysisState: AnalysisState = .analyzing
     @State private var randomBlurb: String = ReceiptAnalyzingToast.analyzingBlurbs.randomElement() ?? "Crunching the numbers..."
 
-    // 20 random blurbs shown during receipt analysis
+    // Random blurbs shown during receipt analysis
     private static let analyzingBlurbs = [
         "Ooh, what do we have here...",
         "Reading the fine print...",
-        "Crunching the numbers...",
         "This looks interesting...",
         "Decoding your purchase...",
         "Let's see what we've got...",

@@ -62,10 +62,14 @@ enum OnboardingStep: String, Codable, CaseIterable {
         switch self {
         case .emailConfirmation: return "Email Confirmation"
         case .nameCollection: return "Name Collection"
-        case .currencySelection: return "Currency Selection"  
+        case .currencySelection: return "Currency Selection"
         case .goalSelection: return "Goal Selection"
         case .transactionAddition: return "Transaction Addition"
         }
+    }
+
+    var stepNumber: Int {
+        OnboardingStep.allCases.firstIndex(of: self) ?? 0
     }
 }
 

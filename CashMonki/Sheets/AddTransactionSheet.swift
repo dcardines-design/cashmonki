@@ -212,7 +212,15 @@ struct AddTransactionSheet: View {
         print("📤 AddTransactionSheet: Calling onSave callback...")
         onSave(transaction)
         print("✅ AddTransactionSheet: onSave callback completed")
-        
+
+        // Track transaction creation in PostHog
+        PostHogManager.shared.trackTransactionCreated(
+            amount: abs(transaction.amount),
+            currency: transaction.primaryCurrency.rawValue,
+            category: categoryName,
+            isIncome: isIncome
+        )
+
         print("🔄 AddTransactionSheet: Dismissing sheet...")
         isPresented = false
         print("✅ AddTransactionSheet: SAVE COMPLETED SUCCESSFULLY")

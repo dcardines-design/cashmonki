@@ -207,7 +207,17 @@ class AccountManager: ObservableObject {
         )
         
         print("🆔 AccountManager: Created wallet with ID: \(newAccount.id.uuidString)")
-        
+
+        // Track wallet creation in PostHog
+        PostHogManager.shared.capture(.walletCreated, properties: [
+            "name": name,
+            "type": type.displayName,
+            "currency": currency.rawValue,
+            "is_default": makeDefault,
+            "has_balance": balance != nil,
+            "show_balance": showBalance
+        ])
+
         // Add to user's accounts
         print("📥 AccountManager: Adding wallet to UserManager...")
         userManager.addSubAccount(newAccount)
@@ -252,33 +262,40 @@ class AccountManager: ObservableObject {
     
     func deleteSubAccount(_ accountId: UUID) {
         guard let account = userManager.currentUser.subAccount(withId: accountId) else { return }
-        
+
         // Don't allow deleting the last account
         guard userManager.currentUser.subAccounts.count > 1 else {
             print("⚠️ AccountManager: Cannot delete last remaining account")
             return
         }
-        
+
+        // Track wallet deletion in PostHog
+        PostHogManager.shared.capture(.walletDeleted, properties: [
+            "name": account.name,
+            "type": account.type.displayName,
+            "was_default": account.isDefault
+        ])
+
         // If deleting default account, set another as default
         if account.isDefault {
             if let otherAccount = userManager.currentUser.subAccounts.first(where: { $0.id != accountId }) {
                 setDefaultAccount(otherAccount.id)
             }
         }
-        
+
         // Remove from user's accounts
         userManager.deleteAccount(withId: accountId)
-        
+
         // If currently selected account was deleted, switch to default
         if selectedSubAccountId == accountId {
             selectedSubAccountId = userManager.currentUser.defaultSubAccount?.id
         }
-        
+
         // Sync deletion to Firebase
         userManager.syncToFirebase { success in
             print(success ? "✅ Account deletion synced to Firebase" : "❌ Failed to sync account deletion to Firebase")
         }
-        
+
         print("🗑️ AccountManager: Deleted sub-account '\(account.name)'")
     }
     

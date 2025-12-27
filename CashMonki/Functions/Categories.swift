@@ -1341,6 +1341,15 @@ class CategoriesManager: ObservableObject {
         // Force immediate UI update - synchronous to prevent race conditions
         self.objectWillChange.send()
         
+        // Track category edit in PostHog
+        PostHogManager.shared.capture(.categoryEdited, properties: [
+            "original_name": originalName,
+            "new_name": trimmedName,
+            "new_emoji": newEmoji,
+            "type": newType.rawValue,
+            "has_parent": parentId != nil
+        ])
+
         print("✅ updateCategory: Successfully updated '\(originalName)' to '\(trimmedName)' with parent '\(parentCategory ?? "None")'")
         return true
     }
@@ -1552,11 +1561,19 @@ class CategoriesManager: ObservableObject {
         
         // Get the category type before deletion to determine correct "No Category" type
         let categoryType = categories[categoryIndex].type
-        
+        let categoryEmoji = categories[categoryIndex].emoji
+
         // Soft delete the category
         categories[categoryIndex].isDeleted = true
         categories[categoryIndex].updatedAt = Date()
-        
+
+        // Track category deletion in PostHog
+        PostHogManager.shared.capture(.categoryDeleted, properties: [
+            "name": categoryName,
+            "emoji": categoryEmoji,
+            "type": categoryType.rawValue
+        ])
+
         saveCategories()
         
         // Convert affected transactions to "No Category"

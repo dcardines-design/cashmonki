@@ -173,7 +173,7 @@ function formatPassedCategories(categories: any[]): string {
     categoriesText += "\n\n";
   }
 
-  categoriesText += "For subcategories (items in parentheses), use the specific subcategory name if it's a better match.";
+  categoriesText += "IMPORTANT: Always prefer the SPECIFIC subcategory name over the parent category. For example, if someone buys coffee, return 'Coffee' NOT 'Drinks'. Return ONLY the subcategory name, not 'Drinks > Coffee'.";
 
   logger.info(`Formatted ${categories.length} passed categories (${expenseCategories.length} expense, ${incomeCategories.length} income)`);
   return categoriesText;
@@ -237,8 +237,8 @@ async function fetchUserCategories(userId: string): Promise<string> {
       categoriesText += "\n\n";
     }
     
-    categoriesText += "For subcategories (items in parentheses), use the specific subcategory name if it's a better match.";
-    
+    categoriesText += "IMPORTANT: Always prefer the SPECIFIC subcategory name over the parent category. For example, if someone buys coffee, return 'Coffee' NOT 'Drinks'. Return ONLY the subcategory name, not 'Drinks > Coffee'.";
+
     return categoriesText;
     
   } catch (error) {
@@ -424,9 +424,17 @@ app.post('/api/analyze-receipt', optionalAuth, async (req: AuthenticatedRequest,
       ? `CATEGORY SELECTION - CRITICAL:
                 ${userCategoriesText}
 
-                IMPORTANT: You MUST use ONLY the categories listed above. Do NOT use any other category names.
-                Choose the most specific category or subcategory that matches the receipt.
-                If no category matches well, use "Other".`
+                HOW TO CATEGORIZE (waterfall method - use first match):
+                1. Look at individual LINE ITEMS first - what was actually purchased?
+                2. If multiple items, consider the OVERALL GROUP of items together
+                3. Then consider the MERCHANT NAME/TYPE
+                4. Finally, use overall CONTEXT of the receipt
+
+                RULES:
+                - Use ONLY categories from the list above. Do NOT create new ones.
+                - ALWAYS prefer the SPECIFIC subcategory (e.g., "Coffee" NOT "Drinks")
+                - Return ONLY the category name, nothing else.
+                - If no category matches well, use "Other".`
       : `Available categories (ONLY use these exact categories, do NOT create new ones):
                   * Home: "Home", "Rent/Mortgage", "Property Tax", "Repairs"
                   * Utilities: "Utilities", "Electricity", "Water", "Internet"
@@ -458,9 +466,18 @@ app.post('/api/analyze-receipt', optionalAuth, async (req: AuthenticatedRequest,
                   * Hobbies: "Hobbies", "Supplies", "Equipment", "Events"
                   * Events: "Events", "Parties", "Tickets", "Ceremonies"
                   * Other: "Other", "Fees", "Miscellaneous", "Uncategorized"
-                - IMPORTANT: ONLY use categories from the list above. Do NOT create or suggest new categories.
-                - Choose the MOST SPECIFIC subcategory that matches the receipt (e.g., "Groceries" instead of "Food")
-                - If uncertain, use the closest matching category or "Other"`;
+
+                HOW TO CATEGORIZE (waterfall method - use first match):
+                1. Look at individual LINE ITEMS first - what was actually purchased?
+                2. If multiple items, consider the OVERALL GROUP of items together
+                3. Then consider the MERCHANT NAME/TYPE
+                4. Finally, use overall CONTEXT of the receipt
+
+                RULES:
+                - Use ONLY categories from the list above. Do NOT create new ones.
+                - ALWAYS prefer the SPECIFIC subcategory (e.g., "Coffee" NOT "Drinks")
+                - Return ONLY the category name, nothing else.
+                - If no category matches well, use "Other".`;
 
     logger.info(`Using ${hasCustomCategories ? 'CUSTOM' : 'DEFAULT'} categories for AI prompt`);
 
@@ -487,7 +504,7 @@ app.post('/api/analyze-receipt', optionalAuth, async (req: AuthenticatedRequest,
                   "merchant_name": "exact business name from receipt",
                   "amount": 20.50,
                   "currency": "USD",
-                  "date": "YYYY-MM-DD",
+                  "date": "YYYY-MM-DD or YYYY-MM-DD HH:MM",
                   "category": "category name",
                   "items": [
                     {"name": "item or service name", "price": 20.50, "quantity": 1}
@@ -495,17 +512,15 @@ app.post('/api/analyze-receipt', optionalAuth, async (req: AuthenticatedRequest,
                   "confidence": 0.95
                 }
 
-                If no date is visible on receipt, use:
-                "date": "TODAY"
+                DATE EXTRACTION:
+                Take a close look at the receipt to find any references to dates and times, even if the receipt is in another language.
+                If you find a date, convert it to YYYY-MM-DD format (e.g., "2025-12-27").
+                If you also find a time (like 17:08 or 5:08 PM), include it as YYYY-MM-DD HH:MM in 24-hour format (e.g., "2025-12-27 17:08").
+                If no date is visible, use "TODAY".
 
                 IMPORTANT:
                 - Return ONLY the JSON object, no other text
                 - Use numbers for amounts, not strings
-                - Date and time format: YYYY-MM-DD HH:MM (24-hour format) if time is available on receipt, or just YYYY-MM-DD if only date is shown
-                - Extract the EXACT timestamp from the receipt when available (e.g., "2024-11-16 14:30" for 2:30 PM)
-                - If only date is visible, use format: YYYY-MM-DD
-                - CRITICAL: If NO DATE is found on the receipt, return "TODAY" as the date value
-                - IMPORTANT: Always prioritize extracting time when visible on receipt. If no time found, the app will use creation time automatically.
 
                 IMPORTANT CURRENCY DETECTION:
                 - Look for currency symbols: $, €, £, ¥, ₹, ₦, R, ₩, ₡, ₴, ₫, ₱, etc.
@@ -561,6 +576,7 @@ app.post('/api/analyze-receipt', optionalAuth, async (req: AuthenticatedRequest,
       const jsonMatch = analysisText.match(/\{[\s\S]*\}/);
       if (jsonMatch) {
         analysisResult = JSON.parse(jsonMatch[0]);
+        logger.info(`📅 AI returned date: "${analysisResult.date}" (raw from AI)`);
       } else {
         throw new Error('No JSON found in response');
       }
@@ -569,11 +585,14 @@ app.post('/api/analyze-receipt', optionalAuth, async (req: AuthenticatedRequest,
       return res.status(500).json({ error: 'Invalid analysis result format' });
     }
 
-    // Enhanced date parsing that handles "TODAY" keyword (exact logic from iOS AIReceiptAnalyzer.swift lines 436-450)
+    // Enhanced date parsing that handles "TODAY" keyword
     if (analysisResult.date && analysisResult.date.toUpperCase() === 'TODAY') {
       // AI detected no date on receipt, use current date and time
-      analysisResult.date = new Date().toISOString().split('T')[0]; // Current date in YYYY-MM-DD format
-      logger.info('AI found no date on receipt, using TODAY:', analysisResult.date);
+      const todayDate = new Date().toISOString().split('T')[0];
+      logger.info(`📅 AI returned "TODAY" - converting to: ${todayDate}`);
+      analysisResult.date = todayDate;
+    } else {
+      logger.info(`📅 AI extracted actual date from receipt: "${analysisResult.date}"`);
     }
 
     // Validate and format the response
@@ -713,24 +732,44 @@ app.post('/api/generate-roast', optionalAuth, async (req: AuthenticatedRequest, 
         messages: [
           {
             role: 'system',
-            content: `Generate a short, savage roast for a purchase. Target the behavior behind the purchase, not the person. Use simple, clear words. Tone is calm, deadpan, and quietly judgmental. No emojis, no slang, no insults, no moral lectures.
+            content: `The roast must target the behavior behind the purchase, not the person.
+
+Tone:
+- casual
+- deadpan
+- quietly judgmental
+- conversational, like talking to a teenager
+- sarcasm level 7/10
+- savagery level 6/10
 
 Rules:
-- 100 characters or fewer
-- 1 to 2 short sentences
-- State the purchase and call out the real reason behind it (habit, boredom, impulse, avoidance)
-- No closers or one-word endings like "Again." "Anyway." "Sure." etc.
-- Plain language, no clever metaphors
-- Savagery level: 6.5/10
+- no emojis
+- no slang that sounds try-hard
+- no insults or moral lectures
+- no big or fancy words
+- avoid stiff or templated phrasing
+- every roast must feel different and natural
 
-Examples:
-"₱600 on delivery when you have food at home"
-"That coffee isn't energy, it's just a daily habit you won't admit to"
-"₱350 on snacks because you were bored, not hungry"`
+Structure:
+- 2 short lines max
+- you do NOT need to include the amount
+- you MAY include the merchant or category
+- first line mentions the purchase clearly
+- second line explains the real reason behind it (habit, boredom, impatience, avoiding effort, false hope, etc.)
+
+Do NOT:
+- use the words "crave" or anything similar
+- end with "anyway", "be serious", or any fixed closing phrase
+- use clever metaphors
+- overexplain
+
+The burn should feel accurate and slightly uncomfortable, not loud.
+
+Output exactly 3 unique roasts, all under 200 characters each. Return them as a JSON array like: ["roast1", "roast2", "roast3"]`
           },
           {
             role: 'user',
-            content: `Roast this purchase (100 chars max): ` + purchaseContext + ` [seed:${Date.now()}]`
+            content: `Roast this purchase: ` + purchaseContext + ` [seed:${Date.now()}]`
           }
         ],
         max_tokens: 200,
@@ -745,10 +784,26 @@ Examples:
     }
 
     const openRouterData = await openRouterResponse.json() as any;
-    const roastText = openRouterData.choices[0]?.message?.content?.trim();
+    const roastContent = openRouterData.choices[0]?.message?.content?.trim();
 
-    if (!roastText) {
+    if (!roastContent) {
       return res.status(500).json({ error: 'No roast generated' });
+    }
+
+    // Parse JSON array and pick a random roast
+    let roastText: string;
+    try {
+      const jsonMatch = roastContent.match(/\[[\s\S]*\]/);
+      if (jsonMatch) {
+        const roasts = JSON.parse(jsonMatch[0]) as string[];
+        roastText = roasts[Math.floor(Math.random() * roasts.length)];
+      } else {
+        // Fallback to raw text if not JSON array
+        roastText = roastContent;
+      }
+    } catch {
+      // Fallback to raw text if parsing fails
+      roastText = roastContent;
     }
 
     logger.info(`Roast generated for user ${userId}: ${roastText.substring(0, 50)}...`);

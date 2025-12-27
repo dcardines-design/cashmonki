@@ -113,11 +113,14 @@ class AIReceiptAnalyzer {
         print("📸 Image dimensions: \(image.size.width) x \(image.size.height)")
         print("🕐 DEBUG TIMING: Analysis started at \(analysisStart)")
 
+        // Track receipt scan started
+        PostHogManager.shared.capture(.receiptScanStarted)
+
         // PERFORMANCE FIX: Move heavy image processing to background thread
         // This prevents UI hanging during resize and compression
         let finalImageData = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Data, Error>) in
             DispatchQueue.global(qos: .userInitiated).async {
-                let processingStart = Date()
+                let processingStart = Date() 
                 print("🕐 DEBUG TIMING: Image processing started on background thread")
 
                 // Resize image more aggressively for backend (smaller = faster upload, less "message too long" errors)
@@ -187,6 +190,16 @@ class AIReceiptAnalyzer {
         let totalDuration = Date().timeIntervalSince(analysisStart)
         print("🕐 DEBUG TIMING: TOTAL ANALYSIS TIME: \(String(format: "%.3f", totalDuration * 1000))ms")
         print("✅ Secure receipt analysis completed: \(analysis.merchantName) - \(analysis.totalAmount)")
+
+        // Track receipt scan completed
+        PostHogManager.shared.capture(.receiptScanCompleted, properties: [
+            "merchant": analysis.merchantName,
+            "amount": analysis.totalAmount,
+            "currency": analysis.currency.rawValue,
+            "category": analysis.category,
+            "processing_time_ms": Int(totalDuration * 1000)
+        ])
+
         return analysis
     }
 

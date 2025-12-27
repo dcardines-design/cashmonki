@@ -240,31 +240,37 @@ struct ReceiptConfirmationSheet: View {
                 VStack(spacing: 24) {
                     // Amount field
                     AppInputField.amount(
-                        text: $amount, 
+                        text: $amount,
                         selectedCurrency: Binding(
                             get: { selectedCurrency.rawValue },
                             set: { _ in }
-                        ), 
+                        ),
                         onCurrencyTap: {
                             showingCurrencyPicker = true
-                        }, 
+                        },
                         size: .md
                     )
-                    
-                    // Merchant field
-                    AppInputField.merchant(text: $merchant, size: .md)
-                    
-                    // Date field with time
-                    AppInputField.date(title: "Date", dateValue: $selectedDate, components: [.date, .hourAndMinute], size: .md)
-                    
+
                     // Category field
                     AppInputField.categoryById(selectedCategoryId: $selectedCategoryId, size: .md)
-                    
+
+                    // Date field with time
+                    AppInputField.date(title: "Date", dateValue: $selectedDate, components: [.date, .hourAndMinute], size: .md)
+
+                    // Merchant field
+                    AppInputField.text(
+                        title: "Merchant (optional)",
+                        text: $merchant,
+                        placeholder: "Enter merchant name",
+                        isRequired: false,
+                        size: .md
+                    )
+
                     // Note field
                     AppInputField.text(
-                        title: "Note",
+                        title: "Note (optional)",
                         text: $note,
-                        placeholder: "Add context or description (optional)",
+                        placeholder: "Add context or description",
                         isRequired: false,
                         size: .md
                     )
