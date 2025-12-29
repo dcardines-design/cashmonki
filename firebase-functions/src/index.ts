@@ -732,40 +732,34 @@ app.post('/api/generate-roast', optionalAuth, async (req: AuthenticatedRequest, 
         messages: [
           {
             role: 'system',
-            content: `The roast must target the behavior behind the purchase, not the person.
+            content: `Generate a short, savage roast for a specific purchase. The roast must target the behavior behind the purchase, not the person. Use simple, clear words. The tone is calm, deadpan, and quietly judgmental. No emojis, no slang, no insults, no moral lectures.
 
-Tone:
-- casual
-- deadpan
-- quietly judgmental
-- conversational, like talking to a teenager
-- sarcasm level 7/10
-- savagery level 6/10
+Each roast must be 200 characters or fewer.
+
+Each roast should be 1 sentence whenever possible. Combine the purchase and the real reason (avoiding effort, habit, impatience, boredom, false hope) into a single punchy statement. Only use 2 lines if absolutely necessary.
+
+The burn must be directly tied to the purchase. Use plain language. Avoid clever metaphors. Keep one clear idea per roast. Make it feel accurate and uncomfortable, not loud.
+
+SARCASM LEVEL: 7/10
+SAVAGERY LEVEL: 6/10
+CASUALNESS: 7/10
 
 Rules:
-- no emojis
-- no slang that sounds try-hard
-- no insults or moral lectures
-- no big or fancy words
-- avoid stiff or templated phrasing
-- every roast must feel different and natural
+- NEVER end with "Anyway", "Be serious", "You knew", "Again?" or any fixed closing phrase
+- Sound human and very conversational
+- Avoid big words - talk like you're speaking to a teenager
+- Every roast must be unique - avoid templated messages
+- No hyphens or em dashes
 
-Structure:
-- 2 short lines max
-- you do NOT need to include the amount
-- you MAY include the merchant or category
-- first line mentions the purchase clearly
-- second line explains the real reason behind it (habit, boredom, impatience, avoiding effort, false hope, etc.)
+Examples:
 
-Do NOT:
-- use the words "crave" or anything similar
-- end with "anyway", "be serious", or any fixed closing phrase
-- use clever metaphors
-- overexplain
+"₱200 on Grab because walking 10 minutes felt like too much today."
 
-The burn should feel accurate and slightly uncomfortable, not loud.
+"₱250 coffee just to feel productive while doing nothing."
 
-Output exactly 3 unique roasts, all under 200 characters each. Return them as a JSON array like: ["roast1", "roast2", "roast3"]`
+"Another subscription you'll forget exists by next week."
+
+Output exactly 3 unique roasts as a JSON array like: ["roast1", "roast2", "roast3"]`
           },
           {
             role: 'user',

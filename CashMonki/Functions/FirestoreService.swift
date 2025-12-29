@@ -1369,12 +1369,12 @@ final class FirestoreService {
     
     /// Generate sample transactions for specified months (generic)
     private func generateSampleTransactions(userId: UUID, months: [DateComponents]) -> [Txn] {
-        let categories = ["Food", "Dining", "Transport", "Utilities", "Clothes", "Fun", "Personal", "Health"]
+        let categories = ["Food", "Dining", "Transport", "Utilities & Bills", "Clothes", "Fun", "Personal", "Health"]
         let merchants = [
             "Food": ["SM Supermarket", "Robinsons", "Metro Mart", "Puregold"],
             "Dining": ["McDonald's", "Burger King", "Jollibee", "Starbucks", "Coffee Bean"],
             "Transport": ["Grab", "Taxi", "MRT", "Shell", "Petron"],
-            "Utilities": ["PLDT", "Globe", "Meralco", "Manila Water"],
+            "Utilities & Bills": ["PLDT", "Globe", "Meralco", "Manila Water"],
             "Clothes": ["Uniqlo", "H&M", "Zara", "Bench"],
             "Fun": ["Cinema", "Netflix", "Spotify", "Gaming"],
             "Personal": ["Salon", "Spa", "Watsons", "Mercury Drug"],

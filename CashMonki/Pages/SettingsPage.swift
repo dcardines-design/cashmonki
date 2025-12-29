@@ -730,6 +730,13 @@ struct SettingsPage: View {
                 Text("Rosebud Studio")
                     .font(Font.custom("Overused Grotesk", size: 14).weight(.semibold))
                     .foregroundColor(AppColors.foregroundPrimary)
+
+                // Version number
+                Text("Ver \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0")")
+                    .font(Font.custom("Overused Grotesk", size: 12).weight(.medium))
+                    .multilineTextAlignment(.center)
+                    .foregroundColor(AppColors.foregroundSecondary)
+                    .padding(.top, 24) // 32px total (8px VStack spacing + 24px)
             }
             .frame(maxWidth: .infinity)
             .padding(.top, 8)
@@ -1285,232 +1292,17 @@ struct SettingsPage: View {
     }
 
     private var debugSection: some View {
-        VStack(spacing: 0) {
-            sectionHeader("Debug & Testing")
-            
-            VStack(spacing: 0) {
-                debugTestingRows
-            }
-            .background(AppColors.backgroundWhite)
-            .clipShape(RoundedRectangle(cornerRadius: 16))
-        }
-    }
-    
-    private var debugTestingRows: some View {
-        Group {
-            debugConnectionTestRows
-            debugDataManagementRows
-            debugOnboardingTestRows
-            debugCurrencyPickerTestRows
-        }
-    }
-    
-    private var debugConnectionTestRows: some View {
-        Group {
-            settingsRow(
-                title: "Test Firebase Connection",
-                subtitle: "Check if Firebase is working properly",
-                icon: "☁️"
-            ) {
-                userManager.testFirebaseConnection()
-            }
-            
-            Divider()
-                .padding(.leading, 52)
-            
-            settingsRow(
-                title: "Test Receipt AI Connection",
-                subtitle: "Test OpenRouter API for receipt scanning",
-                icon: "🧪"
-            ) {
-                testOpenRouterAPI()
-            }
-            
-            Divider()
-                .padding(.leading, 52)
-            
-            settingsRow(
-                title: "Test Environment & API Keys",
-                subtitle: environmentTestResult ?? "Check environment variables and API key loading",
-                icon: "🔑"
-            ) {
-                testEnvironmentAndAPIKeys()
-            }
-        }
-    }
-    
-    private var debugDataManagementRows: some View {
-        Group {
-            Divider()
-                .padding(.leading, 52)
-            
-            settingsRow(
-                title: "Delete All Transactions",
-                subtitle: "Remove all transactions from Firebase",
-                icon: "🗑️"
-            ) {
-                showingDeleteAllConfirmation = true
-            }
-            
-            // Hidden: Debug Account Status
-            // Divider()
-            //     .padding(.leading, 52)
-            // 
-            // settingsRow(
-            //     title: "Debug Account Status",
-            //     subtitle: "Show detailed account information",
-            //     icon: "🔍"
-            // ) {
-            //     debugAccountStatus()
-            // }
-            
-            Divider()
-                .padding(.leading, 52)
-            
-            settingsRow(
-                title: "Debug Firebase Data",
-                subtitle: "Check Firebase data for current user",
-                icon: "🕵️"
-            ) {
-                userManager.debugFirebaseDataForUser()
-            }
-            
-            Divider()
-                .padding(.leading, 52)
-            
-            settingsRow(
-                title: "Force Sync to Firebase",
-                subtitle: "Manually push current data to Firebase",
-                icon: "🔧"
-            ) {
-                userManager.forceManualSyncToFirebase()
-            }
-        }
-    }
-    
-    private var debugOnboardingTestRows: some View {
-        Group {
-            Divider()
-                .padding(.leading, 52)
-            
-            settingsRow(
-                title: "Test Email Verification Onboarding",
-                subtitle: "Debug email verification onboarding screen",
-                icon: "📧"
-            ) {
-                debugOnboardingStartStep = .emailConfirmation
-                showingDebugOnboarding = true
-            }
-            
-            Divider()
-                .padding(.leading, 52)
-            
-            settingsRow(
-                title: "Test Name Collection Onboarding",
-                subtitle: "Debug name collection onboarding screen",
-                icon: "👤"
-            ) {
-                debugOnboardingStartStep = .nameCollection
-                showingDebugOnboarding = true
-            }
-            
-            Divider()
-                .padding(.leading, 52)
-            
-            settingsRow(
-                title: "Test Currency Selection Onboarding",
-                subtitle: "Debug currency selection onboarding screen",
-                icon: "💰"
-            ) {
-                debugOnboardingStartStep = .currencySelection
-                showingDebugOnboarding = true
-            }
-            
-            Divider()
-                .padding(.leading, 52)
-            
-            settingsRow(
-                title: "Test Transaction Onboarding",
-                subtitle: "Show the transaction addition onboarding sheet",
-                icon: "💳"
-            ) {
-                showingTransactionOnboarding = true
-            }
-            
-            Divider()
-                .padding(.leading, 52)
-            
-            settingsRow(
-                title: "Reset Onboarding State",
-                subtitle: "Clear all onboarding flags and goal data for testing",
-                icon: "🔄"
-            ) {
-                OnboardingStateManager.shared.resetOnboardingState()
-                toastManager.showSuccess("Onboarding state reset successfully")
-            }
-            
-            Divider()
-                .padding(.leading, 52)
-
-            settingsRow(
-                title: "Test Trial-Ended Paywall",
-                subtitle: "Shows 'Continue with Pro' button",
-                icon: "⏰"
-            ) {
-                RevenueCatManager.shared.forceDebugLapsedTrial()
-                showingCustomPaywall = true
-            }
-
-            Divider()
-                .padding(.leading, 52)
-
-            settingsRow(
-                title: "Test New User Paywall",
-                subtitle: "Shows 'Start my free week' button",
-                icon: "🆕"
-            ) {
-                RevenueCatManager.shared.forceDebugNewUser()
-                showingCustomPaywall = true
-            }
-
-            Divider()
-                .padding(.leading, 52)
-
-            settingsRow(
-                title: "Reset Debug State",
-                subtitle: "Use real RevenueCat data",
-                icon: "🔧"
-            ) {
-                RevenueCatManager.shared.resetDebugTrialState()
-                toastManager.showSuccess("Using real subscription data")
-            }
-        }
-    }
-
-    private var debugCurrencyPickerTestRows: some View {
-        Group {
-            Divider()
-                .padding(.leading, 52)
-            
-            settingsRow(
-                title: "Test Primary Currency Picker",
-                subtitle: "Open primary currency picker sheet",
-                icon: "🌍"
-            ) {
-                showingCurrencyPicker = true
-            }
-            
-            Divider()
-                .padding(.leading, 52)
-            
-            settingsRow(
-                title: "Test Secondary Currency Picker",
-                subtitle: "Open secondary currency picker sheet",
-                icon: "🏳️"
-            ) {
-                showingSecondaryCurrencyPicker = true
-            }
-        }
+        DebugSettingsSection(
+            showingDeleteAllConfirmation: $showingDeleteAllConfirmation,
+            showingDebugOnboarding: $showingDebugOnboarding,
+            debugOnboardingStartStep: $debugOnboardingStartStep,
+            showingTransactionOnboarding: $showingTransactionOnboarding,
+            showingCustomPaywall: $showingCustomPaywall,
+            showingCurrencyPicker: $showingCurrencyPicker,
+            showingSecondaryCurrencyPicker: $showingSecondaryCurrencyPicker,
+            environmentTestResult: $environmentTestResult,
+            userManager: userManager
+        )
     }
     
     // MARK: - Showcase Sections (Temporarily Disabled)
@@ -3079,72 +2871,9 @@ struct SettingsPage: View {
     }
     
     // MARK: - DEBUG: Duplicate Account Section
-    
+
     private var duplicateAccountDebugSection: some View {
-        VStack(spacing: 0) {
-            sectionHeader("🔍 Account Debug (Temporary)")
-            
-            VStack(spacing: 0) {
-                // Analyze Auth Providers Button
-                settingsRow(
-                    title: "Analyze Auth Providers",
-                    subtitle: "Check for duplicate Google/Email accounts",
-                    icon: "🔍",
-                    action: {
-                        print("🔍 User tapped: Analyze Auth Providers")
-                        authManager.debugAuthenticationProviders()
-                    }
-                )
-                
-                Divider()
-                    .background(AppColors.foregroundTertiary.opacity(0.1))
-                    .padding(.leading, 52)
-                
-                // Cleanup Duplicate Account Button
-                settingsRow(
-                    title: "Cleanup Duplicate Account",
-                    subtitle: "Remove email provider, keep Google only",
-                    icon: "🧹",
-                    action: {
-                        print("🧹 User tapped: Cleanup Duplicate Account")
-                        Task {
-                            await authManager.cleanupDuplicateAccount()
-                        }
-                    }
-                )
-                
-                Divider()
-                    .background(AppColors.foregroundTertiary.opacity(0.1))
-                    .padding(.leading, 52)
-                
-                // Force Refresh Auth State Button
-                settingsRow(
-                    title: "Refresh Auth State", 
-                    subtitle: "Reload Firebase authentication state",
-                    icon: "🔄",
-                    action: {
-                        print("🔄 User tapped: Refresh Auth State")
-                        #if canImport(FirebaseAuth)
-                        if let firebaseUser = Auth.auth().currentUser {
-                            Task {
-                                do {
-                                    try await firebaseUser.reload()
-                                    print("✅ Firebase user state refreshed")
-                                    authManager.debugAuthenticationProviders()
-                                } catch {
-                                    print("❌ Failed to refresh Firebase user: \(error.localizedDescription)")
-                                }
-                            }
-                        } else {
-                            print("❌ No Firebase user to refresh")
-                        }
-                        #endif
-                    }
-                )
-            }
-            .background(AppColors.surfaceSecondary)
-            .cornerRadius(12)
-        }
+        DuplicateAccountDebugSection(authManager: authManager)
     }
     
     // MARK: - Support Functions

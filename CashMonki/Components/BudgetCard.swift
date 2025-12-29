@@ -11,7 +11,8 @@ struct BudgetCard: View {
     let budget: Budget
     let spentAmount: Double
     let displayPeriod: BudgetPeriod?  // If set, shows equivalent amount for this period
-    let onMenuTap: () -> Void
+    let onCardTap: () -> Void  // Called when card is tapped
+    let onMenuTap: () -> Void  // Called when ellipsis is tapped
 
     @ObservedObject private var currencyPrefs = CurrencyPreferences.shared
     private let rateManager = CurrencyRateManager.shared
@@ -80,7 +81,7 @@ struct BudgetCard: View {
     // MARK: - Body
 
     var body: some View {
-        Button(action: onMenuTap) {
+        Button(action: onCardTap) {
             VStack(alignment: .leading, spacing: 16) {
                 // Row 1: Category + Menu icon
                 HStack(spacing: 12) {
@@ -98,11 +99,15 @@ struct BudgetCard: View {
 
                     Spacer()
 
-                    // Three-dot menu indicator
-                    Image(systemName: "ellipsis")
-                        .font(.system(size: 16, weight: .medium))
-                        .foregroundStyle(AppColors.foregroundTertiary)
-                        .frame(width: 24, height: 24)
+                    // Three-dot menu button (separate tap target)
+                    Button(action: onMenuTap) {
+                        Image(systemName: "ellipsis")
+                            .font(.system(size: 16, weight: .medium))
+                            .foregroundStyle(AppColors.foregroundTertiary)
+                            .frame(width: 44, height: 44)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(PlainButtonStyle())
                 }
 
                 // Row 2: Progress bar
@@ -164,28 +169,31 @@ struct BudgetCard: View {
 
 extension BudgetCard {
     /// Initializer that automatically calculates spent amount for the budget's original period
-    init(budget: Budget, onMenuTap: @escaping () -> Void) {
+    init(budget: Budget, onCardTap: @escaping () -> Void, onMenuTap: @escaping () -> Void) {
         self.budget = budget
         self.spentAmount = BudgetManager.shared.spentAmount(for: budget)
         self.displayPeriod = nil
+        self.onCardTap = onCardTap
         self.onMenuTap = onMenuTap
     }
 
     /// Initializer that shows budget equivalent for a different display period
-    init(budget: Budget, displayPeriod: BudgetPeriod, onMenuTap: @escaping () -> Void) {
+    init(budget: Budget, displayPeriod: BudgetPeriod, onCardTap: @escaping () -> Void, onMenuTap: @escaping () -> Void) {
         self.budget = budget
         self.displayPeriod = displayPeriod
         // Calculate spent amount for the display period, not the original budget period
         self.spentAmount = BudgetManager.shared.spentAmount(for: budget, displayPeriod: displayPeriod)
+        self.onCardTap = onCardTap
         self.onMenuTap = onMenuTap
     }
 
     /// Initializer that shows budget equivalent for a display period at a specific date
-    init(budget: Budget, displayPeriod: BudgetPeriod, date: Date, onMenuTap: @escaping () -> Void) {
+    init(budget: Budget, displayPeriod: BudgetPeriod, date: Date, onCardTap: @escaping () -> Void, onMenuTap: @escaping () -> Void) {
         self.budget = budget
         self.displayPeriod = displayPeriod
         // Calculate spent amount for the display period containing the specific date
         self.spentAmount = BudgetManager.shared.spentAmount(for: budget, displayPeriod: displayPeriod, on: date)
+        self.onCardTap = onCardTap
         self.onMenuTap = onMenuTap
     }
 }
@@ -206,6 +214,7 @@ extension BudgetCard {
             ),
             spentAmount: 5500,
             displayPeriod: .monthly,
+            onCardTap: {},
             onMenuTap: {}
         )
 
@@ -221,6 +230,7 @@ extension BudgetCard {
             ),
             spentAmount: 3500,
             displayPeriod: .monthly,
+            onCardTap: {},
             onMenuTap: {}
         )
 
@@ -236,6 +246,7 @@ extension BudgetCard {
             ),
             spentAmount: 400,
             displayPeriod: .daily,  // Shows ~493/day equivalent
+            onCardTap: {},
             onMenuTap: {}
         )
     }

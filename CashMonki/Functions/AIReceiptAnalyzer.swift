@@ -316,7 +316,7 @@ class AIReceiptAnalyzer {
         - Vietnamese examples: "60.000 ₫" = 60000, "1.234.567 VND" = 1234567
         - Available categories (ONLY use these exact categories, do NOT create new ones):
           * Home: "Home", "Rent/Mortgage", "Property Tax", "Repairs"
-          * Utilities: "Utilities", "Electricity", "Water", "Internet"
+          * Utilities & Bills: "Utilities & Bills", "Electricity", "Water", "Internet"
           * Food: "Food", "Groceries", "Snacks", "Meal Prep"
           * Dining: "Dining", "Restaurants", "Cafes", "Takeout"
           * Transport: "Transport", "Fuel", "Car Payments", "Rideshare"

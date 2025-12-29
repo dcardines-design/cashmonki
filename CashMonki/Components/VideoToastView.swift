@@ -146,7 +146,7 @@ class VideoToastManager: ObservableObject {
         }
     }
     
-    func showScanning(_ message: String = "Crunching the numbers...") {
+    func showScanning(_ message: String = "Analyzing...") {
         show(message, type: .scanning)
     }
     
@@ -162,7 +162,7 @@ class VideoToastManager: ObservableObject {
     
     /// Start receipt analysis toast with video
     func startReceiptAnalysis() {
-        showScanning("Crunching the numbers...")
+        showScanning("Analyzing receipt...")
     }
     
     /// Transition from scanning to done state with video
@@ -224,11 +224,11 @@ extension View {
 #Preview {
     VStack {
         VideoToastView(
-            message: "Crunching the numbers...",
+            message: "Analyzing receipt...",
             type: .scanning,
             isShowing: .constant(true)
         )
-        
+
         Spacer()
     }
     .background(Color.gray.opacity(0.1))

@@ -307,10 +307,8 @@ struct ContentView: View {
                 get: { roastSheetMessage != nil },
                 set: { if !$0 { roastSheetMessage = nil } }
             ), roastMessage: roast.message)
-                // Start at 98%, pull down to dismiss
-                .presentationDetents([.fraction(0.98)])
-                // TODO: Uncomment below for two-stage detent (65% then 98%)
-                // .presentationDetents([.fraction(0.65), .fraction(0.98)], selection: .constant(.fraction(0.65)))
+                // Start at 75%, can expand to 98%
+                .presentationDetents([.fraction(0.75), .fraction(0.98)], selection: .constant(.fraction(0.75)))
                 .presentationDragIndicator(.hidden)
                 .presentationBackground(.clear)
                 .presentationBackgroundInteraction(.disabled)

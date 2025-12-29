@@ -18,11 +18,10 @@ struct ToastView: View {
     @State private var animationOpacity: Double = 1.0
     @State private var dragOffset: CGFloat = 0
 
-    // 20 random blurbs shown during receipt analysis
+    // Random blurbs shown during receipt analysis
     static let analyzingBlurbs = [
         "Ooh, what do we have here...",
         "Reading the fine print...",
-        "Crunching the numbers...",
         "This looks interesting...",
         "Decoding your purchase...",
         "Let's see what we've got...",
@@ -382,7 +381,7 @@ class ToastManager: ObservableObject {
         print("🍞 === SHOW() CORE DEBUG END ===")
     }
     
-    func showScanning(_ message: String = "Crunching the numbers...") {
+    func showScanning(_ message: String = "Analyzing...") {
         show(message, type: .scanning)
         if let blurb = currentToast?.scanningBlurb {
             print("🎲 Random blurb selected: \"\(blurb)\"")
@@ -551,7 +550,7 @@ class ToastManager: ObservableObject {
         print("🍞 DEBUG: Reset current toast, now showing scanning toast")
         
         // Start new scanning toast immediately
-        showScanning("Crunching the numbers...")
+        showScanning("Analyzing...")
         print("🍞 DEBUG: Current toast after scanning start: \(currentToast?.message ?? "nil")")
     }
     

@@ -11,7 +11,7 @@ import Lottie
 struct ReceiptAnalyzingToast: View {
     @Binding var isShowing: Bool
     @State private var analysisState: AnalysisState = .analyzing
-    @State private var randomBlurb: String = ReceiptAnalyzingToast.analyzingBlurbs.randomElement() ?? "Crunching the numbers..."
+    @State private var randomBlurb: String = ReceiptAnalyzingToast.analyzingBlurbs.randomElement() ?? "Analyzing..."
 
     // Random blurbs shown during receipt analysis
     private static let analyzingBlurbs = [
@@ -52,7 +52,7 @@ struct ReceiptAnalyzingToast: View {
         var title: String {
             switch self {
             case .analyzing:
-                return "Crunching the numbers..."
+                return "Analyzing receipt..."
             case .done:
                 return "Done analyzing!"
             }

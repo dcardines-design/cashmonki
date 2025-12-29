@@ -52,7 +52,7 @@ enum DummyDataGenerator {
         
         return Txn(
             userId: getCurrentUserId(),
-            category: "Utilities", // Software/AI service fits under Utilities
+            category: "Utilities & Bills", // Software/AI service fits under Utilities & Bills
             amount: -1120.00, // Negative for expense (20 USD * 56 exchange rate = 1120 PHP)
             date: receiptDate,
             createdAt: finalCreatedAt, // ✅ Now uses historical timestamp!
@@ -128,13 +128,13 @@ enum DummyDataGenerator {
                         amount = Double(Int.random(in: 15000...75000)) // Business income range
                     } else {
                         // Business expenses
-                        let businessCategories = ["Subscriptions", "Supplies", "Dining", "Tech", "Tech", "Utilities", "Services"]
+                        let businessCategories = ["Subscriptions", "Supplies", "Dining", "Tech", "Tech", "Utilities & Bills", "Services"]
                         let businessMerchants = [
                             "Subscriptions": ["Adobe Creative Suite", "Figma Pro", "Slack Premium", "Notion Team", "Canva Pro", "Dropbox Business"],
                             "Supplies": ["Office Depot", "Staples", "Amazon Business", "Best Buy Business", "Costco Business"],
                             "Dining": ["Client Lunch", "Team Dinner", "Business Meeting", "Networking Event", "Conference Meal"],
                             "Tech": ["MacBook Pro", "iPad Pro", "Camera Equipment", "Lighting Setup", "Monitor", "External Drive", "Facebook Ads", "Google Ads"],
-                            "Utilities": ["Internet Bill", "Phone Bill", "Cloud Storage", "VPN Service", "Security Software"],
+                            "Utilities & Bills": ["Internet Bill", "Phone Bill", "Cloud Storage", "VPN Service", "Security Software"],
                             "Services": ["Accountant", "Lawyer", "Business Consultant", "Tax Preparation", "Insurance"]
                         ]
                         
@@ -165,7 +165,7 @@ enum DummyDataGenerator {
                         amount = Double(Int.random(in: 5000...35000)) // Personal income range
                     } else {
                         // Personal expenses  
-                        let personalCategories = ["Food", "Dining", "Transport", "Clothes", "Fun", "Health", "Personal", "Utilities"]
+                        let personalCategories = ["Food", "Dining", "Transport", "Clothes", "Fun", "Health", "Personal", "Utilities & Bills"]
                         let personalMerchants = [
                             "Food": ["SM Supermarket", "Robinsons", "Puregold", "S&R", "Landers", "Metro Market"],
                             "Dining": ["McDonald's", "Jollibee", "KFC", "Pizza Hut", "Starbucks", "Coffee Bean", "Shakey's"],
@@ -174,7 +174,7 @@ enum DummyDataGenerator {
                             "Fun": ["Netflix", "Spotify", "Cinema", "Concert", "Gaming", "Books"],
                             "Health": ["Mercury Drug", "Watsons", "Hospital", "Dentist", "Gym Membership"],
                             "Personal": ["Haircut", "Spa", "Beauty", "Clothing", "Accessories"],
-                            "Utilities": ["Electric Bill", "Water Bill", "Internet", "Mobile Plan", "Insurance"]
+                            "Utilities & Bills": ["Electric Bill", "Water Bill", "Internet", "Mobile Plan", "Insurance"]
                         ]
                         
                         category = personalCategories.randomElement()!
@@ -270,7 +270,7 @@ enum DummyDataGenerator {
             (merchant: "Business Lunch - Client Meeting", category: "Dining", amount: -3200.0, hour: 12, minute: 30, daysAgo: 3), // 3 days ago
             (merchant: "Shopify Monthly", category: "Subscriptions", amount: -1495.0, hour: 14, minute: 10, daysAgo: 4), // 4 days ago
             (merchant: "Stock Photo License", category: "Subscriptions", amount: -750.0, hour: 15, minute: 25, daysAgo: 2), // 2 days ago
-            (merchant: "Web Hosting", category: "Utilities", amount: -1200.0, hour: 16, minute: 40, daysAgo: 5), // 5 days ago
+            (merchant: "Web Hosting", category: "Utilities & Bills", amount: -1200.0, hour: 16, minute: 40, daysAgo: 5), // 5 days ago
             (merchant: "Logo Design Project", category: "Business Income", amount: 28000.0, hour: 17, minute: 55, daysAgo: 3), // 3 days ago - INCOME
             (merchant: "Print Shop - Business Cards", category: "Tech", amount: -2100.0, hour: 18, minute: 20, daysAgo: 4) // 4 days ago
         ]
@@ -351,7 +351,7 @@ enum DummyDataGenerator {
             (merchant: "Adobe Creative Suite", category: "Subscriptions", amount: -2999.0, hour: 8, minute: 30),
             (merchant: "Office Depot", category: "Supplies", amount: -1850.0, hour: 11, minute: 45),
             (merchant: "Client Payment - Brand Identity", category: "Business Income", amount: 45000.0, hour: 10, minute: 15),
-            (merchant: "Web Hosting", category: "Utilities", amount: -1200.0, hour: 16, minute: 40)
+            (merchant: "Web Hosting", category: "Utilities & Bills", amount: -1200.0, hour: 16, minute: 40)
         ]
         
         var transactions: [Txn] = []
@@ -375,8 +375,8 @@ enum DummyDataGenerator {
             let businessAccount = userManager.currentUser.subAccounts.first { $0.name == "Business" }
             
             let accountId: UUID
-            if txnData.category == "Business Income" || txnData.category == "Subscriptions" || 
-               txnData.category == "Supplies" || txnData.category == "Utilities" {
+            if txnData.category == "Business Income" || txnData.category == "Subscriptions" ||
+               txnData.category == "Supplies" || txnData.category == "Utilities & Bills" {
                 accountId = businessAccount?.id ?? personalAccount?.id ?? UUID()
                 print("🏢 Using business account ID: \(accountId.uuidString.prefix(8))...")
             } else {

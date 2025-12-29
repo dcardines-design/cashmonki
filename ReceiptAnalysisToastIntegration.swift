@@ -143,14 +143,14 @@ struct HomePageWithToast: View {
    ```
 
 3. **Toast States:**
-   - `toastManager.startReceiptAnalysis()` - Shows "Crunching the numbers..." with scanning animation
+   - `toastManager.startReceiptAnalysis()` - Shows "Analyzing receipt..." with scanning animation
    - `toastManager.completeReceiptAnalysis()` - Transitions to "Done analyzing!" with done animation
    - `toastManager.showError()` - Shows error toast
    - `toastManager.dismiss()` - Manually dismiss toast
 
 ## Animation Flow:
 1. User scans/uploads receipt
-2. Toast appears from bottom with "Crunching the numbers..." + scanning animation
+2. Toast appears from bottom with "Analyzing receipt..." + scanning animation
 3. Analysis completes successfully
 4. Toast transitions to "Done analyzing!" + done animation (auto-dismisses after 2s)
 5. Receipt confirmation sheet appears

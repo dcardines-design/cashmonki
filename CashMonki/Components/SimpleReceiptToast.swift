@@ -10,13 +10,12 @@ import SwiftUI
 struct SimpleReceiptToast: View {
     @Binding var isShowing: Bool
     @State private var analysisState: AnalysisState = .analyzing
-    @State private var randomBlurb: String = SimpleReceiptToast.analyzingBlurbs.randomElement() ?? "Crunching the numbers..."
+    @State private var randomBlurb: String = SimpleReceiptToast.analyzingBlurbs.randomElement() ?? "Analyzing..."
 
     // 20 random blurbs shown during receipt analysis
     private static let analyzingBlurbs = [
         "Ooh, what do we have here...",
         "Reading the fine print...",
-        "Crunching the numbers...",
         "This looks interesting...",
         "Decoding your purchase...",
         "Let's see what we've got...",
@@ -43,7 +42,7 @@ struct SimpleReceiptToast: View {
         var title: String {
             switch self {
             case .analyzing:
-                return "Crunching the numbers..."
+                return "Analyzing receipt..."
             case .done:
                 return "Done analyzing!"
             }

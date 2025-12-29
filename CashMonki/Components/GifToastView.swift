@@ -125,7 +125,7 @@ class GifToastManager: ObservableObject {
         }
     }
     
-    func showScanning(_ message: String = "Crunching the numbers...") {
+    func showScanning(_ message: String = "Analyzing...") {
         show(message, type: .scanning)
     }
     
@@ -141,7 +141,7 @@ class GifToastManager: ObservableObject {
     
     /// Start receipt analysis toast
     func startReceiptAnalysis() {
-        showScanning("Crunching the numbers...")
+        showScanning("Analyzing receipt...")
     }
     
     /// Transition from scanning to done state
@@ -203,11 +203,11 @@ extension View {
 #Preview {
     VStack {
         GifToastView(
-            message: "Crunching the numbers...",
+            message: "Analyzing receipt...",
             type: .scanning,
             isShowing: .constant(true)
         )
-        
+
         Spacer()
     }
     .background(Color.gray.opacity(0.1))

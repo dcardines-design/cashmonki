@@ -42,7 +42,8 @@ struct FixedBottomGroup: View {
                 )
             }
             .padding(.horizontal, 20)
-            .padding(.vertical, 16)
+            .padding(.top, 16)
+            .padding(.bottom, 34)
             .background(AppColors.backgroundWhite)
         }
     }

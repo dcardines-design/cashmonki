@@ -134,10 +134,24 @@ struct EditTransactionSheet: View {
                     AppInputField.date(title: "Date", dateValue: $selectedDate, components: [.date, .hourAndMinute], size: .md)
 
                     // Merchant field
-                    AppInputField.merchant(text: $merchant, size: .md, focusBinding: $isMerchantFocused)
-                    
+                    AppInputField.text(
+                        title: "Merchant (optional)",
+                        text: $merchant,
+                        placeholder: "Enter merchant name",
+                        isRequired: false,
+                        size: .md,
+                        focusBinding: $isMerchantFocused
+                    )
+
                     // Note field
-                    AppInputField.text(title: "Note", text: $note, placeholder: "Add note...", size: .md, focusBinding: $isNoteFocused)
+                    AppInputField.text(
+                        title: "Note (optional)",
+                        text: $note,
+                        placeholder: "Add context or description",
+                        isRequired: false,
+                        size: .md,
+                        focusBinding: $isNoteFocused
+                    )
                     
                     Spacer()
                         .frame(height: 100)

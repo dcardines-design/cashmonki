@@ -28,6 +28,7 @@ struct BudgetsPage: View {
     @State private var showingAddBudget: Bool = false
     @State private var selectedBudgetForEdit: Budget?
     @State private var showingBudgetMenu: Budget?
+    @State private var selectedBudgetForSpending: Budget?
 
     // MARK: - Date Navigation
 
@@ -199,6 +200,19 @@ struct BudgetsPage: View {
             }
             Button("Cancel", role: .cancel) {}
         }
+        .sheet(item: $selectedBudgetForSpending) { budget in
+            BudgetSpendingSheet(
+                isPresented: Binding(
+                    get: { selectedBudgetForSpending != nil },
+                    set: { if !$0 { selectedBudgetForSpending = nil } }
+                ),
+                budget: budget,
+                displayPeriod: selectedPeriodFilter,
+                selectedDate: selectedDate
+            )
+            .presentationDetents([.fraction(0.98)])
+            .presentationDragIndicator(.hidden)
+        }
     }
 
     // MARK: - Period Tabs Section (like month tabs in transactions)
@@ -324,6 +338,9 @@ struct BudgetsPage: View {
                         budget: budget,
                         displayPeriod: selectedPeriodFilter,
                         date: selectedDate,
+                        onCardTap: {
+                            selectedBudgetForSpending = budget
+                        },
                         onMenuTap: {
                             showingBudgetMenu = budget
                         }

@@ -113,6 +113,7 @@ class UserManager: ObservableObject {
             print("   📧 Email: \(localUser.email)")
             print("   📊 Transactions: \(localUser.transactions.count)")
             print("   🏦 Wallets: \(localUser.accounts.count)")
+            print("   🎯 Budgets: \(localUser.budgets.count)")
 
             // Use the locally stored user data
             self.currentUser = localUser
@@ -1295,6 +1296,11 @@ class UserManager: ObservableObject {
         saveCurrentUserLocally()
         objectWillChange.send()
 
+        // LOCAL-ONLY MODE: Firebase sync disabled for now
+        // TODO: Re-enable when data sync feature is implemented
+        print("📱 UserManager: Budget saved locally only (Firebase sync disabled)")
+
+        /*
         // Sync to Firebase
         syncToFirebase { success in
             if success {
@@ -1303,6 +1309,7 @@ class UserManager: ObservableObject {
                 print("⚠️ UserManager: Budget sync to Firebase failed")
             }
         }
+        */
     }
 
     func updateBudget(_ budget: Budget) {
@@ -1318,6 +1325,11 @@ class UserManager: ObservableObject {
         saveCurrentUserLocally()
         objectWillChange.send()
 
+        // LOCAL-ONLY MODE: Firebase sync disabled for now
+        // TODO: Re-enable when data sync feature is implemented
+        print("📱 UserManager: Budget update saved locally only (Firebase sync disabled)")
+
+        /*
         // Sync to Firebase
         syncToFirebase { success in
             if success {
@@ -1326,6 +1338,7 @@ class UserManager: ObservableObject {
                 print("⚠️ UserManager: Budget update sync to Firebase failed")
             }
         }
+        */
 
         print("✏️ UserManager: Updated budget - \(budget.categoryName)")
     }
@@ -1352,6 +1365,11 @@ class UserManager: ObservableObject {
         saveCurrentUserLocally()
         objectWillChange.send()
 
+        // LOCAL-ONLY MODE: Firebase sync disabled for now
+        // TODO: Re-enable when data sync feature is implemented
+        print("📱 UserManager: Budget deletion saved locally only (Firebase sync disabled)")
+
+        /*
         // Sync to Firebase
         syncToFirebase { success in
             if success {
@@ -1360,6 +1378,7 @@ class UserManager: ObservableObject {
                 print("⚠️ UserManager: Budget deletion sync to Firebase failed")
             }
         }
+        */
 
         print("🗑️ UserManager: Deleted budget - \(deletedBudget.categoryName)")
     }
@@ -1915,6 +1934,7 @@ class UserManager: ObservableObject {
         print("   👤 User: \(currentUser.name) (\(currentUser.email))")
         print("   🆔 User ID: \(currentUser.id.uuidString)")
         print("   🏦 Wallets to save: \(currentUser.accounts.count)")
+        print("   🎯 Budgets to save: \(currentUser.budgets.count)")
         
         for (index, account) in currentUser.accounts.enumerated() {
             print("   \(index + 1). '\(account.name)' (\(account.id.uuidString.prefix(8))...) - Default: \(account.isDefault)")
@@ -1949,6 +1969,7 @@ class UserManager: ObservableObject {
                 if let verifyUser = try? JSONDecoder().decode(UserData.self, from: verification) {
                     print("✅ UserManager: VERIFICATION - Data can be decoded successfully")
                     print("   🏦 Verified wallet count: \(verifyUser.accounts.count)")
+                    print("   🎯 Verified budget count: \(verifyUser.budgets.count)")
                     print("   📝 Verified user name: \(verifyUser.name)")
                 } else {
                     print("❌ UserManager: VERIFICATION FAILED - Data cannot be decoded")

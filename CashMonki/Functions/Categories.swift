@@ -220,7 +220,7 @@ class CategoriesManager: ObservableObject {
             SubcategoryData(name: "Home Repairs", emoji: "🔨", type: .expense)
         ]),
         
-        CategoryData(name: "Utilities", emoji: "💡", subcategories: [
+        CategoryData(name: "Utilities & Bills", emoji: "💡", subcategories: [
             SubcategoryData(name: "Electricity", emoji: "⚡", type: .expense),
             SubcategoryData(name: "Water", emoji: "💧", type: .expense),
             SubcategoryData(name: "Internet", emoji: "📶", type: .expense)
