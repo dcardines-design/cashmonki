@@ -728,46 +728,32 @@ app.post('/api/generate-roast', optionalAuth, async (req: AuthenticatedRequest, 
         'X-Title': 'CashMonki Receipt Roaster'
       },
       body: JSON.stringify({
-        model: 'openai/gpt-4o-mini',
+        model: 'openai/gpt-4o',
         messages: [
           {
             role: 'system',
-            content: `Generate a short, savage roast for a specific purchase. The roast must target the behavior behind the purchase, not the person. Use simple, clear words. The tone is calm, deadpan, and quietly judgmental. No emojis, no slang, no insults, no moral lectures.
+            content: `Sarcastic roast about the SPECIFIC purchase. ONE sentence, <15 words.
 
-Each roast must be 200 characters or fewer.
+MUST be relevant to what they bought. Deadpool energy.
 
-Each roast should be 1 sentence whenever possible. Combine the purchase and the real reason (avoiding effort, habit, impatience, boredom, false hope) into a single punchy statement. Only use 2 lines if absolutely necessary.
+EXAMPLES:
+₱500 on Grab, oh so we're just not walking anymore.
+₱300 on bubble tea, the weekly tapioca ritual continues.
+₱800 on coffee because tap water doesn't spark joy.
+₱1,200 on delivery to avoid putting on pants.
+₱2,000 at Zara, classic fast fashion that'll fall apart in a month.
+₱500 on skincare, paying to fix what sleep would fix for free.
 
-The burn must be directly tied to the purchase. Use plain language. Avoid clever metaphors. Keep one clear idea per roast. Make it feel accurate and uncomfortable, not loud.
-
-SARCASM LEVEL: 7/10
-SAVAGERY LEVEL: 6/10
-CASUALNESS: 7/10
-
-Rules:
-- NEVER end with "Anyway", "Be serious", "You knew", "Again?" or any fixed closing phrase
-- Sound human and very conversational
-- Avoid big words - talk like you're speaking to a teenager
-- Every roast must be unique - avoid templated messages
-- No hyphens or em dashes
-
-Examples:
-
-"₱200 on Grab because walking 10 minutes felt like too much today."
-
-"₱250 coffee just to feel productive while doing nothing."
-
-"Another subscription you'll forget exists by next week."
-
-Output exactly 3 unique roasts as a JSON array like: ["roast1", "roast2", "roast3"]`
+NEVER: quotes, brackets, Marvel refs, "bold choice", random nonsense unrelated to purchase.
+Output: ["roast1","roast2","roast3"]`
           },
           {
             role: 'user',
-            content: `Roast this purchase: ` + purchaseContext + ` [seed:${Date.now()}]`
+            content: `Roast: ${purchaseContext}`
           }
         ],
-        max_tokens: 200,
-        temperature: 1.0
+        max_tokens: 120,
+        temperature: 0.9
       })
     });
 
@@ -790,7 +776,22 @@ Output exactly 3 unique roasts as a JSON array like: ["roast1", "roast2", "roast
       const jsonMatch = roastContent.match(/\[[\s\S]*\]/);
       if (jsonMatch) {
         const roasts = JSON.parse(jsonMatch[0]) as string[];
-        roastText = roasts[Math.floor(Math.random() * roasts.length)];
+
+        // Filter out only truly problematic roasts (keep questions, allow 2 sentences)
+        const forbiddenWords = ['self-care', 'self-respect', 'intervention', 'crisis', 'sabotage', 'existential', 'therapy', 'nowhere', 'life goes', 'taste buds', 'identity'];
+        const validRoasts = roasts
+          .map((r: string) => r.trim())
+          .filter((r: string) => {
+            const hasForbiddenWord = forbiddenWords.some(word => r.toLowerCase().includes(word));
+            return r.length > 20 && r.length < 250 && !hasForbiddenWord;
+          });
+
+        if (validRoasts.length > 0) {
+          roastText = validRoasts[Math.floor(Math.random() * validRoasts.length)];
+        } else {
+          // Use first roast if no valid ones
+          roastText = roasts[0]?.trim() || roastContent;
+        }
       } else {
         // Fallback to raw text if not JSON array
         roastText = roastContent;
@@ -800,8 +801,15 @@ Output exactly 3 unique roasts as a JSON array like: ["roast1", "roast2", "roast
       roastText = roastContent;
     }
 
-    logger.info(`Roast generated for user ${userId}: ${roastText.substring(0, 50)}...`);
-    res.json({ roast: roastText });
+    // Clean up the roast - remove quotes, brackets, question marks
+    const finalRoast = roastText
+      .replace(/^[\["']|[\]"']$/g, '')  // Remove leading/trailing quotes and brackets
+      .replace(/^\[|\]$/g, '')  // Extra bracket removal
+      .replace(/\?/g, '.')
+      .trim();
+
+    logger.info(`Roast generated for user ${userId}: ${finalRoast.substring(0, 50)}...`);
+    res.json({ roast: finalRoast });
 
   } catch (error) {
     logger.error('Roast generation error:', error);

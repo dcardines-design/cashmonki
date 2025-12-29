@@ -381,7 +381,7 @@ class ToastManager: ObservableObject {
         print("🍞 === SHOW() CORE DEBUG END ===")
     }
     
-    func showScanning(_ message: String = "Analyzing...") {
+    func showScanning(_ message: String = "Crunching the numbers...") {
         show(message, type: .scanning)
         if let blurb = currentToast?.scanningBlurb {
             print("🎲 Random blurb selected: \"\(blurb)\"")
@@ -550,7 +550,7 @@ class ToastManager: ObservableObject {
         print("🍞 DEBUG: Reset current toast, now showing scanning toast")
         
         // Start new scanning toast immediately
-        showScanning("Analyzing...")
+        showScanning("Crunching the numbers...")
         print("🍞 DEBUG: Current toast after scanning start: \(currentToast?.message ?? "nil")")
     }
     
