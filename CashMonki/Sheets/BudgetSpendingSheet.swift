@@ -235,73 +235,49 @@ struct BudgetSpendingSheet: View {
 
     private var transactionsSection: some View {
         VStack(alignment: .leading, spacing: 24) {
-            if groupedTransactions.isEmpty {
-                emptyStateView
-            } else {
-                ForEach(Array(groupedTransactions.enumerated()), id: \.offset) { _, section in
-                    let dailyTotal = section.1.reduce(0) { $0 + $1.amount }
+            ForEach(Array(groupedTransactions.enumerated()), id: \.offset) { _, section in
+                let dailyTotal = section.1.reduce(0) { $0 + $1.amount }
 
-                    VStack(alignment: .leading, spacing: 10) {
-                        // Date header with daily total
-                        HStack {
-                            Text(section.0)
-                                .font(AppFonts.overusedGroteskMedium(size: 14))
-                                .foregroundStyle(AppColors.foregroundSecondary)
+                VStack(alignment: .leading, spacing: 10) {
+                    // Date header with daily total
+                    HStack {
+                        Text(section.0)
+                            .font(AppFonts.overusedGroteskMedium(size: 14))
+                            .foregroundStyle(AppColors.foregroundSecondary)
 
-                            Spacer()
+                        Spacer()
 
-                            Text(currencyPrefs.formatPrimaryAmount(dailyTotal))
-                                .font(AppFonts.overusedGroteskMedium(size: 16))
-                                .foregroundStyle(AppColors.foregroundSecondary)
-                        }
+                        Text(currencyPrefs.formatPrimaryAmount(dailyTotal))
+                            .font(AppFonts.overusedGroteskMedium(size: 16))
+                            .foregroundStyle(AppColors.foregroundSecondary)
+                    }
 
-                        // Transaction rows
-                        VStack(spacing: 0) {
-                            ForEach(Array(section.1.enumerated()), id: \.element.id) { index, txn in
-                                UnifiedTransactionDisplay.row(
-                                    transaction: txn,
-                                    onTap: {
-                                        selectedTransactionForDetail = txn
-                                    },
-                                    onTransactionUpdate: { updatedTransaction in
-                                        userManager.updateTransaction(updatedTransaction)
-                                    }
-                                )
-
-                                if index < section.1.count - 1 {
-                                    Divider()
-                                        .padding(.leading, 64)
+                    // Transaction rows
+                    VStack(spacing: 0) {
+                        ForEach(Array(section.1.enumerated()), id: \.element.id) { index, txn in
+                            UnifiedTransactionDisplay.row(
+                                transaction: txn,
+                                onTap: {
+                                    selectedTransactionForDetail = txn
+                                },
+                                onTransactionUpdate: { updatedTransaction in
+                                    userManager.updateTransaction(updatedTransaction)
                                 }
+                            )
+
+                            if index < section.1.count - 1 {
+                                Divider()
+                                    .padding(.leading, 64)
                             }
                         }
-                        .background(AppColors.backgroundWhite)
-                        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                     }
+                    .background(AppColors.backgroundWhite)
+                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                 }
             }
         }
     }
 
-    // MARK: - Empty State
-
-    private var emptyStateView: some View {
-        VStack(spacing: 16) {
-            Image(systemName: "tray")
-                .font(.system(size: 40))
-                .foregroundStyle(AppColors.foregroundTertiary)
-
-            Text("No transactions yet")
-                .font(AppFonts.overusedGroteskMedium(size: 16))
-                .foregroundStyle(AppColors.foregroundSecondary)
-
-            Text("Transactions in \(budget.categoryName) will appear here")
-                .font(AppFonts.overusedGroteskMedium(size: 14))
-                .foregroundStyle(AppColors.foregroundTertiary)
-                .multilineTextAlignment(.center)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 60)
-    }
 }
 
 // MARK: - Preview

@@ -15,8 +15,13 @@ struct CustomPaywallSheet: View {
     @State private var selectedPlan: PricingPlan = .yearly
     @State private var showingManageBilling = false
     @State private var isDismissing = false // Prevents UI re-render during dismissal
+    @State private var isPurchasing = false // Prevents "Manage Billing" flash during purchase
     @ObservedObject private var revenueCatManager = RevenueCatManager.shared
     @EnvironmentObject var toastManager: ToastManager
+
+    // Static counter to detect duplicate paywall presentations
+    private static var presentationCount = 0
+    private static var lastPresentationTime: Date?
     
     // MARK: - RevenueCat Package Helpers
     private var targetOffering: Offering? {
@@ -426,22 +431,29 @@ struct CustomPaywallSheet: View {
                 .buttonStyle(PlainButtonStyle())
                 
                 // Primary button - changes based on subscription status
-                // Use isDismissing to prevent showing "Manage Billing" during dismissal animation
-                let _ = print("🎫 PAYWALL BUTTON DEBUG: isProUser=\(revenueCatManager.isProUser), isDismissing=\(isDismissing), hasUsedTrialBefore=\(revenueCatManager.hasUsedTrialBefore)")
-                if revenueCatManager.isProUser && !isDismissing {
+                // Keep button visible during purchase (just disabled), but hide during dismissal
+                let _ = print("🎫 PAYWALL BUTTON DEBUG: isProUser=\(revenueCatManager.isProUser), isDismissing=\(isDismissing), isPurchasing=\(isPurchasing), hasUsedTrialBefore=\(revenueCatManager.hasUsedTrialBefore)")
+                if revenueCatManager.isProUser && !isDismissing && !isPurchasing {
                     let _ = print("🎫 PAYWALL: Showing 'Manage Billing' button")
                     AppButton.secondary("Manage Billing", size: .extraSmall) {
                         showingManageBilling = true
                     }
                 } else if !isDismissing {
                     // Different button text for lapsed trial users
-                    let buttonText = revenueCatManager.hasUsedTrialBefore ? "Continue with Pro" : "Start my free week"
-                    let _ = print("🎫 PAYWALL: Showing '\(buttonText)' button")
-                    AppButton.primary(buttonText, size: .extraSmall) {
-                        handleStartFreeTrial()
-                    }
+                    // Show loading text during purchase, otherwise show normal text
+                    let buttonText = isPurchasing ? "Processing..." : (revenueCatManager.hasUsedTrialBefore ? "Continue with Pro" : "Start my free week")
+                    let _ = print("🎫 PAYWALL: Showing '\(buttonText)' button (isPurchasing=\(isPurchasing))")
+
+                    // Use pressed state styling when processing
+                    AppButton(
+                        title: buttonText,
+                        action: { if !isPurchasing { handleStartFreeTrial() } },
+                        hierarchy: .primary,
+                        size: .extraSmall,
+                        state: isPurchasing ? .pressed : .active
+                    )
                 } else {
-                    let _ = print("🎫 PAYWALL: ⚠️ NO BUTTON SHOWN - isDismissing=\(isDismissing)")
+                    let _ = print("🎫 PAYWALL: ⚠️ Button hidden - isDismissing=\(isDismissing)")
                 }
                 
                 // Payment terms text - different for lapsed trial users
@@ -528,9 +540,23 @@ struct CustomPaywallSheet: View {
                 .environmentObject(toastManager)
         }
         .onAppear {
+            // Track duplicate paywall presentations
+            Self.presentationCount += 1
+            let timeSinceLast = Self.lastPresentationTime.map { Date().timeIntervalSince($0) }
+            Self.lastPresentationTime = Date()
+
             print("🎫 ======= PAYWALL APPEARED =======")
+            print("🎫 PAYWALL: Presentation #\(Self.presentationCount)")
+            if let timeSince = timeSinceLast {
+                print("🎫 PAYWALL: ⚠️ Time since last presentation: \(String(format: "%.2f", timeSince))s")
+                if timeSince < 2.0 {
+                    print("🎫 PAYWALL: 🚨🚨🚨 DUPLICATE DETECTED! Paywall shown twice within 2 seconds! 🚨🚨🚨")
+                }
+            }
             print("🎫 PAYWALL onAppear: isProUser=\(revenueCatManager.isProUser)")
             print("🎫 PAYWALL onAppear: isDismissing=\(isDismissing)")
+            print("🎫 PAYWALL onAppear: isPurchasing=\(isPurchasing)")
+            print("🎫 PAYWALL onAppear: isPurchaseInProgress=\(revenueCatManager.isPurchaseInProgress)")
             print("🎫 PAYWALL onAppear: hasUsedTrialBefore=\(revenueCatManager.hasUsedTrialBefore)")
             print("🎫 PAYWALL onAppear: customerInfo=\(revenueCatManager.customerInfo != nil ? "loaded" : "nil")")
 
@@ -582,13 +608,14 @@ struct CustomPaywallSheet: View {
 
     private func handleStartFreeTrial() {
         print("🎫 ======= handleStartFreeTrial CALLED =======")
+        isPurchasing = true // Prevent "Manage Billing" flash during purchase
         Task {
             await ensureOfferingsLoaded()
 
             guard let package = selectedPackage else {
                 print("🎫 PURCHASE: ❌ No package selected")
                 await MainActor.run {
-                    isDismissing = true // Prevent any UI state changes during dismissal
+                    isDismissing = true
                     isPresented = false
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
                         NotificationCenter.default.post(
@@ -634,6 +661,7 @@ struct CustomPaywallSheet: View {
                                                 error.localizedDescription.lowercased().contains("cancel")
 
                         if isUserCancellation {
+                            isPurchasing = false // Reset so user can try again
                             return
                         }
                         
@@ -655,6 +683,7 @@ struct CustomPaywallSheet: View {
                             )
                         }
                     } else {
+                        isPurchasing = false // Reset so user can try again
                         return // No error object, likely user cancellation
                     }
                 }

@@ -34,6 +34,7 @@ class RevenueCatManager: NSObject, ObservableObject {
     @Published var customerInfo: CustomerInfo?
     @Published var offerings: Offerings?
     @Published var isSubscriptionActive: Bool = false
+    @Published var isPurchaseInProgress: Bool = false  // Tracks active purchase flow
 
     // Debug flags for testing (always available for testing)
     @Published var debugForceTrialLapsed: Bool = false
@@ -208,6 +209,7 @@ class RevenueCatManager: NSObject, ObservableObject {
         }
 
         print("💳 RevenueCat: Purchasing \(package.storeProduct.localizedTitle)...")
+        isPurchaseInProgress = true
 
         do {
             let result = try await Purchases.shared.purchase(package: package)
@@ -216,13 +218,16 @@ class RevenueCatManager: NSObject, ObservableObject {
                 customerInfo = result.customerInfo
                 updateSubscriptionStatus(result.customerInfo)
                 print("✅ RevenueCat: Purchase successful")
+                isPurchaseInProgress = false
                 return (true, nil)
             } else {
                 print("⏹️ RevenueCat: Purchase cancelled by user")
+                isPurchaseInProgress = false
                 return (false, nil)
             }
         } catch {
             print("❌ RevenueCat: Purchase failed - \(error.localizedDescription)")
+            isPurchaseInProgress = false
             return (false, error)
         }
     }
@@ -346,6 +351,7 @@ class RevenueCatManager: NSObject, ObservableObject {
     @Published var customerInfo: Any? = nil
     @Published var offerings: Any? = nil
     @Published var isSubscriptionActive: Bool = false
+    @Published var isPurchaseInProgress: Bool = false
 
     var isProUser: Bool { false }
     var currentOffering: Any? { nil }

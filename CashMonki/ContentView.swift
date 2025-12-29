@@ -384,6 +384,7 @@ struct ContentView: View {
         print("🎫 CHECK: showingTrialEndedPaywall=\(showingTrialEndedPaywall)")
         print("🎫 CHECK: isProUser=\(revenueCatManager.isProUser)")
         print("🎫 CHECK: hasUsedTrialBefore=\(revenueCatManager.hasUsedTrialBefore)")
+        print("🎫 CHECK: isPurchaseInProgress=\(revenueCatManager.isPurchaseInProgress)")
 
         // Multiple guards to prevent re-showing paywall after subscription
         guard !hasShownTrialEndedToast else {
@@ -394,6 +395,12 @@ struct ContentView: View {
         // Don't show if paywall is already showing
         guard !showingTrialEndedPaywall else {
             print("🎫 ContentView: ❌ Skipping - paywall already visible")
+            return
+        }
+
+        // CRITICAL: Don't show paywall while a purchase is in progress
+        guard !revenueCatManager.isPurchaseInProgress else {
+            print("🎫 ContentView: ❌ Skipping - purchase in progress")
             return
         }
 
@@ -415,6 +422,7 @@ struct ContentView: View {
                 print("🎫 ASYNC CHECK: hasShownTrialEndedToast=\(hasShownTrialEndedToast)")
                 print("🎫 ASYNC CHECK: showingTrialEndedPaywall=\(showingTrialEndedPaywall)")
                 print("🎫 ASYNC CHECK: isProUser=\(revenueCatManager.isProUser)")
+                print("🎫 ASYNC CHECK: isPurchaseInProgress=\(revenueCatManager.isPurchaseInProgress)")
 
                 // Double-check guards after delay (state may have changed)
                 guard !hasShownTrialEndedToast else {
@@ -423,6 +431,10 @@ struct ContentView: View {
                 }
                 guard !showingTrialEndedPaywall else {
                     print("🎫 ASYNC: ❌ Skipping - already visible")
+                    return
+                }
+                guard !revenueCatManager.isPurchaseInProgress else {
+                    print("🎫 ASYNC: ❌ Skipping - purchase in progress")
                     return
                 }
                 guard !revenueCatManager.isProUser else {
