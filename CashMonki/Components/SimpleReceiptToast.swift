@@ -12,27 +12,34 @@ struct SimpleReceiptToast: View {
     @State private var analysisState: AnalysisState = .analyzing
     @State private var randomBlurb: String = SimpleReceiptToast.analyzingBlurbs.randomElement() ?? "Analyzing..."
 
-    // 20 random blurbs shown during receipt analysis
+    // Random blurbs shown during receipt analysis - Deadpool energy
     private static let analyzingBlurbs = [
-        "Ooh, what do we have here...",
-        "Reading the fine print...",
-        "This looks interesting...",
-        "Decoding your purchase...",
-        "Let's see what we've got...",
-        "Doing the math...",
-        "Almost got it...",
-        "Making sense of this...",
-        "One moment...",
-        "Processing...",
-        "Scanning away...",
-        "On the case...",
-        "Working on it...",
-        "Getting the details...",
-        "Breaking it down...",
-        "Analyzing...",
-        "Reading...",
-        "Just a sec...",
-        "Hmm, interesting..."
+        // General sarcastic
+        "Oh, this should be good...",
+        "Let's see the damage...",
+        "Ah yes, another receipt...",
+        "Reading your life choices...",
+        "Judging in progress...",
+        "Oh we're doing this now...",
+        "Time to face the numbers...",
+        "Here we go again...",
+        "And what did we buy...",
+        "This better be worth it...",
+        "Moment of truth...",
+        "Let's see what we're working with...",
+        "Bracing myself...",
+        "Okay let's do this...",
+        "No judgment... okay maybe some...",
+        "Deep breaths...",
+        // Category-flavored guesses
+        "Coffee again, isn't it...",
+        "Let me guess, food...",
+        "Another Grab ride...",
+        "Boba? It's boba isn't it...",
+        "Online shopping strikes again...",
+        "The delivery app wins again...",
+        "More coffee? Respect...",
+        "Snacks? It's always snacks..."
     ]
 
     enum AnalysisState {
@@ -42,7 +49,7 @@ struct SimpleReceiptToast: View {
         var title: String {
             switch self {
             case .analyzing:
-                return "Analyzing receipt..."
+                return "Crunching the numbers..."
             case .done:
                 return "Done analyzing!"
             }
