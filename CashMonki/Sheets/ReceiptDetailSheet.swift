@@ -276,7 +276,7 @@ struct ReceiptDetailSheet: View {
                             .padding(.horizontal, 20)
                             */
                         }
-                        .padding(.top, 0)
+                        .padding(.top, -8) // Reduces 20px parent spacing to 12px gap from "Receipt" label
                         .padding(.bottom, 32)
                     }
                 }

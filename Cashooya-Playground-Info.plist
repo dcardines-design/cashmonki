@@ -28,7 +28,17 @@
 				<string>com.googleusercontent.apps.817492386994-9sev7s5qd08bnjtpstkoqptf37cki8gd</string>
 			</array>
 		</dict>
+		<dict>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>fb2252885065123219</string>
+			</array>
+		</dict>
 	</array>
+	<key>FacebookAppID</key>
+	<string>2252885065123219</string>
+	<key>FacebookDisplayName</key>
+	<string>Cashmonki</string>
 	<key>CFBundleVersion</key>
 	<string>1</string>
 	<key>LSRequiresIPhoneOS</key>

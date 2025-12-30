@@ -161,11 +161,11 @@ struct CategoryPickerSheet: View {
                     print("🔍   - Category subcategories: \(category.subcategories.map { $0.name })")
                 }
                 #endif
-                
+
                 // Search in category name
                 let categoryMatches = category.name.localizedCaseInsensitiveContains(searchText)
-                
-                // Search in subcategory names
+
+                // Search in subcategory names (built-in subcategories)
                 let subcategoryMatches = category.subcategories.contains { subcategory in
                     let matches = subcategory.name.localizedCaseInsensitiveContains(searchText)
                     #if DEBUG
@@ -175,14 +175,21 @@ struct CategoryPickerSheet: View {
                     #endif
                     return matches
                 }
-                
-                let result = categoryMatches || subcategoryMatches
+
+                // CRITICAL FIX: Also include parent categories when their child categories match
+                // This ensures new subcategories (stored as separate categories with parentId) are searchable
+                let hasMatchingChildCategory = categories.contains { childCategory in
+                    childCategory.parentId == category.id &&
+                    childCategory.name.localizedCaseInsensitiveContains(searchText)
+                }
+
+                let result = categoryMatches || subcategoryMatches || hasMatchingChildCategory
                 #if DEBUG
                 if !searchText.isEmpty && (searchText.lowercased().contains("haircuts") || searchText.lowercased().contains("hair")) {
-                    print("🔍   - Category '\(category.name)' result: \(result) (category: \(categoryMatches), subcategory: \(subcategoryMatches))")
+                    print("🔍   - Category '\(category.name)' result: \(result) (category: \(categoryMatches), subcategory: \(subcategoryMatches), hasMatchingChild: \(hasMatchingChildCategory))")
                 }
                 #endif
-                
+
                 return result
             }
         

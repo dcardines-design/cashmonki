@@ -77,8 +77,8 @@ struct WelcomeScreen: View {
             }
             
             // Use simple DispatchQueue - more reliable in SwiftUI
-            print("⏰ WelcomeScreen: Setting up auto-dismiss timer for 2.5 seconds")
-            DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
+            print("⏰ WelcomeScreen: Setting up auto-dismiss timer for 1.8 seconds")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.8) {
                 print("⏰ WelcomeScreen: Timer fired! Dismissing welcome screen")
                 print("⏰ WelcomeScreen: isPresented before dismiss: \(isPresented)")
                 
