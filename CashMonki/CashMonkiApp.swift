@@ -19,6 +19,9 @@ import FirebaseAuth
 #if canImport(PostHog)
 import PostHog
 #endif
+#if canImport(FBSDKCoreKit)
+import FBSDKCoreKit
+#endif
 
 @main
 struct CashMonkiApp: App {
@@ -202,6 +205,9 @@ struct CashMonkiApp: App {
 
                     // Initialize PostHog analytics synchronously
                     initializePostHog()
+
+                    // Initialize Facebook SDK
+                    initializeFacebook()
 
                     // Debug: Check if custom fonts are loaded
                     #if DEBUG
@@ -429,6 +435,29 @@ struct CashMonkiApp: App {
         PostHogSDK.shared.flush()
 
         print("✅ CashMonkiApp: PostHog initialized and test events sent!")
+    }
+
+    // MARK: - Facebook SDK Initialization
+
+    private func initializeFacebook() {
+        print("📘 CashMonkiApp: Initializing Facebook SDK...")
+#if canImport(FBSDKCoreKit)
+        // Initialize Facebook SDK
+        ApplicationDelegate.shared.application(
+            UIApplication.shared,
+            didFinishLaunchingWithOptions: nil
+        )
+
+        // Enable automatic app event logging
+        Settings.shared.isAutoLogAppEventsEnabled = true
+        Settings.shared.isAdvertiserIDCollectionEnabled = true
+
+        // Log a test event to verify connection
+        AppEvents.shared.logEvent(.init("app_launched_cashmonki"))
+        print("✅ CashMonkiApp: Facebook SDK initialized and test event logged")
+#else
+        print("⚠️ CashMonkiApp: FBSDKCoreKit not available - Facebook SDK not installed")
+#endif
     }
 
     // MARK: - Onboarding State Management

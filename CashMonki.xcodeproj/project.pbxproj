@@ -18,7 +18,6 @@
 		CBE781B22F0445E600CA6ED3 /* FacebookAEM in Frameworks */ = {isa = PBXBuildFile; productRef = CBE781B12F0445E600CA6ED3 /* FacebookAEM */; };
 		CBE781B42F0445E600CA6ED3 /* FacebookBasics in Frameworks */ = {isa = PBXBuildFile; productRef = CBE781B32F0445E600CA6ED3 /* FacebookBasics */; };
 		CBE781B62F0445E600CA6ED3 /* FacebookCore in Frameworks */ = {isa = PBXBuildFile; productRef = CBE781B52F0445E600CA6ED3 /* FacebookCore */; };
-		CBE781B82F0445E600CA6ED3 /* FacebookGamingServices in Frameworks */ = {isa = PBXBuildFile; productRef = CBE781B72F0445E600CA6ED3 /* FacebookGamingServices */; };
 		CBE781BA2F0445E600CA6ED3 /* FacebookLogin in Frameworks */ = {isa = PBXBuildFile; productRef = CBE781B92F0445E600CA6ED3 /* FacebookLogin */; };
 		CBEAE1432ECE30C70044BD60 /* RevenueCatUI in Frameworks */ = {isa = PBXBuildFile; productRef = CBEAE1422ECE30C70044BD60 /* RevenueCatUI */; };
 /* End PBXBuildFile section */
@@ -129,7 +128,6 @@
 				CBE781B22F0445E600CA6ED3 /* FacebookAEM in Frameworks */,
 				CB6221642EFE93B50077600D /* PostHog in Frameworks */,
 				CBCAC3B52EB21602002CB3B1 /* FirebaseAuth in Frameworks */,
-				CBE781B82F0445E600CA6ED3 /* FacebookGamingServices in Frameworks */,
 				CBE781BA2F0445E600CA6ED3 /* FacebookLogin in Frameworks */,
 				CBCAC3B92EB21602002CB3B1 /* FirebaseFirestore in Frameworks */,
 			);
@@ -212,7 +210,6 @@
 				CBE781B12F0445E600CA6ED3 /* FacebookAEM */,
 				CBE781B32F0445E600CA6ED3 /* FacebookBasics */,
 				CBE781B52F0445E600CA6ED3 /* FacebookCore */,
-				CBE781B72F0445E600CA6ED3 /* FacebookGamingServices */,
 				CBE781B92F0445E600CA6ED3 /* FacebookLogin */,
 			);
 			productName = Cashmonki;
@@ -822,11 +819,6 @@
 			isa = XCSwiftPackageProductDependency;
 			package = CBE781B02F0445E600CA6ED3 /* XCRemoteSwiftPackageReference "facebook-ios-sdk" */;
 			productName = FacebookCore;
-		};
-		CBE781B72F0445E600CA6ED3 /* FacebookGamingServices */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = CBE781B02F0445E600CA6ED3 /* XCRemoteSwiftPackageReference "facebook-ios-sdk" */;
-			productName = FacebookGamingServices;
 		};
 		CBE781B92F0445E600CA6ED3 /* FacebookLogin */ = {
 			isa = XCSwiftPackageProductDependency;
