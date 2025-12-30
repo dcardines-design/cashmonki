@@ -19,8 +19,8 @@ import FirebaseAuth
 #if canImport(PostHog)
 import PostHog
 #endif
-#if canImport(FBSDKCoreKit)
-import FBSDKCoreKit
+#if canImport(FacebookCore)
+import FacebookCore
 #endif
 
 @main
@@ -441,7 +441,7 @@ struct CashMonkiApp: App {
 
     private func initializeFacebook() {
         print("📘 CashMonkiApp: Initializing Facebook SDK...")
-#if canImport(FBSDKCoreKit)
+#if canImport(FacebookCore)
         // Initialize Facebook SDK
         ApplicationDelegate.shared.application(
             UIApplication.shared,
@@ -453,10 +453,10 @@ struct CashMonkiApp: App {
         Settings.shared.isAdvertiserIDCollectionEnabled = true
 
         // Log a test event to verify connection
-        AppEvents.shared.logEvent(.init("app_launched_cashmonki"))
+        AppEvents.shared.logEvent(AppEvents.Name("app_launched_cashmonki"))
         print("✅ CashMonkiApp: Facebook SDK initialized and test event logged")
 #else
-        print("⚠️ CashMonkiApp: FBSDKCoreKit not available - Facebook SDK not installed")
+        print("⚠️ CashMonkiApp: FacebookCore not available - Facebook SDK not installed")
 #endif
     }
 

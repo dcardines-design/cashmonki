@@ -37,6 +37,8 @@
 	</array>
 	<key>FacebookAppID</key>
 	<string>2252885065123219</string>
+	<key>FacebookClientToken</key>
+	<string>ca5cbc215c656422b8d3668b6be48a92</string>
 	<key>FacebookDisplayName</key>
 	<string>Cashmonki</string>
 	<key>CFBundleVersion</key>
