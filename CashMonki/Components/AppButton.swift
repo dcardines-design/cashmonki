@@ -15,6 +15,7 @@ enum ButtonSize {
     case small            // sm - 20px text, 28px icons
     case extraSmall       // xs - 18px text, 24px icons
     case doubleExtraSmall // 2xs - 18px text, 14px h-padding, 10px v-padding
+    case tripleExtraSmall // 3xs - 16px text, 12px h-padding, 8px v-padding
 }
 
 enum ButtonState {
@@ -65,6 +66,7 @@ struct AppButton: View {
         case .small: return 20
         case .extraSmall: return 18
         case .doubleExtraSmall: return 18
+        case .tripleExtraSmall: return 16
         }
     }
     
@@ -74,6 +76,7 @@ struct AppButton: View {
         case .small: return 28
         case .extraSmall: return 40  // 40 * 0.6 = 24px actual
         case .doubleExtraSmall: return 40  // 40 * 0.6 = 24px actual
+        case .tripleExtraSmall: return 36  // 36 * 0.6 = ~22px actual
         }
     }
     
@@ -82,6 +85,7 @@ struct AppButton: View {
         case .medium, .small: return 14
         case .extraSmall: return 12
         case .doubleExtraSmall: return 10
+        case .tripleExtraSmall: return 8
         }
     }
     
@@ -91,6 +95,7 @@ struct AppButton: View {
         case .small: return 18
         case .extraSmall: return 16
         case .doubleExtraSmall: return 14
+        case .tripleExtraSmall: return 12
         }
     }
     
@@ -100,6 +105,7 @@ struct AppButton: View {
         case .small: return 12
         case .extraSmall: return 12
         case .doubleExtraSmall: return 10
+        case .tripleExtraSmall: return 8
         }
     }
     
