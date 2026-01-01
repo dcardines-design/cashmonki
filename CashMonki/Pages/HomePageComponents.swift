@@ -210,7 +210,7 @@ extension HomePage {
                         selectedTab = .transactions
                     },
                     hierarchy: .tertiary,
-                    size: .extraSmall,
+                    size: .doubleExtraSmall,
                     rightIcon: "chevron-right"
                 )
                 .padding(.horizontal, 16)
