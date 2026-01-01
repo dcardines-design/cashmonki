@@ -667,6 +667,20 @@ extension HomePage {
                 let minValue: Double = chartFilter == .balance ? min(dataMin, 0) : 0
                 let maxValue: Double = max(dataMax, chartFilter == .balance ? 0 : 1)
 
+                // Dynamic line color: for balance, green if positive, red if negative
+                let dynamicLineColor: Color = {
+                    switch chartFilter {
+                    case .expense:
+                        return AppColors.chartExpense1
+                    case .income:
+                        return AppColors.chartIncome2
+                    case .balance:
+                        // Check last data point to determine if balance is positive or negative
+                        let lastAmount = currentPeriodData.last?.amount ?? 0
+                        return lastAmount >= 0 ? AppColors.chartIncome2 : AppColors.chartExpense1
+                    }
+                }()
+
                 // Calculate Y-axis label values based on range
                 let range = maxValue - minValue
                 let yLabel1 = maxValue
@@ -804,7 +818,7 @@ extension HomePage {
                         // Dot clamps to line endpoints when dragging beyond
                         if let current = currentPoint {
                             Circle()
-                                .fill(chartLineColor)
+                                .fill(dynamicLineColor)
                                 .frame(width: 8, height: 8)
                                 .overlay(
                                     Circle()
@@ -868,7 +882,7 @@ extension HomePage {
                         let currentTime = Date()
                         if selectedData.date <= currentTime, let current = currentPoint {
                             Circle()
-                                .fill(chartLineColor)
+                                .fill(dynamicLineColor)
                                 .frame(width: 8, height: 8)
                                 .overlay(
                                     Circle()
@@ -909,7 +923,7 @@ extension HomePage {
                         }
                         .fill(
                             LinearGradient(
-                                colors: [chartLineColor.opacity(0.3), chartLineColor.opacity(0)],
+                                colors: [dynamicLineColor.opacity(0.15), dynamicLineColor.opacity(0)],
                                 startPoint: .top,
                                 endPoint: .bottom
                             )
@@ -921,7 +935,7 @@ extension HomePage {
                         Path { path in
                             drawRoundedLine(path: &path, points: currentPoints)
                         }
-                        .stroke(chartLineColor, lineWidth: 2)
+                        .stroke(dynamicLineColor, lineWidth: 2)
                         .animation(.easeInOut(duration: 0.6), value: chartFilter)
                         .animation(.easeInOut(duration: 0.6), value: rangeSelection)
                     }
