@@ -750,13 +750,37 @@ extension HomePage {
                         .animation(.easeInOut(duration: 0.6), value: rangeSelection)
                     }
                     
+                    // Calculate current period points BEFORE crosshairs so dot can use them
+                    let currentPoints: [CGPoint] = {
+                        guard currentPeriodData.count > 0 else { return [] }
+                        let currentTime = Date()
+                        let periodDuration = periodEndDate.timeIntervalSince(periodStartDate)
+
+                        let basePoints: [CGPoint] = currentPeriodData.compactMap { dataPoint in
+                            guard dataPoint.date <= currentTime else { return nil }
+                            let timeOffset = dataPoint.date.timeIntervalSince(periodStartDate)
+                            let normalizedTime: Double = periodDuration > 0 ? timeOffset / periodDuration : 0
+                            let x = chartWidth * CGFloat(max(0, min(1, normalizedTime)))
+                            let y = height - (height * CGFloat((dataPoint.amount - minValue) / (maxValue - minValue)))
+                            return CGPoint(x: x, y: y)
+                        }
+
+                        // Extend line to "now"
+                        guard let lastPoint = basePoints.last, currentTime <= periodEndDate else { return basePoints }
+                        let nowTimeOffset = currentTime.timeIntervalSince(periodStartDate)
+                        let nowNormalizedTime = periodDuration > 0 ? nowTimeOffset / periodDuration : 0
+                        let nowX = chartWidth * CGFloat(max(0, min(1, nowNormalizedTime)))
+                        guard nowX > lastPoint.x + 1 else { return basePoints }
+                        return basePoints + [CGPoint(x: nowX, y: lastPoint.y)]
+                    }()
+
                     // Crosshairs (behind the lines)
                     // Enhanced crosshairs for smooth dragging - show crosshairs throughout period, data points only for current data
-                    if let dragPos = selectedDragPosition, let dragValue = selectedDragValue {
+                    if let dragPos = selectedDragPosition, let _ = selectedDragValue {
                         // Smooth drag crosshairs
                         let pointX = chartWidth * CGFloat(dragPos)
-                        let normalizedValue = max(0, min(1, (dragValue - minValue) / (maxValue - minValue)))
-                        let pointY = height - (height * CGFloat(normalizedValue))
+                        // Use line interpolation for dot Y position (guarantees dot sits on line)
+                        let pointY = findYOnLine(atX: pointX, points: currentPoints) ?? height
                         
                         // Vertical crosshair - dashed with DCE2F4 color
                         Path { path in
@@ -877,53 +901,27 @@ extension HomePage {
                     }
                     
                     // Current period line (foreground) - with gradient fill and rounded corners
-                    if currentPeriodData.count > 0 {
-                        let currentTime = Date()
-                        let periodDuration = periodEndDate.timeIntervalSince(periodStartDate)
-
-                        // Collect points for current data (up to now)
-                        let basePoints: [CGPoint] = currentPeriodData.compactMap { dataPoint in
-                            guard dataPoint.date <= currentTime else { return nil }
-                            let timeOffset = dataPoint.date.timeIntervalSince(periodStartDate)
-                            let normalizedTime: Double = periodDuration > 0 ? timeOffset / periodDuration : 0
-                            let x = chartWidth * CGFloat(max(0, min(1, normalizedTime)))
-                            let y = height - (height * CGFloat((dataPoint.amount - minValue) / (maxValue - minValue)))
-                            return CGPoint(x: x, y: y)
-                        }
-
-                        // Extend line to "now" so the dot appears on the line
-                        let nowExtension: [CGPoint] = {
-                            guard let lastPoint = basePoints.last, currentTime <= periodEndDate else { return [] }
-                            let nowTimeOffset = currentTime.timeIntervalSince(periodStartDate)
-                            let nowNormalizedTime = periodDuration > 0 ? nowTimeOffset / periodDuration : 0
-                            let nowX = chartWidth * CGFloat(max(0, min(1, nowNormalizedTime)))
-                            guard nowX > lastPoint.x + 1 else { return [] }
-                            return [CGPoint(x: nowX, y: lastPoint.y)]
-                        }()
-
-                        let currentPoints = basePoints + nowExtension
-
+                    // Uses pre-calculated currentPoints from above (same points used for dot positioning)
+                    if currentPoints.count > 1 {
                         // Gradient fill under the line
-                        if currentPoints.count > 1 {
-                            Path { path in
-                                drawRoundedLine(path: &path, points: currentPoints)
-                                // Close to bottom-right, then bottom-left
-                                if let lastPoint = currentPoints.last, let firstPoint = currentPoints.first {
-                                    path.addLine(to: CGPoint(x: lastPoint.x, y: height))
-                                    path.addLine(to: CGPoint(x: firstPoint.x, y: height))
-                                    path.closeSubpath()
-                                }
+                        Path { path in
+                            drawRoundedLine(path: &path, points: currentPoints)
+                            // Close to bottom-right, then bottom-left
+                            if let lastPoint = currentPoints.last, let firstPoint = currentPoints.first {
+                                path.addLine(to: CGPoint(x: lastPoint.x, y: height))
+                                path.addLine(to: CGPoint(x: firstPoint.x, y: height))
+                                path.closeSubpath()
                             }
-                            .fill(
-                                LinearGradient(
-                                    colors: [chartLineColor.opacity(0.3), chartLineColor.opacity(0)],
-                                    startPoint: .top,
-                                    endPoint: .bottom
-                                )
-                            )
-                            .animation(.easeInOut(duration: 0.6), value: chartFilter)
-                            .animation(.easeInOut(duration: 0.6), value: rangeSelection)
                         }
+                        .fill(
+                            LinearGradient(
+                                colors: [chartLineColor.opacity(0.3), chartLineColor.opacity(0)],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            )
+                        )
+                        .animation(.easeInOut(duration: 0.6), value: chartFilter)
+                        .animation(.easeInOut(duration: 0.6), value: rangeSelection)
 
                         // Draw line with rounded corners
                         Path { path in
@@ -1155,6 +1153,30 @@ extension HomePage {
 }
 
 // MARK: - Line Chart Helper Functions
+
+/// Find Y position on line at given X by interpolating between points
+fileprivate func findYOnLine(atX targetX: CGFloat, points: [CGPoint]) -> CGFloat? {
+    guard points.count >= 2 else { return points.first?.y }
+
+    for i in 0..<points.count - 1 {
+        let p1 = points[i]
+        let p2 = points[i + 1]
+
+        // Check if targetX is between these two points
+        if targetX >= p1.x && targetX <= p2.x {
+            // Linear interpolation
+            let t = (p2.x - p1.x) > 0 ? (targetX - p1.x) / (p2.x - p1.x) : 0
+            return p1.y + t * (p2.y - p1.y)
+        }
+    }
+
+    // If past the last point, return last point's Y
+    if let last = points.last, targetX > last.x {
+        return last.y
+    }
+
+    return points.first?.y
+}
 
 /// Draws lines through all points with small rounded corners at junctions
 fileprivate func drawRoundedLine(path: inout Path, points: [CGPoint], cornerRadius: CGFloat = 4) {
