@@ -120,23 +120,11 @@ fileprivate func createStepwiseRunningTotals(
         let preTransactionTime = normalizedDate.addingTimeInterval(-60) // 1 minute before
         dataPoints.append((date: preTransactionTime, amount: previousTotal))
         
-        // Add the transaction point (creates diagonal line to new amount)
+        // Add the transaction point (creates vertical step to new amount)
         dataPoints.append((date: normalizedDate, amount: runningTotal))
-        
-        // Create additional "hold" points for smooth dragging for all views
-        // This ensures the previous value is maintained until the next transaction
-        let nextTransactionDate = getNextTransactionDate(after: transaction.date, in: transactions)
-        if let nextDate = nextTransactionDate, nextDate <= endDate {
-            let timeInterval = nextDate.timeIntervalSince(transaction.date)
-            let steps = min(20, max(2, Int(timeInterval / 3600))) // More points for longer gaps
-            
-            for i in 1..<steps {
-                let interpolatedDate = transaction.date.addingTimeInterval(timeInterval * Double(i) / Double(steps))
-                if interpolatedDate <= endDate {
-                    dataPoints.append((date: interpolatedDate, amount: runningTotal)) // Previous value maintained
-                }
-            }
-        }
+
+        // Note: Removed excessive interpolation points that were causing horizontal striping artifacts
+        // The step-wise behavior is preserved via pre-transaction points
     }
     
     // Add final point at current time with last known value
@@ -172,10 +160,6 @@ fileprivate func getTransactionImpact(_ transaction: Txn, chartFilter: HomePage.
     case .expense:
         return convertedAmount < 0 ? abs(convertedAmount) : 0
     }
-}
-
-fileprivate func getNextTransactionDate(after date: Date, in transactions: [Txn]) -> Date? {
-    return transactions.first { $0.date > date }?.date
 }
 
 // Calculate running total at any specific time (previous value logic)
@@ -296,22 +280,10 @@ fileprivate func createStepwiseRunningTotalsFromMapped(
         let preTransactionTime = mappedTransaction.mappedDate.addingTimeInterval(-60) // 1 minute before
         dataPoints.append((date: preTransactionTime, amount: previousTotal))
         
-        // Add the transaction point (creates diagonal line to new amount)
+        // Add the transaction point (creates vertical step to new amount)
         dataPoints.append((date: mappedTransaction.mappedDate, amount: runningTotal))
-        
-        // Create additional "hold" points for smooth dragging
-        let nextTransactionDate = index < sortedData.count - 1 ? sortedData[index + 1].mappedDate : endDate
-        if nextTransactionDate <= endDate {
-            let timeInterval = nextTransactionDate.timeIntervalSince(mappedTransaction.mappedDate)
-            let steps = min(20, max(2, Int(timeInterval / 3600))) // More points for longer gaps
-            
-            for i in 1..<steps {
-                let interpolatedDate = mappedTransaction.mappedDate.addingTimeInterval(timeInterval * Double(i) / Double(steps))
-                if interpolatedDate <= endDate {
-                    dataPoints.append((date: interpolatedDate, amount: runningTotal)) // Previous value maintained
-                }
-            }
-        }
+
+        // Note: Removed excessive interpolation points that were causing horizontal striping artifacts
     }
     
     // Add final point at current time with last known value
