@@ -706,12 +706,11 @@ extension HomePage {
                         }
                     }
                     
-                    // Previous period line (background) - gray with gradient fill and rounded corners
-                    if previousPeriodData.count > 0 {
+                    // Calculate previous period points BEFORE drawing so dot can use them
+                    let previousPoints: [CGPoint] = {
+                        guard previousPeriodData.count > 0 else { return [] }
                         let periodDuration = periodEndDate.timeIntervalSince(periodStartDate)
-
-                        // Collect points for previous period data
-                        let previousPoints: [CGPoint] = previousPeriodData.map { dataPoint in
+                        return previousPeriodData.map { dataPoint in
                             let timeOffset = dataPoint.date.timeIntervalSince(periodStartDate)
                             let normalizedTime: Double = periodDuration > 0 ? timeOffset / periodDuration : 0
                             let x = chartWidth * CGFloat(max(0, min(1, normalizedTime)))
@@ -719,27 +718,28 @@ extension HomePage {
                             let y = height - (height * CGFloat(normalizedAmount))
                             return CGPoint(x: x, y: y)
                         }
+                    }()
 
+                    // Previous period line (background) - gray with gradient fill and rounded corners
+                    if previousPoints.count > 1 {
                         // Gradient fill under the previous period line (subtle)
-                        if previousPoints.count > 1 {
-                            Path { path in
-                                drawRoundedLine(path: &path, points: previousPoints)
-                                if let lastPoint = previousPoints.last, let firstPoint = previousPoints.first {
-                                    path.addLine(to: CGPoint(x: lastPoint.x, y: height))
-                                    path.addLine(to: CGPoint(x: firstPoint.x, y: height))
-                                    path.closeSubpath()
-                                }
+                        Path { path in
+                            drawRoundedLine(path: &path, points: previousPoints)
+                            if let lastPoint = previousPoints.last, let firstPoint = previousPoints.first {
+                                path.addLine(to: CGPoint(x: lastPoint.x, y: height))
+                                path.addLine(to: CGPoint(x: firstPoint.x, y: height))
+                                path.closeSubpath()
                             }
-                            .fill(
-                                LinearGradient(
-                                    colors: [AppColors.linePrimary.opacity(0.15), AppColors.linePrimary.opacity(0)],
-                                    startPoint: .top,
-                                    endPoint: .bottom
-                                )
-                            )
-                            .animation(.easeInOut(duration: 0.6), value: chartFilter)
-                            .animation(.easeInOut(duration: 0.6), value: rangeSelection)
                         }
+                        .fill(
+                            LinearGradient(
+                                colors: [AppColors.linePrimary.opacity(0.15), AppColors.linePrimary.opacity(0)],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            )
+                        )
+                        .animation(.easeInOut(duration: 0.6), value: chartFilter)
+                        .animation(.easeInOut(duration: 0.6), value: rangeSelection)
 
                         // Draw line with rounded corners
                         Path { path in
@@ -749,7 +749,7 @@ extension HomePage {
                         .animation(.easeInOut(duration: 0.6), value: chartFilter)
                         .animation(.easeInOut(duration: 0.6), value: rangeSelection)
                     }
-                    
+
                     // Calculate current period points BEFORE crosshairs so dot can use them
                     let currentPoints: [CGPoint] = {
                         guard currentPeriodData.count > 0 else { return [] }
@@ -809,15 +809,10 @@ extension HomePage {
                             .zIndex(20)
                         
                         // Previous period data point indicator (gray dot)
-                        if previousPeriodData.count > 0, let dragPos = selectedDragPosition {
-                            // Calculate previous period value at the same X position
-                            let targetTime = periodStartDate.addingTimeInterval((periodEndDate.timeIntervalSince(periodStartDate)) * dragPos)
-                            
-                            // Find closest previous period data point or interpolate
-                            let previousValue = findPreviousPeriodValue(at: targetTime, in: previousPeriodData)
-                            
-                            let previousPointY = height - (height * CGFloat((previousValue - minValue) / (maxValue - minValue)))
-                            
+                        // Uses line interpolation to guarantee dot sits on line
+                        if previousPoints.count > 0 {
+                            let previousPointY = findYOnLine(atX: pointX, points: previousPoints) ?? height
+
                             Circle()
                                 .fill(Color(red: 0.86, green: 0.89, blue: 0.96))
                                 .frame(width: 8, height: 8)
@@ -833,35 +828,35 @@ extension HomePage {
                     } else if let selectedIndex = selectedDataPointIndex,
                        selectedIndex < currentPeriodData.count {
                         let selectedData = currentPeriodData[selectedIndex]
-                        
-                        // Calculate position for the selected data point (fallback)
+
+                        // Calculate X position for the selected data point
                         let periodDuration = periodEndDate.timeIntervalSince(periodStartDate)
-                        
-                        // Use full date/time for all views to show time-based progressions  
                         let dateForPositioning = selectedData.date
-                        
                         let timeOffset = dateForPositioning.timeIntervalSince(periodStartDate)
                         let normalizedTime: Double = periodDuration > 0 ? timeOffset / periodDuration : 0
                         let pointX = chartWidth * CGFloat(max(0, min(1, normalizedTime)))
-                        let pointY = height - (height * CGFloat((selectedData.amount - minValue) / (maxValue - minValue)))
-                        
+
+                        // Use line interpolation for Y positions (guarantees dots sit on lines)
+                        let pointY = findYOnLine(atX: pointX, points: currentPoints) ?? height
+                        let previousPointY = findYOnLine(atX: pointX, points: previousPoints) ?? height
+
                         // Vertical line (grey)
                         Path { path in
                             path.move(to: CGPoint(x: pointX, y: 0))
                             path.addLine(to: CGPoint(x: pointX, y: height))
                         }
                         .stroke(AppColors.linePrimary, style: StrokeStyle(lineWidth: 1, dash: [5, 5]))
-                        
+
                         // Horizontal line (grey)
                         Path { path in
                             path.move(to: CGPoint(x: 0, y: pointY))
                             path.addLine(to: CGPoint(x: chartWidth, y: pointY))
                         }
                         .stroke(AppColors.linePrimary, style: StrokeStyle(lineWidth: 1, dash: [5, 5]))
-                        
+
                         // Data point indicator at data point (current period) - only show if data is not in future
                         let currentTime = Date()
-                        if selectedData.date <= currentTime {
+                        if selectedData.date <= currentTime, currentPoints.count > 0 {
                             Circle()
                                 .fill(chartLineColor)
                                 .frame(width: 8, height: 8)
@@ -873,20 +868,9 @@ extension HomePage {
                                 .position(x: pointX, y: pointY)
                                 .zIndex(20)
                         }
-                        
+
                         // Previous period data point indicator (gray dot) for discrete selection
-                        if previousPeriodData.count > 0 {
-                            // Calculate previous period value at the same X position
-                            let periodDuration = periodEndDate.timeIntervalSince(periodStartDate)
-                            let timeOffset = selectedData.date.timeIntervalSince(periodStartDate)
-                            let normalizedTime: Double = periodDuration > 0 ? timeOffset / periodDuration : 0
-                            let targetTime = periodStartDate.addingTimeInterval((periodEndDate.timeIntervalSince(periodStartDate)) * normalizedTime)
-                            
-                            // Find closest previous period data point
-                            let previousValue = findPreviousPeriodValue(at: targetTime, in: previousPeriodData)
-                            
-                            let previousPointY = height - (height * CGFloat((previousValue - minValue) / (maxValue - minValue)))
-                            
+                        if previousPoints.count > 0 {
                             Circle()
                                 .fill(Color(red: 0.86, green: 0.89, blue: 0.96))
                                 .frame(width: 8, height: 8)
