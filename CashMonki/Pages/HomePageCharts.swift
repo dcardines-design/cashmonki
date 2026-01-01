@@ -1144,19 +1144,42 @@ extension HomePage {
 
 // MARK: - Line Chart Helper Functions
 
-/// Draws lines through all points with rounded corners at junctions
-fileprivate func drawRoundedLine(path: inout Path, points: [CGPoint], cornerRadius: CGFloat = 8) {
+/// Draws lines through all points with small rounded corners at junctions
+fileprivate func drawRoundedLine(path: inout Path, points: [CGPoint], cornerRadius: CGFloat = 4) {
     guard points.count > 0 else { return }
     guard points.count > 1 else {
         path.move(to: points[0])
         return
     }
 
+    // For 2 points, just draw a straight line
+    guard points.count > 2 else {
+        path.move(to: points[0])
+        path.addLine(to: points[1])
+        return
+    }
+
     path.move(to: points[0])
 
     for i in 1..<points.count - 1 {
-        // Use arc tangent to create rounded corner at each junction
-        path.addArc(tangent1End: points[i], tangent2End: points[i + 1], radius: cornerRadius)
+        let prev = points[i - 1]
+        let curr = points[i]
+        let next = points[i + 1]
+
+        // Calculate distances to determine safe radius
+        let dist1 = hypot(curr.x - prev.x, curr.y - prev.y)
+        let dist2 = hypot(next.x - curr.x, next.y - curr.y)
+        let minDist = min(dist1, dist2)
+
+        // Use smaller radius for short segments to avoid artifacts
+        let safeRadius = min(cornerRadius, minDist / 3)
+
+        if safeRadius > 1 {
+            path.addArc(tangent1End: curr, tangent2End: next, radius: safeRadius)
+        } else {
+            // Too short for rounding, just go straight
+            path.addLine(to: curr)
+        }
     }
 
     // Final line to last point
