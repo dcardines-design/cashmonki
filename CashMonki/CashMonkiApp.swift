@@ -322,17 +322,10 @@ struct CashMonkiApp: App {
                                 await RevenueCatManager.shared.identifyUser(userId: userId)
                             }
 
-                            // Identify user to PostHog with email and name
-                            PostHogManager.shared.identifyWithEmail(
+                            // Identify user across all analytics services
+                            AnalyticsManager.shared.identify(
                                 userId: userId,
-                                email: authManager.currentUser?.email ?? "",
-                                name: authManager.currentUser?.name
-                            )
-
-                            // Identify user to Mixpanel
-                            MixpanelManager.shared.identifyWithEmail(
-                                userId: userId,
-                                email: authManager.currentUser?.email ?? "",
+                                email: authManager.currentUser?.email,
                                 name: authManager.currentUser?.name
                             )
                         }
@@ -341,9 +334,8 @@ struct CashMonkiApp: App {
                         Task {
                             await RevenueCatManager.shared.logoutUser()
                         }
-                        // Reset PostHog and Mixpanel sessions on logout
-                        PostHogManager.shared.reset()
-                        MixpanelManager.shared.reset()
+                        // Reset analytics sessions on logout
+                        AnalyticsManager.shared.reset()
                         showingOnboarding = false
                         isNewUser = false
                     }
@@ -484,11 +476,11 @@ struct CashMonkiApp: App {
 #if canImport(Mixpanel)
         MixpanelManager.shared.configure(token: MIXPANEL_TOKEN)
 
-        // Track app launch
-        MixpanelManager.shared.trackCustom("app_launched")
-        MixpanelManager.shared.flush()
+        // Track app launch to both PostHog and Mixpanel
+        AnalyticsManager.shared.track(.appLaunched)
+        AnalyticsManager.shared.flush()
 
-        print("✅ CashMonkiApp: Mixpanel initialized and test event sent!")
+        print("✅ CashMonkiApp: Mixpanel initialized and app_launched tracked!")
 #else
         print("⚠️ CashMonkiApp: Mixpanel SDK not available - add Mixpanel package via SPM")
 #endif

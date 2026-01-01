@@ -459,8 +459,8 @@ struct EditTransactionSheet: View {
                 userEnteredCurrency: selectedCurrency // Keep for backward compatibility
             )
         
-        // Track transaction edit in PostHog
-        PostHogManager.shared.capture(.transactionEdited, properties: [
+        // Track transaction edit
+        AnalyticsManager.shared.track(.transactionEdited, properties: [
             "amount": abs(updatedTransaction.amount),
             "currency": updatedTransaction.primaryCurrency.rawValue,
             "category": updatedTransaction.category,
@@ -490,8 +490,8 @@ struct EditTransactionSheet: View {
     }
     
     private func deleteTransaction() {
-        // Track transaction deletion in PostHog
-        PostHogManager.shared.capture(.transactionDeleted, properties: [
+        // Track transaction deletion
+        AnalyticsManager.shared.track(.transactionDeleted, properties: [
             "amount": abs(transaction.amount),
             "currency": transaction.primaryCurrency.rawValue,
             "category": transaction.category,

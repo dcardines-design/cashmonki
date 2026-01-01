@@ -824,7 +824,7 @@ extension HomePage {
                     }
 
                     // Track receipt scan failure
-                    PostHogManager.shared.trackReceiptScan(success: false, errorMessage: error.localizedDescription)
+                    AnalyticsManager.shared.trackReceiptScan(success: false, errorMessage: error.localizedDescription)
 
                     isAnalyzingReceipt = false
                     analyzingSource = nil

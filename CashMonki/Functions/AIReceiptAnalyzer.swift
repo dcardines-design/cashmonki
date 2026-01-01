@@ -114,7 +114,7 @@ class AIReceiptAnalyzer {
         print("🕐 DEBUG TIMING: Analysis started at \(analysisStart)")
 
         // Track receipt scan started
-        PostHogManager.shared.capture(.receiptScanStarted)
+        AnalyticsManager.shared.track(.receiptScanStarted)
 
         // PERFORMANCE FIX: Move heavy image processing to background thread
         // This prevents UI hanging during resize and compression
@@ -192,7 +192,7 @@ class AIReceiptAnalyzer {
         print("✅ Secure receipt analysis completed: \(analysis.merchantName) - \(analysis.totalAmount)")
 
         // Track receipt scan completed
-        PostHogManager.shared.capture(.receiptScanCompleted, properties: [
+        AnalyticsManager.shared.track(.receiptScanCompleted, properties: [
             "merchant": analysis.merchantName,
             "amount": analysis.totalAmount,
             "currency": analysis.currency.rawValue,

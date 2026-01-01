@@ -560,8 +560,8 @@ struct CustomPaywallSheet: View {
             print("🎫 PAYWALL onAppear: hasUsedTrialBefore=\(revenueCatManager.hasUsedTrialBefore)")
             print("🎫 PAYWALL onAppear: customerInfo=\(revenueCatManager.customerInfo != nil ? "loaded" : "nil")")
 
-            // Track paywall view in PostHog
-            PostHogManager.shared.trackPaywallViewed(
+            // Track paywall view
+            AnalyticsManager.shared.trackPaywallViewed(
                 source: "app",
                 hasUsedTrial: revenueCatManager.hasUsedTrialBefore
             )
@@ -636,8 +636,8 @@ struct CustomPaywallSheet: View {
                 if result.success {
                     print("🎫 PURCHASE: ✅ SUCCESS - Setting isDismissing=true, isPresented=false")
 
-                    // Track subscription started in PostHog
-                    PostHogManager.shared.capture(.subscriptionStarted, properties: [
+                    // Track subscription started
+                    AnalyticsManager.shared.track(.subscriptionStarted, properties: [
                         "plan": selectedPlan == .yearly ? "yearly" : "monthly",
                         "price": package.storeProduct.localizedPriceString
                     ])

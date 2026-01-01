@@ -68,7 +68,7 @@ struct OnboardingFlow: View {
 
             // Track step completion when moving forward
             if isNavigatingForward {
-                PostHogManager.shared.trackOnboardingStep(oldValue.rawValue, stepNumber: oldValue.stepNumber)
+                AnalyticsManager.shared.trackOnboardingStep(oldValue.rawValue, stepNumber: oldValue.stepNumber)
             }
         }
         .onAppear {
@@ -101,7 +101,7 @@ struct OnboardingFlow: View {
             print("🎆 OnboardingFlow: ======= ONBOARDING FLOW READY =======")
 
             // Track onboarding started
-            PostHogManager.shared.capture(.onboardingStarted, properties: [
+            AnalyticsManager.shared.track(.onboardingStarted, properties: [
                 "is_new_registration": isNewRegistration,
                 "starting_step": currentStep.rawValue
             ])
@@ -755,7 +755,7 @@ struct OnboardingFlow: View {
         print("🏁 OnboardingFlow: User is Pro: \(isProUser)")
 
         // Track onboarding completed
-        PostHogManager.shared.capture(.onboardingCompleted, properties: [
+        AnalyticsManager.shared.track(.onboardingCompleted, properties: [
             "subscribed": isProUser,
             "currency": selectedCurrency.rawValue
         ])

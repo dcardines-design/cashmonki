@@ -208,8 +208,8 @@ class AccountManager: ObservableObject {
         
         print("🆔 AccountManager: Created wallet with ID: \(newAccount.id.uuidString)")
 
-        // Track wallet creation in PostHog
-        PostHogManager.shared.capture(.walletCreated, properties: [
+        // Track wallet creation
+        AnalyticsManager.shared.track(.walletCreated, properties: [
             "name": name,
             "type": type.displayName,
             "currency": currency.rawValue,
@@ -269,8 +269,8 @@ class AccountManager: ObservableObject {
             return
         }
 
-        // Track wallet deletion in PostHog
-        PostHogManager.shared.capture(.walletDeleted, properties: [
+        // Track wallet deletion
+        AnalyticsManager.shared.track(.walletDeleted, properties: [
             "name": account.name,
             "type": account.type.displayName,
             "was_default": account.isDefault

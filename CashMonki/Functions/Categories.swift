@@ -1341,8 +1341,8 @@ class CategoriesManager: ObservableObject {
         // Force immediate UI update - synchronous to prevent race conditions
         self.objectWillChange.send()
         
-        // Track category edit in PostHog
-        PostHogManager.shared.capture(.categoryEdited, properties: [
+        // Track category edit
+        AnalyticsManager.shared.track(.categoryEdited, properties: [
             "original_name": originalName,
             "new_name": trimmedName,
             "new_emoji": newEmoji,
@@ -1567,8 +1567,8 @@ class CategoriesManager: ObservableObject {
         categories[categoryIndex].isDeleted = true
         categories[categoryIndex].updatedAt = Date()
 
-        // Track category deletion in PostHog
-        PostHogManager.shared.capture(.categoryDeleted, properties: [
+        // Track category deletion
+        AnalyticsManager.shared.track(.categoryDeleted, properties: [
             "name": categoryName,
             "emoji": categoryEmoji,
             "type": categoryType.rawValue

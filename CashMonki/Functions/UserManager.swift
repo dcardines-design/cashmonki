@@ -1355,8 +1355,8 @@ class UserManager: ObservableObject {
 
         let deletedBudget = currentUser.budgets.remove(at: index)
 
-        // Track budget deletion in PostHog
-        PostHogManager.shared.capture(.budgetDeleted, properties: [
+        // Track budget deletion
+        AnalyticsManager.shared.track(.budgetDeleted, properties: [
             "category": deletedBudget.categoryName,
             "amount": deletedBudget.amount,
             "period": deletedBudget.period.rawValue

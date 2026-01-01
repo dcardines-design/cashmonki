@@ -180,8 +180,8 @@ struct AddCategorySheet: View {
         if success {
             print("✅ Successfully created category: \(trimmedName) with emoji: \(selectedEmoji), parent: \(selectedParentCategory ?? "None")")
 
-            // Track category creation in PostHog
-            PostHogManager.shared.capture(.categoryCreated, properties: [
+            // Track category creation
+            AnalyticsManager.shared.track(.categoryCreated, properties: [
                 "name": trimmedName,
                 "emoji": selectedEmoji,
                 "type": currentTab.rawValue,
