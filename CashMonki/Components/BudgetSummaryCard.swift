@@ -16,6 +16,10 @@ struct BudgetSummaryCard: View {
     private let budgetManager = BudgetManager.shared
     private let rateManager = CurrencyRateManager.shared
 
+    @State private var isExpanded: Bool = false
+
+    private let collapsedLimit = 5
+
     // MARK: - Budget Data
 
     private struct BudgetData: Identifiable {
@@ -53,31 +57,41 @@ struct BudgetSummaryCard: View {
         }
     }
 
-    /// Returns top 4 budgets + "Others" row if there are more than 4
+    /// Returns budgets based on expanded state
     private var displayBudgetDataList: [BudgetData] {
         let allData = budgetDataList
 
-        if allData.count <= 4 {
+        if isExpanded || allData.count <= collapsedLimit {
             return allData
         }
 
-        // Top 4 items
-        let top4 = Array(allData.prefix(4))
+        // Show first 5 items when collapsed
+        return Array(allData.prefix(collapsedLimit))
+    }
 
-        // Combine remaining into "Others"
-        let remaining = Array(allData.dropFirst(4))
-        let othersSpent = remaining.reduce(0) { $0 + $1.spent }
-        let othersBudget = remaining.reduce(0) { $0 + $1.budget }
+    /// Whether there are more budgets than the collapsed limit
+    private var hasMoreBudgets: Bool {
+        budgetDataList.count > collapsedLimit
+    }
 
-        let othersRow = BudgetData(
-            id: UUID(),
-            categoryName: "Others",
-            emoji: "",
-            spent: othersSpent,
-            budget: othersBudget
-        )
+    /// Combined spent amount of remaining (hidden) budgets
+    private var remainingSpent: Double {
+        let allData = budgetDataList
+        guard allData.count > collapsedLimit else { return 0 }
+        return Array(allData.dropFirst(collapsedLimit)).reduce(0) { $0 + $1.spent }
+    }
 
-        return top4 + [othersRow]
+    /// Combined budget amount of remaining (hidden) budgets
+    private var remainingBudget: Double {
+        let allData = budgetDataList
+        guard allData.count > collapsedLimit else { return 0 }
+        return Array(allData.dropFirst(collapsedLimit)).reduce(0) { $0 + $1.budget }
+    }
+
+    /// Percentage spent of remaining budgets
+    private var remainingSpentPercentage: Int {
+        guard remainingBudget > 0 else { return 0 }
+        return Int((remainingSpent / remainingBudget) * 100)
     }
 
     private var totalSpent: Double {
@@ -219,16 +233,66 @@ struct BudgetSummaryCard: View {
                 segmentedProgressBar
             }
 
-            // Budget breakdown list (top 4 + Others)
+            // Budget breakdown list
             VStack(spacing: 16) {
                 ForEach(displayBudgetDataList) { data in
                     budgetRow(data: data)
+                }
+
+                // Show All / Show Less button when there are more than 5 budgets
+                if hasMoreBudgets {
+                    showAllToggleRow
                 }
             }
         }
         .padding(20)
         .background(AppColors.backgroundWhite)
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+
+    // MARK: - Show All Toggle Row
+
+    private var showAllToggleRow: some View {
+        Button(action: {
+            withAnimation(.easeInOut(duration: 0.25)) {
+                isExpanded.toggle()
+            }
+        }) {
+            HStack(spacing: 8) {
+                // Show All / Show Less text
+                Text(isExpanded ? "Show Less" : "Show All")
+                    .font(AppFonts.overusedGroteskMedium(size: 16))
+                    .foregroundStyle(AppColors.primary)
+
+                Spacer()
+
+                // Only show amounts when collapsed (Show All state)
+                if !isExpanded {
+                    HStack(spacing: 4) {
+                        Text(currencyPrefs.formatPrimaryAmount(remainingSpent))
+                            .font(AppFonts.overusedGroteskMedium(size: 14))
+                            .foregroundStyle(remainingSpent > remainingBudget ? AppColors.destructiveForeground : AppColors.foregroundSecondary)
+
+                        Text("/")
+                            .font(AppFonts.overusedGroteskMedium(size: 14))
+                            .foregroundStyle(AppColors.foregroundTertiary)
+
+                        Text(currencyPrefs.formatPrimaryAmount(remainingBudget))
+                            .font(AppFonts.overusedGroteskMedium(size: 14))
+                            .foregroundStyle(AppColors.foregroundTertiary)
+
+                        Text("·")
+                            .font(AppFonts.overusedGroteskMedium(size: 14))
+                            .foregroundStyle(AppColors.foregroundTertiary)
+
+                        Text("\(remainingSpentPercentage)%")
+                            .font(AppFonts.overusedGroteskMedium(size: 14))
+                            .foregroundStyle(AppColors.foregroundTertiary)
+                    }
+                }
+            }
+        }
+        .buttonStyle(PlainButtonStyle())
     }
 
     // MARK: - Progress Bar
