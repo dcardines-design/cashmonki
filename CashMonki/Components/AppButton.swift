@@ -7,7 +7,8 @@ enum ButtonHierarchy {
     case tertiary      // 3rd - White background, black text
     case ghost         // 4th - No background, black text
     case ghostPrimary  // 5th - No background, purple text
-    case text          // 6th - Text only, underlined on hover
+    case text          // 6th - Text only, black text
+    case textPrimary   // 7th - Text only, purple text
 }
 
 enum ButtonSize {
@@ -150,12 +151,8 @@ struct AppButton: View {
         case (.ghostPrimary, .disabled):
             return Color.clear
 
-        case (.text, .active), (.text, .pressed):
+        case (.text, _), (.textPrimary, _):
             return Color.clear
-        case (.text, .hover):
-            return Color.clear
-        case (.text, .disabled):
-            return Color.clear // Same as pressed state
         }
     }
     
@@ -187,7 +184,12 @@ struct AppButton: View {
         case (.text, .active), (.text, .hover), (.text, .pressed):
             return AppColors.foregroundPrimary
         case (.text, .disabled):
-            return AppColors.foregroundPrimary // Same as pressed state
+            return AppColors.foregroundTertiary
+
+        case (.textPrimary, .active), (.textPrimary, .hover), (.textPrimary, .pressed):
+            return AppColors.primary  // Purple text
+        case (.textPrimary, .disabled):
+            return AppColors.foregroundTertiary
         }
     }
 
@@ -232,11 +234,11 @@ struct AppButton: View {
         case (.tertiary, _):
             return Color.clear
 
-        case (.ghost, _), (.ghostPrimary, _), (.text, _):
+        case (.ghost, _), (.ghostPrimary, _), (.text, _), (.textPrimary, _):
             return Color.clear
         }
     }
-    
+
     private var shadowColor: Color {
         switch (hierarchy, buttonState) {
         case (.primary, .active), (.primary, .hover):
@@ -262,13 +264,13 @@ struct AppButton: View {
             return false
         case (.tertiary, _):
             return false
-        case (.ghost, _), (.ghostPrimary, _), (.text, _), (_, .disabled):
+        case (.ghost, _), (.ghostPrimary, _), (.text, _), (.textPrimary, _), (_, .disabled):
             return false
         }
     }
     
     private var isTextUnderlined: Bool {
-        hierarchy == .text && buttonState == .hover
+        (hierarchy == .text || hierarchy == .textPrimary) && buttonState == .hover
     }
     
     // MARK: - Body
