@@ -882,13 +882,24 @@ extension HomePage {
                         let periodDuration = periodEndDate.timeIntervalSince(periodStartDate)
 
                         // Collect points for current data (up to now)
-                        let currentPoints: [CGPoint] = currentPeriodData.compactMap { dataPoint in
+                        var currentPoints: [CGPoint] = currentPeriodData.compactMap { dataPoint in
                             guard dataPoint.date <= currentTime else { return nil }
                             let timeOffset = dataPoint.date.timeIntervalSince(periodStartDate)
                             let normalizedTime: Double = periodDuration > 0 ? timeOffset / periodDuration : 0
                             let x = chartWidth * CGFloat(max(0, min(1, normalizedTime)))
                             let y = height - (height * CGFloat((dataPoint.amount - minValue) / (maxValue - minValue)))
                             return CGPoint(x: x, y: y)
+                        }
+
+                        // Extend line to "now" so the dot appears on the line
+                        if let lastPoint = currentPoints.last, currentTime <= periodEndDate {
+                            let nowTimeOffset = currentTime.timeIntervalSince(periodStartDate)
+                            let nowNormalizedTime = periodDuration > 0 ? nowTimeOffset / periodDuration : 0
+                            let nowX = chartWidth * CGFloat(max(0, min(1, nowNormalizedTime)))
+                            // Only add if it's actually ahead of the last point
+                            if nowX > lastPoint.x + 1 {
+                                currentPoints.append(CGPoint(x: nowX, y: lastPoint.y))
+                            }
                         }
 
                         // Gradient fill under the line
