@@ -282,14 +282,6 @@ struct BudgetSummaryCard: View {
                     Text(currencyPrefs.formatPrimaryAmount(remainingBudget))
                         .font(AppFonts.overusedGroteskMedium(size: 14))
                         .foregroundStyle(AppColors.foregroundTertiary)
-
-                    Text("·")
-                        .font(AppFonts.overusedGroteskMedium(size: 14))
-                        .foregroundStyle(AppColors.foregroundTertiary)
-
-                    Text("\(remainingSpentPercentage)%")
-                        .font(AppFonts.overusedGroteskMedium(size: 14))
-                        .foregroundStyle(AppColors.foregroundTertiary)
                 }
             }
         }
@@ -374,7 +366,7 @@ struct BudgetSummaryCard: View {
 
             Spacer()
 
-            // Amounts and percentage
+            // Amounts only (no percentage)
             HStack(spacing: 4) {
                 Text(currencyPrefs.formatPrimaryAmount(data.spent))
                     .font(AppFonts.overusedGroteskMedium(size: 14))
@@ -385,14 +377,6 @@ struct BudgetSummaryCard: View {
                     .foregroundStyle(AppColors.foregroundTertiary)
 
                 Text(currencyPrefs.formatPrimaryAmount(data.budget))
-                    .font(AppFonts.overusedGroteskMedium(size: 14))
-                    .foregroundStyle(AppColors.foregroundTertiary)
-
-                Text("·")
-                    .font(AppFonts.overusedGroteskMedium(size: 14))
-                    .foregroundStyle(AppColors.foregroundTertiary)
-
-                Text("\(Int(data.spentPercentage))%")
                     .font(AppFonts.overusedGroteskMedium(size: 14))
                     .foregroundStyle(AppColors.foregroundTertiary)
             }
