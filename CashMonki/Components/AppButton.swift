@@ -91,6 +91,9 @@ struct AppButton: View {
     }
     
     private var horizontalPadding: CGFloat {
+        // textPrimary has no padding
+        if hierarchy == .textPrimary { return 0 }
+
         switch size {
         case .medium: return 24
         case .small: return 18
@@ -99,8 +102,11 @@ struct AppButton: View {
         case .tripleExtraSmall: return 12
         }
     }
-    
+
     private var verticalPadding: CGFloat {
+        // textPrimary has no padding
+        if hierarchy == .textPrimary { return 0 }
+
         switch size {
         case .medium: return 14
         case .small: return 12
