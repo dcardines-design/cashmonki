@@ -706,7 +706,7 @@ extension HomePage {
                         }
                     }
                     
-                    // Previous period line (background) - gray smooth curve
+                    // Previous period line (background) - gray with gradient fill and rounded corners
                     if previousPeriodData.count > 0 {
                         let periodDuration = periodEndDate.timeIntervalSince(periodStartDate)
 
@@ -720,9 +720,30 @@ extension HomePage {
                             return CGPoint(x: x, y: y)
                         }
 
-                        // Draw smooth curve through previous period points
+                        // Gradient fill under the previous period line (subtle)
+                        if previousPoints.count > 1 {
+                            Path { path in
+                                drawRoundedLine(path: &path, points: previousPoints)
+                                if let lastPoint = previousPoints.last, let firstPoint = previousPoints.first {
+                                    path.addLine(to: CGPoint(x: lastPoint.x, y: height))
+                                    path.addLine(to: CGPoint(x: firstPoint.x, y: height))
+                                    path.closeSubpath()
+                                }
+                            }
+                            .fill(
+                                LinearGradient(
+                                    colors: [AppColors.linePrimary.opacity(0.15), AppColors.linePrimary.opacity(0)],
+                                    startPoint: .top,
+                                    endPoint: .bottom
+                                )
+                            )
+                            .animation(.easeInOut(duration: 0.6), value: chartFilter)
+                            .animation(.easeInOut(duration: 0.6), value: rangeSelection)
+                        }
+
+                        // Draw line with rounded corners
                         Path { path in
-                            drawSmoothCurve(path: &path, points: previousPoints)
+                            drawRoundedLine(path: &path, points: previousPoints)
                         }
                         .stroke(AppColors.linePrimary, lineWidth: 2)
                         .animation(.easeInOut(duration: 0.6), value: chartFilter)
@@ -855,7 +876,7 @@ extension HomePage {
                         }
                     }
                     
-                    // Current period line (foreground) - smooth curve
+                    // Current period line (foreground) - with gradient fill and rounded corners
                     if currentPeriodData.count > 0 {
                         let currentTime = Date()
                         let periodDuration = periodEndDate.timeIntervalSince(periodStartDate)
@@ -870,9 +891,31 @@ extension HomePage {
                             return CGPoint(x: x, y: y)
                         }
 
-                        // Draw smooth curve through current period points
+                        // Gradient fill under the line
+                        if currentPoints.count > 1 {
+                            Path { path in
+                                drawRoundedLine(path: &path, points: currentPoints)
+                                // Close to bottom-right, then bottom-left
+                                if let lastPoint = currentPoints.last, let firstPoint = currentPoints.first {
+                                    path.addLine(to: CGPoint(x: lastPoint.x, y: height))
+                                    path.addLine(to: CGPoint(x: firstPoint.x, y: height))
+                                    path.closeSubpath()
+                                }
+                            }
+                            .fill(
+                                LinearGradient(
+                                    colors: [chartLineColor.opacity(0.3), chartLineColor.opacity(0)],
+                                    startPoint: .top,
+                                    endPoint: .bottom
+                                )
+                            )
+                            .animation(.easeInOut(duration: 0.6), value: chartFilter)
+                            .animation(.easeInOut(duration: 0.6), value: rangeSelection)
+                        }
+
+                        // Draw line with rounded corners
                         Path { path in
-                            drawSmoothCurve(path: &path, points: currentPoints)
+                            drawRoundedLine(path: &path, points: currentPoints)
                         }
                         .stroke(chartLineColor, lineWidth: 2)
                         .animation(.easeInOut(duration: 0.6), value: chartFilter)
@@ -1101,13 +1144,21 @@ extension HomePage {
 
 // MARK: - Line Chart Helper Functions
 
-/// Draws straight diagonal lines through all points
-fileprivate func drawSmoothCurve(path: inout Path, points: [CGPoint]) {
+/// Draws lines through all points with rounded corners at junctions
+fileprivate func drawRoundedLine(path: inout Path, points: [CGPoint], cornerRadius: CGFloat = 8) {
     guard points.count > 0 else { return }
+    guard points.count > 1 else {
+        path.move(to: points[0])
+        return
+    }
 
     path.move(to: points[0])
 
-    for i in 1..<points.count {
-        path.addLine(to: points[i])
+    for i in 1..<points.count - 1 {
+        // Use arc tangent to create rounded corner at each junction
+        path.addArc(tangent1End: points[i], tangent2End: points[i + 1], radius: cornerRadius)
     }
+
+    // Final line to last point
+    path.addLine(to: points.last!)
 }
