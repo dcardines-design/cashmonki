@@ -706,28 +706,23 @@ extension HomePage {
                         }
                     }
                     
-                    // Previous period line (background) - gray comparison line
+                    // Previous period line (background) - gray smooth curve
                     if previousPeriodData.count > 0 {
+                        let periodDuration = periodEndDate.timeIntervalSince(periodStartDate)
+
+                        // Collect points for previous period data
+                        let previousPoints: [CGPoint] = previousPeriodData.map { dataPoint in
+                            let timeOffset = dataPoint.date.timeIntervalSince(periodStartDate)
+                            let normalizedTime: Double = periodDuration > 0 ? timeOffset / periodDuration : 0
+                            let x = chartWidth * CGFloat(max(0, min(1, normalizedTime)))
+                            let normalizedAmount = max(0, min(1, (dataPoint.amount - minValue) / (maxValue - minValue)))
+                            let y = height - (height * CGFloat(normalizedAmount))
+                            return CGPoint(x: x, y: y)
+                        }
+
+                        // Draw smooth curve through previous period points
                         Path { path in
-                            for dataPoint in previousPeriodData {
-                                let periodDuration = periodEndDate.timeIntervalSince(periodStartDate)
-                                
-                                // Use full date/time for all views to show time-based progressions
-                                let dateForPositioning = dataPoint.date
-                                
-                                let timeOffset = dateForPositioning.timeIntervalSince(periodStartDate)
-                                let normalizedTime: Double = periodDuration > 0 ? timeOffset / periodDuration : 0
-                                
-                                let x = chartWidth * CGFloat(max(0, min(1, normalizedTime)))
-                                let normalizedAmount = max(0, min(1, (dataPoint.amount - minValue) / (maxValue - minValue)))
-                                let y = height - (height * CGFloat(normalizedAmount))
-                                
-                                if path.isEmpty {
-                                    path.move(to: CGPoint(x: x, y: y))
-                                } else {
-                                    path.addLine(to: CGPoint(x: x, y: y))
-                                }
-                            }
+                            drawSmoothCurve(path: &path, points: previousPoints)
                         }
                         .stroke(AppColors.linePrimary, lineWidth: 2)
                         .animation(.easeInOut(duration: 0.6), value: chartFilter)
@@ -862,65 +857,26 @@ extension HomePage {
                         }
                     }
                     
-                    // Current period line (foreground) - positioned relative to X-axis labels
+                    // Current period line (foreground) - smooth curve
                     if currentPeriodData.count > 0 {
-                        
-                        // Split into current and future segments
                         let currentTime = Date()
-                        
-                        // Current data (up to now) - straight lines with smooth transitions
+                        let periodDuration = periodEndDate.timeIntervalSince(periodStartDate)
+
+                        // Collect points for current data (up to now)
+                        let currentPoints: [CGPoint] = currentPeriodData.compactMap { dataPoint in
+                            guard dataPoint.date <= currentTime else { return nil }
+                            let timeOffset = dataPoint.date.timeIntervalSince(periodStartDate)
+                            let normalizedTime: Double = periodDuration > 0 ? timeOffset / periodDuration : 0
+                            let x = chartWidth * CGFloat(max(0, min(1, normalizedTime)))
+                            let y = height - (height * CGFloat((dataPoint.amount - minValue) / (maxValue - minValue)))
+                            return CGPoint(x: x, y: y)
+                        }
+
+                        // Draw smooth curve through current period points
                         Path { path in
-                            for dataPoint in currentPeriodData {
-                                // Only show data points up to current time
-                                if dataPoint.date <= currentTime {
-                                    let periodDuration = periodEndDate.timeIntervalSince(periodStartDate)
-                                    
-                                    // Use full date/time for all views to show time-based progressions
-                                    let dateForPositioning = dataPoint.date
-                                    
-                                    let timeOffset = dateForPositioning.timeIntervalSince(periodStartDate)
-                                    let normalizedTime: Double = periodDuration > 0 ? timeOffset / periodDuration : 0
-                                    
-                                    let x = chartWidth * CGFloat(max(0, min(1, normalizedTime)))
-                                    let y = height - (height * CGFloat((dataPoint.amount - minValue) / (maxValue - minValue)))
-                                    
-                                    if path.isEmpty {
-                                        path.move(to: CGPoint(x: x, y: y))
-                                    } else {
-                                        path.addLine(to: CGPoint(x: x, y: y))
-                                    }
-                                }
-                            }
+                            drawSmoothCurve(path: &path, points: currentPoints)
                         }
                         .stroke(chartLineColor, lineWidth: 2)
-                        .animation(.easeInOut(duration: 0.6), value: chartFilter)
-                        .animation(.easeInOut(duration: 0.6), value: rangeSelection)
-
-                        // Future data (beyond now) - transparent (0% opacity)
-                        Path { path in
-                            for dataPoint in currentPeriodData {
-                                // Only show data points beyond current time
-                                if dataPoint.date > currentTime {
-                                    let periodDuration = periodEndDate.timeIntervalSince(periodStartDate)
-
-                                    // Use full date/time for all views to show time-based progressions
-                                    let dateForPositioning = dataPoint.date
-
-                                    let timeOffset = dateForPositioning.timeIntervalSince(periodStartDate)
-                                    let normalizedTime: Double = periodDuration > 0 ? timeOffset / periodDuration : 0
-
-                                    let x = chartWidth * CGFloat(max(0, min(1, normalizedTime)))
-                                    let y = height - (height * CGFloat((dataPoint.amount - minValue) / (maxValue - minValue)))
-
-                                    if path.isEmpty {
-                                        path.move(to: CGPoint(x: x, y: y))
-                                    } else {
-                                        path.addLine(to: CGPoint(x: x, y: y))
-                                    }
-                                }
-                            }
-                        }
-                        .stroke(chartLineColor.opacity(0), lineWidth: 2) // 0% opacity for future data
                         .animation(.easeInOut(duration: 0.6), value: chartFilter)
                         .animation(.easeInOut(duration: 0.6), value: rangeSelection)
                     }
@@ -1145,48 +1101,43 @@ extension HomePage {
     
 }
 
-// MARK: - Smooth Curve Helper Functions
+// MARK: - Smooth Curve Helper Functions (Catmull-Rom Spline)
 
-fileprivate func createSmoothCurve(path: inout Path, points: [CGPoint]) {
+/// Draws a smooth curve through all points using Catmull-Rom spline interpolation
+/// This creates natural-looking curves like TradingView charts
+fileprivate func drawSmoothCurve(path: inout Path, points: [CGPoint], tension: CGFloat = 0.3) {
     guard points.count > 0 else { return }
-    
+
     if points.count == 1 {
         path.move(to: points[0])
         return
     }
-    
+
     if points.count == 2 {
         path.move(to: points[0])
         path.addLine(to: points[1])
         return
     }
-    
+
     path.move(to: points[0])
-    
-    // For smooth curves, we'll use quadratic curves with calculated control points
+
+    // For 3+ points, use Catmull-Rom spline converted to cubic bezier
     for i in 0..<points.count - 1 {
-        let current = points[i]
-        let next = points[i + 1]
-        
-        if i == 0 {
-            // First segment - start with quadratic curve
-            let control = CGPoint(
-                x: current.x + (next.x - current.x) * 0.5,
-                y: current.y
-            )
-            path.addQuadCurve(to: next, control: control)
-        } else {
-            // Middle segments - use cubic curves for smoothness
-            let previous = points[i - 1]
-            let control1 = CGPoint(
-                x: current.x + (next.x - previous.x) * 0.25,
-                y: current.y
-            )
-            let control2 = CGPoint(
-                x: next.x - (next.x - current.x) * 0.25,
-                y: next.y
-            )
-            path.addCurve(to: next, control1: control1, control2: control2)
-        }
+        let p0 = i > 0 ? points[i - 1] : points[0]
+        let p1 = points[i]
+        let p2 = points[i + 1]
+        let p3 = i < points.count - 2 ? points[i + 2] : points[i + 1]
+
+        // Calculate control points for cubic bezier from Catmull-Rom
+        let cp1 = CGPoint(
+            x: p1.x + (p2.x - p0.x) * tension,
+            y: p1.y + (p2.y - p0.y) * tension
+        )
+        let cp2 = CGPoint(
+            x: p2.x - (p3.x - p1.x) * tension,
+            y: p2.y - (p3.y - p1.y) * tension
+        )
+
+        path.addCurve(to: p2, control1: cp1, control2: cp2)
     }
 }
