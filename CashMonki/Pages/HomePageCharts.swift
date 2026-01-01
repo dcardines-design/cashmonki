@@ -881,14 +881,15 @@ extension HomePage {
                         let currentTime = Date()
                         let periodDuration = periodEndDate.timeIntervalSince(periodStartDate)
 
-                        // Collect points for current data (up to now)
-                        var currentPoints: [CGPoint] = currentPeriodData.compactMap { (dataPoint: (date: Date, amount: Double)) -> CGPoint? in
-                            guard dataPoint.date <= currentTime else { return nil }
+                        // Collect points for current data (up to now) using for loop to avoid type inference issues
+                        var currentPoints: [CGPoint] = []
+                        for dataPoint in currentPeriodData {
+                            guard dataPoint.date <= currentTime else { continue }
                             let timeOffset = dataPoint.date.timeIntervalSince(periodStartDate)
                             let normalizedTime: Double = periodDuration > 0 ? timeOffset / periodDuration : 0
                             let x = chartWidth * CGFloat(max(0, min(1, normalizedTime)))
                             let y = height - (height * CGFloat((dataPoint.amount - minValue) / (maxValue - minValue)))
-                            return CGPoint(x: x, y: y)
+                            currentPoints.append(CGPoint(x: x, y: y))
                         }
 
                         // Extend line to "now" so the dot appears on the line
