@@ -751,19 +751,17 @@ extension HomePage {
                         }
                         .stroke(AppColors.linePrimary, style: StrokeStyle(lineWidth: 1, dash: [5, 5]))
                         
-                        // Data point indicator at drag point (current period) - only show if there's current data
-                        if selectedDragHasCurrentData {
-                            Circle()
-                                .fill(chartLineColor)
-                                .frame(width: 8, height: 8)
-                                .overlay(
-                                    Circle()
-                                        .stroke(.white, lineWidth: 1)
-                                        .frame(width: 8, height: 8)
-                                )
-                                .position(x: pointX, y: pointY)
-                                .zIndex(20)
-                        }
+                        // Data point indicator at drag point (current period)
+                        Circle()
+                            .fill(chartLineColor)
+                            .frame(width: 8, height: 8)
+                            .overlay(
+                                Circle()
+                                    .stroke(.white, lineWidth: 1)
+                                    .frame(width: 8, height: 8)
+                            )
+                            .position(x: pointX, y: pointY)
+                            .zIndex(20)
                         
                         // Previous period data point indicator (gray dot)
                         if previousPeriodData.count > 0, let dragPos = selectedDragPosition {
