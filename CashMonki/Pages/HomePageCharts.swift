@@ -779,8 +779,12 @@ extension HomePage {
                     if let dragPos = selectedDragPosition, let _ = selectedDragValue {
                         // Smooth drag crosshairs
                         let pointX = chartWidth * CGFloat(dragPos)
-                        // Use line interpolation for dot Y position (guarantees dot sits on line)
-                        let pointY = findYOnLine(atX: pointX, points: currentPoints) ?? height
+                        // Use line interpolation for dot Y position (nil if outside line range)
+                        let currentPointY = findYOnLine(atX: pointX, points: currentPoints)
+                        let previousPointY = findYOnLine(atX: pointX, points: previousPoints)
+
+                        // Use current point Y for crosshair, fallback to previous, or hide
+                        let pointY = currentPointY ?? previousPointY ?? height
                         
                         // Vertical crosshair - dashed with DCE2F4 color
                         Path { path in
@@ -797,22 +801,23 @@ extension HomePage {
                         .stroke(AppColors.linePrimary, style: StrokeStyle(lineWidth: 1, dash: [5, 5]))
                         
                         // Data point indicator at drag point (current period)
-                        Circle()
-                            .fill(chartLineColor)
-                            .frame(width: 8, height: 8)
-                            .overlay(
-                                Circle()
-                                    .stroke(.white, lineWidth: 1)
-                                    .frame(width: 8, height: 8)
-                            )
-                            .position(x: pointX, y: pointY)
-                            .zIndex(20)
-                        
-                        // Previous period data point indicator (gray dot)
-                        // Uses line interpolation to guarantee dot sits on line
-                        if previousPoints.count > 0 {
-                            let previousPointY = findYOnLine(atX: pointX, points: previousPoints) ?? height
+                        // Only show if X is within the line's range
+                        if let currentY = currentPointY {
+                            Circle()
+                                .fill(chartLineColor)
+                                .frame(width: 8, height: 8)
+                                .overlay(
+                                    Circle()
+                                        .stroke(.white, lineWidth: 1)
+                                        .frame(width: 8, height: 8)
+                                )
+                                .position(x: pointX, y: currentY)
+                                .zIndex(20)
+                        }
 
+                        // Previous period data point indicator (gray dot)
+                        // Only show if X is within the previous line's range
+                        if let prevY = previousPointY {
                             Circle()
                                 .fill(Color(red: 0.86, green: 0.89, blue: 0.96))
                                 .frame(width: 8, height: 8)
@@ -821,7 +826,7 @@ extension HomePage {
                                         .stroke(.white, lineWidth: 1)
                                         .frame(width: 8, height: 8)
                                 )
-                                .position(x: pointX, y: previousPointY)
+                                .position(x: pointX, y: prevY)
                                 .zIndex(10)
                         }
                         
@@ -836,9 +841,12 @@ extension HomePage {
                         let normalizedTime: Double = periodDuration > 0 ? timeOffset / periodDuration : 0
                         let pointX = chartWidth * CGFloat(max(0, min(1, normalizedTime)))
 
-                        // Use line interpolation for Y positions (guarantees dots sit on lines)
-                        let pointY = findYOnLine(atX: pointX, points: currentPoints) ?? height
-                        let previousPointY = findYOnLine(atX: pointX, points: previousPoints) ?? height
+                        // Use line interpolation for Y positions (nil if outside line range)
+                        let currentPointY = findYOnLine(atX: pointX, points: currentPoints)
+                        let previousPointY = findYOnLine(atX: pointX, points: previousPoints)
+
+                        // Use current point Y for crosshair, fallback to previous, or default to center
+                        let crosshairY = currentPointY ?? previousPointY ?? height / 2
 
                         // Vertical line (grey)
                         Path { path in
@@ -847,16 +855,18 @@ extension HomePage {
                         }
                         .stroke(AppColors.linePrimary, style: StrokeStyle(lineWidth: 1, dash: [5, 5]))
 
-                        // Horizontal line (grey)
-                        Path { path in
-                            path.move(to: CGPoint(x: 0, y: pointY))
-                            path.addLine(to: CGPoint(x: chartWidth, y: pointY))
+                        // Horizontal line (grey) - only show if we have a valid Y
+                        if currentPointY != nil || previousPointY != nil {
+                            Path { path in
+                                path.move(to: CGPoint(x: 0, y: crosshairY))
+                                path.addLine(to: CGPoint(x: chartWidth, y: crosshairY))
+                            }
+                            .stroke(AppColors.linePrimary, style: StrokeStyle(lineWidth: 1, dash: [5, 5]))
                         }
-                        .stroke(AppColors.linePrimary, style: StrokeStyle(lineWidth: 1, dash: [5, 5]))
 
-                        // Data point indicator at data point (current period) - only show if data is not in future
+                        // Data point indicator (current period) - only show if X is within line's range
                         let currentTime = Date()
-                        if selectedData.date <= currentTime, currentPoints.count > 0 {
+                        if selectedData.date <= currentTime, let currentY = currentPointY {
                             Circle()
                                 .fill(chartLineColor)
                                 .frame(width: 8, height: 8)
@@ -865,12 +875,12 @@ extension HomePage {
                                         .stroke(.white, lineWidth: 1)
                                         .frame(width: 8, height: 8)
                                 )
-                                .position(x: pointX, y: pointY)
+                                .position(x: pointX, y: currentY)
                                 .zIndex(20)
                         }
 
-                        // Previous period data point indicator (gray dot) for discrete selection
-                        if previousPoints.count > 0 {
+                        // Previous period data point indicator (gray dot) - only show if X is within line's range
+                        if let prevY = previousPointY {
                             Circle()
                                 .fill(Color(red: 0.86, green: 0.89, blue: 0.96))
                                 .frame(width: 8, height: 8)
@@ -879,7 +889,7 @@ extension HomePage {
                                         .stroke(.white, lineWidth: 1)
                                         .frame(width: 8, height: 8)
                                 )
-                                .position(x: pointX, y: previousPointY)
+                                .position(x: pointX, y: prevY)
                                 .zIndex(10)
                         }
                     }
@@ -1139,8 +1149,22 @@ extension HomePage {
 // MARK: - Line Chart Helper Functions
 
 /// Find Y position on line at given X by interpolating between points
+/// Returns nil if X is outside the line's range (dot shouldn't show)
 fileprivate func findYOnLine(atX targetX: CGFloat, points: [CGPoint]) -> CGFloat? {
-    guard points.count >= 2 else { return points.first?.y }
+    guard points.count >= 1 else { return nil }
+    guard points.count >= 2 else {
+        // Single point - only show if very close to it
+        if let only = points.first, abs(targetX - only.x) < 5 {
+            return only.y
+        }
+        return nil
+    }
+
+    // Check if targetX is outside the line's range - don't show dot
+    guard let first = points.first, let last = points.last else { return nil }
+    if targetX < first.x - 1 || targetX > last.x + 1 {
+        return nil  // X is outside line range, don't show dot
+    }
 
     for i in 0..<points.count - 1 {
         let p1 = points[i]
@@ -1154,12 +1178,12 @@ fileprivate func findYOnLine(atX targetX: CGFloat, points: [CGPoint]) -> CGFloat
         }
     }
 
-    // If past the last point, return last point's Y
-    if let last = points.last, targetX > last.x {
+    // Edge case: if we're at the very end
+    if targetX >= last.x - 1 {
         return last.y
     }
 
-    return points.first?.y
+    return nil
 }
 
 /// Draws lines through all points with small rounded corners at junctions
