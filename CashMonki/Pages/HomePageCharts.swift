@@ -92,8 +92,8 @@ fileprivate func calculateCumulativeBalance(
         }
 }
 
-// Enhanced data processing for smooth dragging
-fileprivate func createStepwiseRunningTotals(
+// Simple line chart data - one point per transaction with running total
+fileprivate func createLineChartData(
     transactions: [Txn],
     startDate: Date,
     endDate: Date,
@@ -104,34 +104,21 @@ fileprivate func createStepwiseRunningTotals(
     var dataPoints: [(date: Date, amount: Double)] = []
     var runningTotal: Double = startingBalance
 
-    // Add starting point with starting balance (0 for expense/income, cumulative for balance)
+    // Add starting point
     dataPoints.append((date: startDate, amount: startingBalance))
-    
-    // Process each transaction and create diagonal transitions
-    for (_, transaction) in transactions.enumerated() {
-        let transactionImpact = getTransactionImpact(transaction, chartFilter: chartFilter)
-        let previousTotal = runningTotal
-        runningTotal += transactionImpact
-        
-        // Normalize the transaction date for chart plotting
-        let normalizedDate = normalizeDateForChart(transaction.date, rangeSelection: rangeSelection)
-        
-        // Add a point just before the transaction (at previous amount) for all views
-        let preTransactionTime = normalizedDate.addingTimeInterval(-60) // 1 minute before
-        dataPoints.append((date: preTransactionTime, amount: previousTotal))
-        
-        // Add the transaction point (creates vertical step to new amount)
-        dataPoints.append((date: normalizedDate, amount: runningTotal))
 
-        // Note: Removed excessive interpolation points that were causing horizontal striping artifacts
-        // The step-wise behavior is preserved via pre-transaction points
+    // Add one point per transaction (simple diagonal lines between points)
+    for transaction in transactions {
+        let transactionImpact = getTransactionImpact(transaction, chartFilter: chartFilter)
+        runningTotal += transactionImpact
+        dataPoints.append((date: transaction.date, amount: runningTotal))
     }
-    
-    // Add final point at current time with last known value
+
+    // Add final point to extend line to end of period
     if let lastAmount = dataPoints.last?.amount {
         dataPoints.append((date: endDate, amount: lastAmount))
     }
-    
+
     return dataPoints
 }
 
@@ -255,8 +242,8 @@ fileprivate func findPreviousPeriodValue(
     return previousValue
 }
 
-// Create step-wise running totals from mapped transaction data
-fileprivate func createStepwiseRunningTotalsFromMapped(
+// Simple line chart data from mapped transaction data (for previous period comparison)
+fileprivate func createLineChartDataFromMapped(
     mappedData: [MappedTransactionData],
     startDate: Date,
     endDate: Date,
@@ -265,32 +252,21 @@ fileprivate func createStepwiseRunningTotalsFromMapped(
     var dataPoints: [(date: Date, amount: Double)] = []
     var runningTotal: Double = startingBalance
 
-    // Add starting point with starting balance
+    // Add starting point
     dataPoints.append((date: startDate, amount: startingBalance))
-    
-    // Sort mapped data by mapped date
-    let sortedData = mappedData.sorted { $0.mappedDate < $1.mappedDate }
-    
-    // Process each mapped transaction and create diagonal transitions
-    for (index, mappedTransaction) in sortedData.enumerated() {
-        let previousTotal = runningTotal
-        runningTotal += mappedTransaction.amount
-        
-        // Add a point just before the transaction (at previous amount)
-        let preTransactionTime = mappedTransaction.mappedDate.addingTimeInterval(-60) // 1 minute before
-        dataPoints.append((date: preTransactionTime, amount: previousTotal))
-        
-        // Add the transaction point (creates vertical step to new amount)
-        dataPoints.append((date: mappedTransaction.mappedDate, amount: runningTotal))
 
-        // Note: Removed excessive interpolation points that were causing horizontal striping artifacts
+    // Sort and add one point per transaction
+    let sortedData = mappedData.sorted { $0.mappedDate < $1.mappedDate }
+    for mappedTransaction in sortedData {
+        runningTotal += mappedTransaction.amount
+        dataPoints.append((date: mappedTransaction.mappedDate, amount: runningTotal))
     }
-    
-    // Add final point at current time with last known value
+
+    // Add final point
     if let lastAmount = dataPoints.last?.amount {
         dataPoints.append((date: endDate, amount: lastAmount))
     }
-    
+
     return dataPoints
 }
 
@@ -438,17 +414,15 @@ extension HomePage {
                 ? calculateCumulativeBalance(allTransactions: transactions, beforeDate: periodStartDate)
                 : 0
 
-            // Create step-wise running total data points for smooth dragging
-            let enhancedDataPoints = createStepwiseRunningTotals(
+            // Create simple line chart data points
+            let currentPeriodData = createLineChartData(
                 transactions: currentPeriodTransactions,
                 startDate: periodStartDate,
-                endDate: periodEndDate, // Use full period for chart structure
+                endDate: periodEndDate,
                 chartFilter: chartFilter,
                 rangeSelection: rangeSelection,
                 startingBalance: startingBalance
             )
-
-            let currentPeriodData = enhancedDataPoints
             
             // Calculate previous period data for comparison
             let (previousPeriodStartDate, mappedPreviousData) = {
@@ -521,8 +495,8 @@ extension HomePage {
                 ? calculateCumulativeBalance(allTransactions: transactions, beforeDate: previousPeriodStartDate)
                 : 0
 
-            // Create step-wise running total data points for previous period
-            let previousPeriodData = createStepwiseRunningTotalsFromMapped(
+            // Create simple line chart data for previous period
+            let previousPeriodData = createLineChartDataFromMapped(
                 mappedData: mappedPreviousData,
                 startDate: periodStartDate,
                 endDate: periodEndDate,
