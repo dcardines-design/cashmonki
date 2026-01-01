@@ -2,11 +2,12 @@ import SwiftUI
 
 // MARK: - Button Enums
 enum ButtonHierarchy {
-    case primary    // 1st - Purple background
-    case secondary  // 2nd - White background, purple text
-    case tertiary   // 3rd - White background, black text
-    case ghost      // 4th - No background, black text
-    case text       // 5th - Text only, underlined on hover
+    case primary       // 1st - Purple background
+    case secondary     // 2nd - White background, purple text
+    case tertiary      // 3rd - White background, black text
+    case ghost         // 4th - No background, black text
+    case ghostPrimary  // 5th - No background, purple text
+    case text          // 6th - Text only, underlined on hover
 }
 
 enum ButtonSize {
@@ -135,7 +136,14 @@ struct AppButton: View {
             return AppColors.surfacePrimary
         case (.ghost, .disabled):
             return AppColors.backgroundWhite // Same as pressed state
-            
+
+        case (.ghostPrimary, .active), (.ghostPrimary, .pressed):
+            return Color.clear
+        case (.ghostPrimary, .hover):
+            return AppColors.surfacePrimary.opacity(0.5)
+        case (.ghostPrimary, .disabled):
+            return Color.clear
+
         case (.text, .active), (.text, .pressed):
             return Color.clear
         case (.text, .hover):
@@ -164,6 +172,11 @@ struct AppButton: View {
             return AppColors.foregroundPrimary
         case (.ghost, .disabled):
             return AppColors.foregroundPrimary // Same as pressed state
+
+        case (.ghostPrimary, .active), (.ghostPrimary, .hover), (.ghostPrimary, .pressed):
+            return AppColors.primary  // Purple text
+        case (.ghostPrimary, .disabled):
+            return AppColors.foregroundTertiary
 
         case (.text, .active), (.text, .hover), (.text, .pressed):
             return AppColors.foregroundPrimary
@@ -212,8 +225,8 @@ struct AppButton: View {
             
         case (.tertiary, _):
             return Color.clear
-            
-        case (.ghost, _), (.text, _):
+
+        case (.ghost, _), (.ghostPrimary, _), (.text, _):
             return Color.clear
         }
     }
@@ -243,7 +256,7 @@ struct AppButton: View {
             return false
         case (.tertiary, _):
             return false
-        case (.ghost, _), (.text, _), (_, .disabled):
+        case (.ghost, _), (.ghostPrimary, _), (.text, _), (_, .disabled):
             return false
         }
     }
