@@ -282,9 +282,29 @@ struct ContentView: View {
                                     await MainActor.run {
                                         roastSheetMessage = RoastMessage(message: aiRoast)
                                     }
+                                } catch let backendError as BackendAPIError {
+                                    print("❌ ROAST FAILED - BackendAPIError: \(backendError.localizedDescription)")
+                                    switch backendError {
+                                    case .unauthorized:
+                                        print("   → Auth issue: Firebase token may be missing or invalid")
+                                    case .rateLimited:
+                                        print("   → Rate limited: Too many requests")
+                                    case .serverError:
+                                        print("   → Server error: Backend returned 500+")
+                                    case .invalidResponse:
+                                        print("   → Invalid response: Could not parse backend response")
+                                    case .unexpectedError(let code):
+                                        print("   → Unexpected HTTP status: \(code)")
+                                    default:
+                                        print("   → Other backend error: \(backendError)")
+                                    }
+                                    await MainActor.run {
+                                        roastSheetMessage = RoastMessage(message: "Spent \(roastAmount) at \(roastMerchant)? Bold choice. 💸")
+                                    }
                                 } catch {
-                                    print("⚠️ AI roast failed: \(error)")
-                                    // Fallback: show a simple roast message
+                                    print("❌ ROAST FAILED - Unknown error: \(error)")
+                                    print("   → Error type: \(type(of: error))")
+                                    print("   → Description: \(error.localizedDescription)")
                                     await MainActor.run {
                                         roastSheetMessage = RoastMessage(message: "Spent \(roastAmount) at \(roastMerchant)? Bold choice. 💸")
                                     }

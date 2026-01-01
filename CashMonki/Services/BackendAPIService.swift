@@ -202,15 +202,20 @@ class BackendAPIService: ObservableObject {
     /// Generate a sassy roast message for a receipt using AI
     /// - Parameter currency: User's preferred currency (e.g., "PHP" for Taglish roasts)
     func generateRoast(amount: String, merchant: String, category: String, notes: String? = nil, lineItems: [[String: Any]]? = nil, userName: String? = nil, currency: String? = nil) async throws -> String {
-        print("🔥 BACKEND: Generating roast message...")
+        print("🔥 ROAST DEBUG: Starting roast generation...")
+        print("🔥 ROAST DEBUG: Amount=\(amount), Merchant=\(merchant), Category=\(category), Currency=\(currency ?? "nil")")
 
         var request = URLRequest(url: URL(string: "\(baseURL)/generate-roast")!)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
         // Add Firebase ID token for authentication
-        if let idToken = await getCurrentFirebaseIDToken() {
-            request.setValue("Bearer \(idToken)", forHTTPHeaderField: "Authorization")
+        let idToken = await getCurrentFirebaseIDToken()
+        if let token = idToken {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            print("🔥 ROAST DEBUG: Auth token attached (\(token.prefix(20))...)")
+        } else {
+            print("⚠️ ROAST DEBUG: No auth token - request may fail with 401")
         }
 
         // Create payload with transaction details
@@ -231,47 +236,63 @@ class BackendAPIService: ObservableObject {
         // Include currency for language-specific roasts (e.g., PHP = Taglish)
         if let currency = currency, !currency.isEmpty {
             payload["currency"] = currency
-            print("🔥 BACKEND: Including currency '\(currency)' for localized roast")
         }
         let jsonData = try JSONSerialization.data(withJSONObject: payload)
         request.httpBody = jsonData
+
+        print("🔥 ROAST DEBUG: Payload = \(payload)")
+        print("🔥 ROAST DEBUG: Sending request to \(baseURL)/generate-roast")
 
         do {
             let (data, response) = try await session.data(for: request)
 
             guard let httpResponse = response as? HTTPURLResponse else {
+                print("❌ ROAST DEBUG: Response is not HTTPURLResponse")
                 throw BackendAPIError.invalidResponse
             }
 
-            print("🔥 BACKEND: Roast response status: \(httpResponse.statusCode)")
+            print("🔥 ROAST DEBUG: Response status = \(httpResponse.statusCode)")
+
+            // Log response body for debugging
+            if let responseBody = String(data: data, encoding: .utf8) {
+                print("🔥 ROAST DEBUG: Response body = \(responseBody.prefix(500))")
+            }
 
             switch httpResponse.statusCode {
             case 200...299:
                 if let result = try? JSONDecoder().decode(RoastResponse.self, from: data) {
-                    print("✅ BACKEND: Roast generated successfully")
+                    print("✅ ROAST DEBUG: Successfully decoded roast: \(result.roast.prefix(50))...")
                     return result.roast
                 } else if let responseString = String(data: data, encoding: .utf8) {
-                    // Try to parse as raw string if not JSON
+                    print("⚠️ ROAST DEBUG: Could not decode as RoastResponse, using raw string")
                     return responseString
                 }
+                print("❌ ROAST DEBUG: Could not decode response at all")
                 throw BackendAPIError.invalidResponse
 
             case 401:
+                print("❌ ROAST DEBUG: 401 Unauthorized - auth token issue")
                 throw BackendAPIError.unauthorized
 
             case 429:
+                print("❌ ROAST DEBUG: 429 Rate Limited")
                 throw BackendAPIError.rateLimited
 
             case 500...599:
+                print("❌ ROAST DEBUG: Server error \(httpResponse.statusCode)")
+                if let errorBody = String(data: data, encoding: .utf8) {
+                    print("❌ ROAST DEBUG: Error details = \(errorBody)")
+                }
                 throw BackendAPIError.serverError
 
             default:
-                print("❌ BACKEND: Unexpected roast response: \(httpResponse.statusCode)")
+                print("❌ ROAST DEBUG: Unexpected status \(httpResponse.statusCode)")
                 throw BackendAPIError.unexpectedError(httpResponse.statusCode)
             }
 
         } catch {
-            print("❌ BACKEND: Roast generation failed: \(error)")
+            print("❌ ROAST DEBUG: Network/request error: \(error)")
+            print("❌ ROAST DEBUG: Error type: \(type(of: error))")
             throw error
         }
     }

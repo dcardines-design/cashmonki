@@ -668,8 +668,8 @@ app.post('/api/generate-roast', optionalAuth, async (req: AuthenticatedRequest, 
     const isAuthenticated = !!req.user;
     logger.info(`Roast generation requested by ${isAuthenticated ? 'authenticated user' : 'anonymous user'}: ${userId}`);
 
-    // Rate limiting for roasts (more restrictive for unauthenticated)
-    const rateLimit = isAuthenticated ? 50 : 10; // 50/hour for auth, 10/hour for anon
+    // Rate limiting for roasts
+    const rateLimit = 50; // 50/hour for all users
     if (!checkRateLimit(userId + '_roast', rateLimit, 3600000)) {
       return res.status(429).json({
         error: 'Rate limit exceeded',
@@ -725,7 +725,7 @@ app.post('/api/generate-roast', optionalAuth, async (req: AuthenticatedRequest, 
     const getLanguageInstruction = (curr: string | undefined): string => {
       switch (curr) {
         case 'PHP':
-          return `LANGUAGE: Write in TAGLISH (natural mix of Tagalog and English). Use the most casual, colloquial tone - like barkada roasting each other. Example: "₱500 sa Grab, ayaw mo na talaga maglakad ano."`;
+          return `LANGUAGE: Write in natural TAGLISH (mix of Tagalog and English). Casual barkada tone. Keep grammar natural - don't force awkward Tagalog. Examples of GOOD Taglish: "₱500 sa Grab? Ayaw mo na talaga maglakad no?" / "Grabe, ₱1,000 sa kape? Tubig libre lang ha." / "Alam na siguro ng Grab driver yung address mo." AVOID weird grammar like "sanayan mo ang Grab".`;
         case 'JPY':
           return `LANGUAGE: Write in casual Japanese (日本語). Use the most casual tone - like friends teasing each other, use casual forms not keigo. Example: "¥500でタクシー？歩けば無料なのに。"`;
         case 'KRW':

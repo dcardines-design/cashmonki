@@ -102,7 +102,12 @@ struct SettingsPage: View {
     
     // Roast My Receipt feature toggle (shared via AppStorage)
     @AppStorage("isRoastReceiptEnabled") private var isRoastReceiptEnabled = false
-    
+
+    // Secret version tap state (7 taps = toggle internal device mode)
+    @State private var versionTapCount = 0
+    @State private var versionTapTimer: Timer?
+    @State private var isInternalDevice = AnalyticsManager.shared.isInternalDevice
+
     // Computed bindings to fix type checker issues
     private var primaryCurrencyBinding: Binding<Currency> {
         Binding(
@@ -122,7 +127,50 @@ struct SettingsPage: View {
         currencyPrefs.setSecondaryCurrency(newCurrency)
         rateManager.setSecondaryCurrency(newCurrency)
     }
-    
+
+    // MARK: - Secret Version Tap Handler
+
+    private func handleVersionTap() {
+        // Cancel existing timer
+        versionTapTimer?.invalidate()
+
+        // Increment tap count
+        versionTapCount += 1
+        print("🔧 Version tap: \(versionTapCount)/7")
+
+        // Check if we hit 7 taps
+        if versionTapCount >= 7 {
+            // Toggle internal device mode
+            if isInternalDevice {
+                AnalyticsManager.shared.unmarkAsInternalDevice()
+                isInternalDevice = false
+                print("🔧 Internal device mode: DISABLED")
+            } else {
+                AnalyticsManager.shared.markAsInternalDevice()
+                isInternalDevice = true
+                print("🔧 Internal device mode: ENABLED")
+            }
+
+            // Reset counter
+            versionTapCount = 0
+
+            // Haptic feedback
+            let generator = UINotificationFeedbackGenerator()
+            generator.notificationOccurred(.success)
+        } else {
+            // Light haptic for each tap
+            let generator = UIImpactFeedbackGenerator(style: .light)
+            generator.impactOccurred()
+
+            // Reset counter after 2 seconds of no taps
+            versionTapTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: false) { _ in
+                DispatchQueue.main.async {
+                    self.versionTapCount = 0
+                }
+            }
+        }
+    }
+
     private var secondaryCurrencyOptionalBinding: Binding<Currency?> {
         Binding(
             get: { currencyPrefs.secondaryCurrency },
@@ -731,12 +779,24 @@ struct SettingsPage: View {
                     .font(Font.custom("Overused Grotesk", size: 14).weight(.semibold))
                     .foregroundColor(AppColors.foregroundPrimary)
 
-                // Version number
-                Text("Ver \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0")")
-                    .font(Font.custom("Overused Grotesk", size: 12).weight(.medium))
-                    .multilineTextAlignment(.center)
-                    .foregroundColor(AppColors.foregroundSecondary)
-                    .padding(.top, 24) // 32px total (8px VStack spacing + 24px)
+                // Version number (tap 7 times to toggle internal device mode)
+                HStack(spacing: 4) {
+                    Text("Ver \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0")")
+                    if versionTapCount > 0 {
+                        Text("(\(versionTapCount))")
+                            .foregroundColor(versionTapCount >= 7 ? .green : AppColors.foregroundTertiary)
+                    }
+                    if isInternalDevice {
+                        Text("🔧")
+                    }
+                }
+                .font(Font.custom("Overused Grotesk", size: 12).weight(.medium))
+                .multilineTextAlignment(.center)
+                .foregroundColor(AppColors.foregroundSecondary)
+                .padding(.top, 24) // 32px total (8px VStack spacing + 24px)
+                .onTapGesture {
+                    handleVersionTap()
+                }
             }
             .frame(maxWidth: .infinity)
             .padding(.top, 8)

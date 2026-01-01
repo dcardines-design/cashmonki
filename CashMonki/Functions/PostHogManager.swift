@@ -88,13 +88,50 @@ class PostHogManager: ObservableObject {
         return true // Always true since AppDelegate handles setup
     }
 
+    // MARK: - Internal/Test Device
+
+    private let internalDeviceKey = "posthog_is_internal_device"
+
+    /// Check if this device is marked as internal/test
+    var isInternalDevice: Bool {
+        get { UserDefaults.standard.bool(forKey: internalDeviceKey) }
+        set {
+            UserDefaults.standard.set(newValue, forKey: internalDeviceKey)
+            if newValue {
+                // Register as super property so all events include this
+                PostHogSDK.shared.register(["is_internal": true, "is_test_device": true])
+                print("🔧 PostHog: Device marked as INTERNAL - all events will include is_internal=true")
+            } else {
+                PostHogSDK.shared.unregister("is_internal")
+                PostHogSDK.shared.unregister("is_test_device")
+                print("🔧 PostHog: Device unmarked as internal")
+            }
+        }
+    }
+
+    /// Mark this device as internal/test (persists across app restarts)
+    func markAsInternalDevice() {
+        isInternalDevice = true
+    }
+
+    /// Unmark this device as internal/test
+    func unmarkAsInternalDevice() {
+        isInternalDevice = false
+    }
+
     // MARK: - Published Properties
 
     @Published var isSessionReplayEnabled: Bool = true
 
     // MARK: - Initialization
 
-    private init() {}
+    private init() {
+        // Re-register internal flag on init if device was previously marked
+        if UserDefaults.standard.bool(forKey: internalDeviceKey) {
+            PostHogSDK.shared.register(["is_internal": true, "is_test_device": true])
+            print("🔧 PostHog: Internal device flag restored from previous session")
+        }
+    }
 
     // MARK: - Event Capture
 

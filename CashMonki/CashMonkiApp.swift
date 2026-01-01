@@ -22,6 +22,9 @@ import PostHog
 #if canImport(FacebookCore)
 import FacebookCore
 #endif
+#if canImport(Mixpanel)
+import Mixpanel
+#endif
 
 @main
 struct CashMonkiApp: App {
@@ -206,6 +209,9 @@ struct CashMonkiApp: App {
                     // Initialize PostHog analytics synchronously
                     initializePostHog()
 
+                    // Initialize Mixpanel analytics
+                    initializeMixpanel()
+
                     // Initialize Facebook SDK
                     initializeFacebook()
 
@@ -322,14 +328,22 @@ struct CashMonkiApp: App {
                                 email: authManager.currentUser?.email ?? "",
                                 name: authManager.currentUser?.name
                             )
+
+                            // Identify user to Mixpanel
+                            MixpanelManager.shared.identifyWithEmail(
+                                userId: userId,
+                                email: authManager.currentUser?.email ?? "",
+                                name: authManager.currentUser?.name
+                            )
                         }
                     } else {
                         print("🔄 CashMonkiApp: User logged out")
                         Task {
                             await RevenueCatManager.shared.logoutUser()
                         }
-                        // Reset PostHog session on logout
+                        // Reset PostHog and Mixpanel sessions on logout
                         PostHogManager.shared.reset()
+                        MixpanelManager.shared.reset()
                         showingOnboarding = false
                         isNewUser = false
                     }
@@ -457,6 +471,26 @@ struct CashMonkiApp: App {
         print("✅ CashMonkiApp: Facebook SDK initialized and test event logged")
 #else
         print("⚠️ CashMonkiApp: FacebookCore not available - Facebook SDK not installed")
+#endif
+    }
+
+    // MARK: - Mixpanel Initialization
+
+    private func initializeMixpanel() {
+        print("📊 CashMonkiApp: Initializing Mixpanel...")
+
+        let MIXPANEL_TOKEN = "18a760e415af02efa8e5965fc9831e03"
+
+#if canImport(Mixpanel)
+        MixpanelManager.shared.configure(token: MIXPANEL_TOKEN)
+
+        // Track app launch
+        MixpanelManager.shared.trackCustom("app_launched")
+        MixpanelManager.shared.flush()
+
+        print("✅ CashMonkiApp: Mixpanel initialized and test event sent!")
+#else
+        print("⚠️ CashMonkiApp: Mixpanel SDK not available - add Mixpanel package via SPM")
 #endif
     }
 

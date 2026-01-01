@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		CB6221642EFE93B50077600D /* PostHog in Frameworks */ = {isa = PBXBuildFile; productRef = CB6221632EFE93B50077600D /* PostHog */; };
 		CB8D47312EBB475A00760A39 /* Lottie in Frameworks */ = {isa = PBXBuildFile; productRef = CB8D47302EBB475A00760A39 /* Lottie */; };
+		CB91D5172F065AA300D7CB38 /* Mixpanel in Frameworks */ = {isa = PBXBuildFile; productRef = CB91D5162F065AA300D7CB38 /* Mixpanel */; };
 		CBCAC3B52EB21602002CB3B1 /* FirebaseAuth in Frameworks */ = {isa = PBXBuildFile; productRef = CBCAC3B42EB21602002CB3B1 /* FirebaseAuth */; };
 		CBCAC3B72EB21602002CB3B1 /* FirebaseCore in Frameworks */ = {isa = PBXBuildFile; productRef = CBCAC3B62EB21602002CB3B1 /* FirebaseCore */; };
 		CBCAC3B92EB21602002CB3B1 /* FirebaseFirestore in Frameworks */ = {isa = PBXBuildFile; productRef = CBCAC3B82EB21602002CB3B1 /* FirebaseFirestore */; };
@@ -119,6 +120,7 @@
 			files = (
 				CBCAC3BE2EB21667002CB3B1 /* GoogleSignInSwift in Frameworks */,
 				CB8D47312EBB475A00760A39 /* Lottie in Frameworks */,
+				CB91D5172F065AA300D7CB38 /* Mixpanel in Frameworks */,
 				CBCAC3B72EB21602002CB3B1 /* FirebaseCore in Frameworks */,
 				CBCAC3C12EB216BC002CB3B1 /* RevenueCat in Frameworks */,
 				CBEAE1432ECE30C70044BD60 /* RevenueCatUI in Frameworks */,
@@ -211,6 +213,7 @@
 				CBE781B32F0445E600CA6ED3 /* FacebookBasics */,
 				CBE781B52F0445E600CA6ED3 /* FacebookCore */,
 				CBE781B92F0445E600CA6ED3 /* FacebookLogin */,
+				CB91D5162F065AA300D7CB38 /* Mixpanel */,
 			);
 			productName = Cashmonki;
 			productReference = CB02A6302E69FAE000B15F44 /* CashMonki.app */;
@@ -301,6 +304,7 @@
 				CB8D472F2EBB475A00760A39 /* XCRemoteSwiftPackageReference "lottie-ios" */,
 				CB6221612EFE855E0077600D /* XCRemoteSwiftPackageReference "posthog-ios" */,
 				CBE781B02F0445E600CA6ED3 /* XCRemoteSwiftPackageReference "facebook-ios-sdk" */,
+				CB91D5152F065AA300D7CB38 /* XCRemoteSwiftPackageReference "mixpanel-swift" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = CB02A6312E69FAE000B15F44 /* Products */;
@@ -730,6 +734,14 @@
 				minimumVersion = 4.5.2;
 			};
 		};
+		CB91D5152F065AA300D7CB38 /* XCRemoteSwiftPackageReference "mixpanel-swift" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/mixpanel/mixpanel-swift";
+			requirement = {
+				branch = master;
+				kind = branch;
+			};
+		};
 		CBCAC3B32EB21602002CB3B1 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/firebase/firebase-ios-sdk.git";
@@ -774,6 +786,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = CB8D472F2EBB475A00760A39 /* XCRemoteSwiftPackageReference "lottie-ios" */;
 			productName = Lottie;
+		};
+		CB91D5162F065AA300D7CB38 /* Mixpanel */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = CB91D5152F065AA300D7CB38 /* XCRemoteSwiftPackageReference "mixpanel-swift" */;
+			productName = Mixpanel;
 		};
 		CBCAC3B42EB21602002CB3B1 /* FirebaseAuth */ = {
 			isa = XCSwiftPackageProductDependency;
