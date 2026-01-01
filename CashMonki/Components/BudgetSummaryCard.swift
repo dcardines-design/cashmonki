@@ -262,7 +262,7 @@ struct BudgetSummaryCard: View {
                         isExpanded.toggle()
                     }
                 },
-                hierarchy: .ghostPrimary,
+                hierarchy: .textPrimary,
                 size: .tripleExtraSmall
             )
             .fixedSize()
