@@ -725,27 +725,27 @@ app.post('/api/generate-roast', optionalAuth, async (req: AuthenticatedRequest, 
     const getLanguageInstruction = (curr: string | undefined): string => {
       switch (curr) {
         case 'PHP':
-          return `LANGUAGE: Write in TAGLISH (natural mix of Tagalog and English, like how Filipinos actually talk). Example: "₱500 sa Grab, ayaw mo na talaga maglakad ano."`;
+          return `LANGUAGE: Write in TAGLISH (natural mix of Tagalog and English). Use the most casual, colloquial tone - like barkada roasting each other. Example: "₱500 sa Grab, ayaw mo na talaga maglakad ano."`;
         case 'JPY':
-          return `LANGUAGE: Write in casual Japanese (日本語). Example: "¥500でタクシー？歩けば無料なのに。"`;
+          return `LANGUAGE: Write in casual Japanese (日本語). Use the most casual tone - like friends teasing each other, use casual forms not keigo. Example: "¥500でタクシー？歩けば無料なのに。"`;
         case 'KRW':
-          return `LANGUAGE: Write in casual Korean (한국어). Example: "₩5000 커피? 물은 공짜인데."`;
+          return `LANGUAGE: Write in casual Korean (한국어). Use the most casual 반말 tone - like close friends roasting each other. Example: "₩5000 커피? 물은 공짜인데."`;
         case 'CNY':
-          return `LANGUAGE: Write in casual Mandarin Chinese (中文). Example: "¥50块打车？腿是装饰品吗？"`;
+          return `LANGUAGE: Write in casual Mandarin Chinese (中文). Use the most casual, colloquial tone - like friends teasing. Example: "¥50块打车？腿是装饰品吗？"`;
         case 'THB':
-          return `LANGUAGE: Write in casual Thai (ภาษาไทย). Example: "฿500 ค่าแท็กซี่? ขาไว้ทำไม"`;
+          return `LANGUAGE: Write in casual Thai (ภาษาไทย). Use the most casual tone - like friends joking around. Example: "฿500 ค่าแท็กซี่? ขาไว้ทำไม"`;
         case 'VND':
-          return `LANGUAGE: Write in casual Vietnamese (Tiếng Việt). Example: "500k đi Grab? Chân để làm cảnh à?"`;
+          return `LANGUAGE: Write in casual Vietnamese (Tiếng Việt). Use the most casual tone - like bạn bè trêu nhau. Example: "500k đi Grab? Chân để làm cảnh à?"`;
         case 'IDR':
-          return `LANGUAGE: Write in casual Indonesian (Bahasa Indonesia). Example: "Rp50rb naik ojol? Kaki cuma pajangan ya?"`;
+          return `LANGUAGE: Write in casual Indonesian (Bahasa Indonesia). Use the most casual, gaul tone - like temen roasting each other. Example: "Rp50rb naik ojol? Kaki cuma pajangan ya?"`;
         case 'MYR':
-          return `LANGUAGE: Write in Manglish (Malaysian English mix). Example: "RM50 for Grab lah, walking is so last season."`;
+          return `LANGUAGE: Write in Manglish (Malaysian English mix). Use the most casual tone - like kawan-kawan joking lah. Example: "RM50 for Grab lah, walking is so last season."`;
         case 'EUR':
-          return `LANGUAGE: Write in English. Example: "€50 on Uber, walking is apparently beneath us now."`;
+          return `LANGUAGE: Write in casual English. Use the most casual, conversational tone. Example: "€50 on Uber, walking is apparently beneath us now."`;
         case 'GBP':
-          return `LANGUAGE: Write in British English. Example: "£50 on a cab? Legs are just for show then, innit."`;
+          return `LANGUAGE: Write in casual British English. Use the most casual tone - like mates taking the piss. Example: "£50 on a cab? Legs are just for show then, innit."`;
         default:
-          return `LANGUAGE: Write in English. Example: "$50 on Uber, oh so we're just not walking anymore."`;
+          return `LANGUAGE: Write in casual English. Use the most casual, conversational tone - like friends roasting each other. Example: "$50 on Uber, oh so we're just not walking anymore."`;
       }
     };
 
