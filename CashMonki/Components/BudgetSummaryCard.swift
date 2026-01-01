@@ -256,7 +256,7 @@ struct BudgetSummaryCard: View {
         HStack(spacing: 8) {
             // Show All / Show Less button
             AppButton(
-                title: isExpanded ? "Show Less" : "Show All Budgets",
+                title: isExpanded ? "Show Less" : "Show Others",
                 action: {
                     withAnimation(.easeInOut(duration: 0.25)) {
                         isExpanded.toggle()
