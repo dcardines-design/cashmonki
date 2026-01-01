@@ -881,27 +881,27 @@ extension HomePage {
                         let currentTime = Date()
                         let periodDuration = periodEndDate.timeIntervalSince(periodStartDate)
 
-                        // Collect points for current data (up to now) using for loop to avoid type inference issues
-                        var currentPoints: [CGPoint] = []
-                        for dataPoint in currentPeriodData {
-                            guard dataPoint.date <= currentTime else { continue }
+                        // Collect points for current data (up to now)
+                        let basePoints: [CGPoint] = currentPeriodData.compactMap { dataPoint in
+                            guard dataPoint.date <= currentTime else { return nil }
                             let timeOffset = dataPoint.date.timeIntervalSince(periodStartDate)
                             let normalizedTime: Double = periodDuration > 0 ? timeOffset / periodDuration : 0
                             let x = chartWidth * CGFloat(max(0, min(1, normalizedTime)))
                             let y = height - (height * CGFloat((dataPoint.amount - minValue) / (maxValue - minValue)))
-                            currentPoints.append(CGPoint(x: x, y: y))
+                            return CGPoint(x: x, y: y)
                         }
 
                         // Extend line to "now" so the dot appears on the line
-                        if let lastPoint = currentPoints.last, currentTime <= periodEndDate {
+                        let nowExtension: [CGPoint] = {
+                            guard let lastPoint = basePoints.last, currentTime <= periodEndDate else { return [] }
                             let nowTimeOffset = currentTime.timeIntervalSince(periodStartDate)
                             let nowNormalizedTime = periodDuration > 0 ? nowTimeOffset / periodDuration : 0
                             let nowX = chartWidth * CGFloat(max(0, min(1, nowNormalizedTime)))
-                            // Only add if it's actually ahead of the last point
-                            if nowX > lastPoint.x + 1 {
-                                currentPoints.append(CGPoint(x: nowX, y: lastPoint.y))
-                            }
-                        }
+                            guard nowX > lastPoint.x + 1 else { return [] }
+                            return [CGPoint(x: nowX, y: lastPoint.y)]
+                        }()
+
+                        let currentPoints = basePoints + nowExtension
 
                         // Gradient fill under the line
                         if currentPoints.count > 1 {
