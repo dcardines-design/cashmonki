@@ -102,6 +102,45 @@ class MixpanelManager: ObservableObject {
         #endif
     }
 
+    /// Track with [String: Any] properties - converts to MixpanelType automatically
+    func trackWithAnyProperties(_ eventName: String, properties: [String: Any]?) {
+        guard isConfigured else {
+            print("⚠️ Mixpanel: Not configured")
+            return
+        }
+
+        let mixpanelProperties = convertToMixpanelProperties(properties)
+        Mixpanel.mainInstance().track(event: eventName, properties: mixpanelProperties)
+
+        #if DEBUG
+        print("📊 Mixpanel: Tracked '\(eventName)' with \(mixpanelProperties?.count ?? 0) properties")
+        #endif
+    }
+
+    /// Convert [String: Any] to [String: MixpanelType]
+    private func convertToMixpanelProperties(_ properties: [String: Any]?) -> [String: MixpanelType]? {
+        guard let properties = properties else { return nil }
+
+        var result: [String: MixpanelType] = [:]
+        for (key, value) in properties {
+            if let stringValue = value as? String {
+                result[key] = stringValue
+            } else if let intValue = value as? Int {
+                result[key] = intValue
+            } else if let doubleValue = value as? Double {
+                result[key] = doubleValue
+            } else if let boolValue = value as? Bool {
+                result[key] = boolValue
+            } else if let floatValue = value as? Float {
+                result[key] = Double(floatValue)
+            } else {
+                // Convert anything else to string
+                result[key] = String(describing: value)
+            }
+        }
+        return result.isEmpty ? nil : result
+    }
+
     // MARK: - User Identification
 
     func identify(userId: String) {
@@ -236,14 +275,20 @@ class MixpanelManager: ObservableObject {
 class MixpanelManager: ObservableObject {
     static let shared = MixpanelManager()
 
+    var isInternalDevice: Bool = false
+
     private init() {}
 
     func configure(token: String) {
         print("❌ Mixpanel: SDK not available - add Mixpanel package via SPM")
     }
 
+    func markAsInternalDevice() {}
+    func unmarkAsInternalDevice() {}
+
     func track(_ event: AnalyticsEvent, properties: [String: Any]? = nil) {}
     func trackCustom(_ eventName: String, properties: [String: Any]? = nil) {}
+    func trackWithAnyProperties(_ eventName: String, properties: [String: Any]?) {}
     func identify(userId: String) {}
     func identifyWithEmail(userId: String, email: String, name: String? = nil) {}
     func setUserProperties(_ properties: [String: Any]) {}

@@ -21,8 +21,8 @@ class AnalyticsManager {
         // PostHog
         PostHogManager.shared.capture(event, properties: properties)
 
-        // Mixpanel (MixpanelManager handles the type conversion internally)
-        MixpanelManager.shared.trackCustom(event.rawValue, properties: nil)
+        // Mixpanel (with automatic type conversion)
+        MixpanelManager.shared.trackWithAnyProperties(event.rawValue, properties: properties)
 
         #if DEBUG
         print("📊 Analytics: Tracked '\(event.rawValue)' to PostHog + Mixpanel")
@@ -32,7 +32,7 @@ class AnalyticsManager {
     /// Track a custom event to all analytics services
     func trackCustom(_ eventName: String, properties: [String: Any]? = nil) {
         PostHogManager.shared.captureCustom(eventName, properties: properties)
-        MixpanelManager.shared.trackCustom(eventName, properties: nil)
+        MixpanelManager.shared.trackWithAnyProperties(eventName, properties: properties)
     }
 
     // MARK: - User Identification
@@ -143,6 +143,6 @@ class AnalyticsManager {
 
     func trackScreen(_ screenName: String) {
         PostHogManager.shared.screen(screenName)
-        MixpanelManager.shared.trackCustom("screen_viewed", properties: nil)
+        MixpanelManager.shared.trackWithAnyProperties("screen_viewed", properties: ["screen_name": screenName])
     }
 }
