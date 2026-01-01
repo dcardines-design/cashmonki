@@ -38,9 +38,9 @@ struct BudgetSummaryCard: View {
     // MARK: - Computed Properties
 
     private var budgetDataList: [BudgetData] {
-        // Sort by spent amount (highest first)
+        // Sort by budget amount (highest first)
         let sortedBudgets = budgets.sorted {
-            getSpentAmount(for: $0) > getSpentAmount(for: $1)
+            getBudgetAmount(for: $0) > getBudgetAmount(for: $1)
         }
 
         return sortedBudgets.map { budget in
