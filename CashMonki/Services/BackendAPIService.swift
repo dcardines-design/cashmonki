@@ -200,7 +200,8 @@ class BackendAPIService: ObservableObject {
     // MARK: - Roast Generation (OpenRouter Proxy)
 
     /// Generate a sassy roast message for a receipt using AI
-    func generateRoast(amount: String, merchant: String, category: String, notes: String? = nil, lineItems: [[String: Any]]? = nil, userName: String? = nil) async throws -> String {
+    /// - Parameter currency: User's preferred currency (e.g., "PHP" for Taglish roasts)
+    func generateRoast(amount: String, merchant: String, category: String, notes: String? = nil, lineItems: [[String: Any]]? = nil, userName: String? = nil, currency: String? = nil) async throws -> String {
         print("🔥 BACKEND: Generating roast message...")
 
         var request = URLRequest(url: URL(string: "\(baseURL)/generate-roast")!)
@@ -226,6 +227,11 @@ class BackendAPIService: ObservableObject {
         }
         if let userName = userName, !userName.isEmpty, userName != "Cashmonki User" {
             payload["userName"] = userName
+        }
+        // Include currency for language-specific roasts (e.g., PHP = Taglish)
+        if let currency = currency, !currency.isEmpty {
+            payload["currency"] = currency
+            print("🔥 BACKEND: Including currency '\(currency)' for localized roast")
         }
         let jsonData = try JSONSerialization.data(withJSONObject: payload)
         request.httpBody = jsonData

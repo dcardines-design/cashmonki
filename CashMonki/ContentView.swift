@@ -276,7 +276,8 @@ struct ContentView: View {
                                         category: roastCategory,
                                         notes: roastNotes,
                                         lineItems: roastLineItems,
-                                        userName: roastUserName
+                                        userName: roastUserName,
+                                        currency: CurrencyPreferences.shared.primaryCurrency.rawValue
                                     )
                                     await MainActor.run {
                                         roastSheetMessage = RoastMessage(message: aiRoast)

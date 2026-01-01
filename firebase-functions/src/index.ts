@@ -677,11 +677,15 @@ app.post('/api/generate-roast', optionalAuth, async (req: AuthenticatedRequest, 
       });
     }
 
-    const { amount, merchant, category, notes, lineItems, userName } = req.body;
+    const { amount, merchant, category, notes, lineItems, userName, currency } = req.body;
 
     if (!amount || !merchant) {
       return res.status(400).json({ error: 'Missing required fields: amount, merchant' });
     }
+
+    // Determine language based on currency
+    const isTaglish = currency === 'PHP';
+    logger.info(`Roast language: ${isTaglish ? 'Taglish (PHP)' : 'English'}, currency: ${currency || 'not specified'}`);
 
     // Get OpenRouter API key from Firebase secrets
     const apiKey = openRouterApiKey.value()?.trim();
@@ -717,6 +721,36 @@ app.post('/api/generate-roast', optionalAuth, async (req: AuthenticatedRequest, 
     }
     const purchaseContext = contextParts.join(` `);
 
+    // Determine language instruction based on currency
+    const getLanguageInstruction = (curr: string | undefined): string => {
+      switch (curr) {
+        case 'PHP':
+          return `LANGUAGE: Write in TAGLISH (natural mix of Tagalog and English, like how Filipinos actually talk). Example: "₱500 sa Grab, ayaw mo na talaga maglakad ano."`;
+        case 'JPY':
+          return `LANGUAGE: Write in casual Japanese (日本語). Example: "¥500でタクシー？歩けば無料なのに。"`;
+        case 'KRW':
+          return `LANGUAGE: Write in casual Korean (한국어). Example: "₩5000 커피? 물은 공짜인데."`;
+        case 'CNY':
+          return `LANGUAGE: Write in casual Mandarin Chinese (中文). Example: "¥50块打车？腿是装饰品吗？"`;
+        case 'THB':
+          return `LANGUAGE: Write in casual Thai (ภาษาไทย). Example: "฿500 ค่าแท็กซี่? ขาไว้ทำไม"`;
+        case 'VND':
+          return `LANGUAGE: Write in casual Vietnamese (Tiếng Việt). Example: "500k đi Grab? Chân để làm cảnh à?"`;
+        case 'IDR':
+          return `LANGUAGE: Write in casual Indonesian (Bahasa Indonesia). Example: "Rp50rb naik ojol? Kaki cuma pajangan ya?"`;
+        case 'MYR':
+          return `LANGUAGE: Write in Manglish (Malaysian English mix). Example: "RM50 for Grab lah, walking is so last season."`;
+        case 'EUR':
+          return `LANGUAGE: Write in English. Example: "€50 on Uber, walking is apparently beneath us now."`;
+        case 'GBP':
+          return `LANGUAGE: Write in British English. Example: "£50 on a cab? Legs are just for show then, innit."`;
+        default:
+          return `LANGUAGE: Write in English. Example: "$50 on Uber, oh so we're just not walking anymore."`;
+      }
+    };
+
+    const languageInstruction = getLanguageInstruction(currency);
+
     // Call OpenRouter API with deadpan roast prompt
     logger.info('Generating roast via OpenRouter...');
     const openRouterResponse = await fetch('https://openrouter.ai/api/v1/chat/completions', {
@@ -736,13 +770,7 @@ app.post('/api/generate-roast', optionalAuth, async (req: AuthenticatedRequest, 
 
 MUST be relevant to what they bought. Deadpool energy.
 
-EXAMPLES:
-₱500 on Grab, oh so we're just not walking anymore.
-₱300 on bubble tea, the weekly tapioca ritual continues.
-₱800 on coffee because tap water doesn't spark joy.
-₱1,200 on delivery to avoid putting on pants.
-₱2,000 at Zara, classic fast fashion that'll fall apart in a month.
-₱500 on skincare, paying to fix what sleep would fix for free.
+${languageInstruction}
 
 NEVER: quotes, brackets, Marvel refs, "bold choice", random nonsense unrelated to purchase.
 Output: ["roast1","roast2","roast3"]`
