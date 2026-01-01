@@ -1101,39 +1101,15 @@ extension HomePage {
     
 }
 
-// MARK: - Smooth Curve Helper Functions (Monotonic Cubic)
+// MARK: - Line Chart Helper Functions
 
-/// Draws a smooth curve through all points using monotonic cubic interpolation
-/// This prevents overshooting/loops while still being smooth
+/// Draws straight diagonal lines through all points
 fileprivate func drawSmoothCurve(path: inout Path, points: [CGPoint]) {
     guard points.count > 0 else { return }
 
-    if points.count == 1 {
-        path.move(to: points[0])
-        return
-    }
-
-    if points.count == 2 {
-        path.move(to: points[0])
-        path.addLine(to: points[1])
-        return
-    }
-
     path.move(to: points[0])
 
-    // Use simple quadratic curves with midpoint control for gentle smoothing
-    // This avoids overshooting while still looking smooth
-    for i in 0..<points.count - 1 {
-        let current = points[i]
-        let next = points[i + 1]
-
-        // Calculate control point - use horizontal smoothing only (no vertical overshoot)
-        let midX = (current.x + next.x) / 2
-
-        // For the control point, stay closer to the steeper side to prevent loops
-        let cp1 = CGPoint(x: midX, y: current.y)
-        let cp2 = CGPoint(x: midX, y: next.y)
-
-        path.addCurve(to: next, control1: cp1, control2: cp2)
+    for i in 1..<points.count {
+        path.addLine(to: points[i])
     }
 }
