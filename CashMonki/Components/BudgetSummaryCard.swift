@@ -253,46 +253,46 @@ struct BudgetSummaryCard: View {
     // MARK: - Show All Toggle Row
 
     private var showAllToggleRow: some View {
-        Button(action: {
-            withAnimation(.easeInOut(duration: 0.25)) {
-                isExpanded.toggle()
-            }
-        }) {
-            HStack(spacing: 8) {
-                // Show All / Show Less text
-                Text(isExpanded ? "Show Less" : "Show All")
-                    .font(AppFonts.overusedGroteskMedium(size: 16))
-                    .foregroundStyle(AppColors.primary)
-
-                Spacer()
-
-                // Only show amounts when collapsed (Show All state)
-                if !isExpanded {
-                    HStack(spacing: 4) {
-                        Text(currencyPrefs.formatPrimaryAmount(remainingSpent))
-                            .font(AppFonts.overusedGroteskMedium(size: 14))
-                            .foregroundStyle(remainingSpent > remainingBudget ? AppColors.destructiveForeground : AppColors.foregroundSecondary)
-
-                        Text("/")
-                            .font(AppFonts.overusedGroteskMedium(size: 14))
-                            .foregroundStyle(AppColors.foregroundTertiary)
-
-                        Text(currencyPrefs.formatPrimaryAmount(remainingBudget))
-                            .font(AppFonts.overusedGroteskMedium(size: 14))
-                            .foregroundStyle(AppColors.foregroundTertiary)
-
-                        Text("·")
-                            .font(AppFonts.overusedGroteskMedium(size: 14))
-                            .foregroundStyle(AppColors.foregroundTertiary)
-
-                        Text("\(remainingSpentPercentage)%")
-                            .font(AppFonts.overusedGroteskMedium(size: 14))
-                            .foregroundStyle(AppColors.foregroundTertiary)
+        HStack(spacing: 8) {
+            // Show All / Show Less button
+            AppButton(
+                title: isExpanded ? "Show Less" : "Show All",
+                action: {
+                    withAnimation(.easeInOut(duration: 0.25)) {
+                        isExpanded.toggle()
                     }
+                },
+                hierarchy: .ghostPrimary,
+                size: .doubleExtraSmall
+            )
+
+            Spacer()
+
+            // Only show amounts when collapsed (Show All state)
+            if !isExpanded {
+                HStack(spacing: 4) {
+                    Text(currencyPrefs.formatPrimaryAmount(remainingSpent))
+                        .font(AppFonts.overusedGroteskMedium(size: 14))
+                        .foregroundStyle(remainingSpent > remainingBudget ? AppColors.destructiveForeground : AppColors.foregroundSecondary)
+
+                    Text("/")
+                        .font(AppFonts.overusedGroteskMedium(size: 14))
+                        .foregroundStyle(AppColors.foregroundTertiary)
+
+                    Text(currencyPrefs.formatPrimaryAmount(remainingBudget))
+                        .font(AppFonts.overusedGroteskMedium(size: 14))
+                        .foregroundStyle(AppColors.foregroundTertiary)
+
+                    Text("·")
+                        .font(AppFonts.overusedGroteskMedium(size: 14))
+                        .foregroundStyle(AppColors.foregroundTertiary)
+
+                    Text("\(remainingSpentPercentage)%")
+                        .font(AppFonts.overusedGroteskMedium(size: 14))
+                        .foregroundStyle(AppColors.foregroundTertiary)
                 }
             }
         }
-        .buttonStyle(PlainButtonStyle())
     }
 
     // MARK: - Progress Bar
