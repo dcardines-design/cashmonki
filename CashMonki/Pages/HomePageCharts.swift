@@ -882,7 +882,7 @@ extension HomePage {
                         let periodDuration = periodEndDate.timeIntervalSince(periodStartDate)
 
                         // Collect points for current data (up to now)
-                        var currentPoints: [CGPoint] = currentPeriodData.compactMap { dataPoint in
+                        var currentPoints: [CGPoint] = currentPeriodData.compactMap { (dataPoint: (date: Date, amount: Double)) -> CGPoint? in
                             guard dataPoint.date <= currentTime else { return nil }
                             let timeOffset = dataPoint.date.timeIntervalSince(periodStartDate)
                             let normalizedTime: Double = periodDuration > 0 ? timeOffset / periodDuration : 0
