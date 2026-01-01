@@ -265,6 +265,7 @@ struct BudgetSummaryCard: View {
                 hierarchy: .ghostPrimary,
                 size: .doubleExtraSmall
             )
+            .fixedSize()
 
             Spacer()
 
