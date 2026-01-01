@@ -19,6 +19,8 @@ struct BudgetSpendingSheet: View {
     @EnvironmentObject var toastManager: ToastManager
 
     @State private var selectedTransactionForDetail: Txn?
+    @State private var showingBudgetMenu: Bool = false
+    @State private var showingEditBudget: Bool = false
 
     // MARK: - Computed Properties
 
@@ -150,6 +152,37 @@ struct BudgetSpendingSheet: View {
             .presentationDetents([.fraction(0.98)])
             .presentationDragIndicator(.hidden)
         }
+        .confirmationDialog(
+            "Budget Options",
+            isPresented: $showingBudgetMenu
+        ) {
+            Button("Edit Budget") {
+                showingEditBudget = true
+            }
+            Button("Delete Budget", role: .destructive) {
+                userManager.deleteBudget(budget)
+                toastManager.showDeleted("Budget deleted")
+                isPresented = false
+            }
+            Button("Cancel", role: .cancel) {}
+        }
+        .sheet(isPresented: $showingEditBudget) {
+            EditBudgetSheet(
+                isPresented: $showingEditBudget,
+                budget: budget,
+                onSave: { updatedBudget in
+                    userManager.updateBudget(updatedBudget)
+                    toastManager.showSuccess("Budget updated!")
+                },
+                onDelete: {
+                    userManager.deleteBudget(budget)
+                    toastManager.showDeleted("Budget deleted")
+                    isPresented = false
+                }
+            )
+            .presentationDetents([.fraction(0.98)])
+            .presentationDragIndicator(.hidden)
+        }
     }
 
     // MARK: - Budget Card Section
@@ -172,11 +205,15 @@ struct BudgetSpendingSheet: View {
 
                 Spacer()
 
-                // Three-dot menu (non-functional in this view)
-                Image(systemName: "ellipsis")
-                    .font(.system(size: 16, weight: .medium))
-                    .foregroundStyle(AppColors.foregroundTertiary)
-                    .frame(width: 24, height: 24)
+                // Three-dot menu button
+                Button(action: { showingBudgetMenu = true }) {
+                    Image(systemName: "ellipsis")
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundStyle(AppColors.foregroundTertiary)
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(PlainButtonStyle())
             }
 
             // Row 2: Progress bar
