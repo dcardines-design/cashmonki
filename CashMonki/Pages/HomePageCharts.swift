@@ -1101,11 +1101,11 @@ extension HomePage {
     
 }
 
-// MARK: - Smooth Curve Helper Functions (Catmull-Rom Spline)
+// MARK: - Smooth Curve Helper Functions (Monotonic Cubic)
 
-/// Draws a smooth curve through all points using Catmull-Rom spline interpolation
-/// This creates natural-looking curves like TradingView charts
-fileprivate func drawSmoothCurve(path: inout Path, points: [CGPoint], tension: CGFloat = 0.3) {
+/// Draws a smooth curve through all points using monotonic cubic interpolation
+/// This prevents overshooting/loops while still being smooth
+fileprivate func drawSmoothCurve(path: inout Path, points: [CGPoint]) {
     guard points.count > 0 else { return }
 
     if points.count == 1 {
@@ -1121,23 +1121,19 @@ fileprivate func drawSmoothCurve(path: inout Path, points: [CGPoint], tension: C
 
     path.move(to: points[0])
 
-    // For 3+ points, use Catmull-Rom spline converted to cubic bezier
+    // Use simple quadratic curves with midpoint control for gentle smoothing
+    // This avoids overshooting while still looking smooth
     for i in 0..<points.count - 1 {
-        let p0 = i > 0 ? points[i - 1] : points[0]
-        let p1 = points[i]
-        let p2 = points[i + 1]
-        let p3 = i < points.count - 2 ? points[i + 2] : points[i + 1]
+        let current = points[i]
+        let next = points[i + 1]
 
-        // Calculate control points for cubic bezier from Catmull-Rom
-        let cp1 = CGPoint(
-            x: p1.x + (p2.x - p0.x) * tension,
-            y: p1.y + (p2.y - p0.y) * tension
-        )
-        let cp2 = CGPoint(
-            x: p2.x - (p3.x - p1.x) * tension,
-            y: p2.y - (p3.y - p1.y) * tension
-        )
+        // Calculate control point - use horizontal smoothing only (no vertical overshoot)
+        let midX = (current.x + next.x) / 2
 
-        path.addCurve(to: p2, control1: cp1, control2: cp2)
+        // For the control point, stay closer to the steeper side to prevent loops
+        let cp1 = CGPoint(x: midX, y: current.y)
+        let cp2 = CGPoint(x: midX, y: next.y)
+
+        path.addCurve(to: next, control1: cp1, control2: cp2)
     }
 }
