@@ -1,48 +1,61 @@
 //
-//  AddSubscriptionSheet.swift
+//  EditSubscriptionSheet.swift
 //  CashMonki
 //
-//  Sheet for adding new recurring transactions/subscriptions
+//  Sheet for editing existing recurring transactions/subscriptions
 //
 
 import SwiftUI
 
-struct AddSubscriptionSheet: View {
+struct EditSubscriptionSheet: View {
+    let subscription: Subscription
     @Binding var isPresented: Bool
     let onSave: ((Subscription) -> Void)?
+    let onDelete: ((Subscription) -> Void)?
 
     @ObservedObject private var currencyPrefs = CurrencyPreferences.shared
     @ObservedObject private var notificationManager = NotificationManager.shared
-    @ObservedObject private var subscriptionManager = SubscriptionManager.shared
+    @ObservedObject private var userManager = UserManager.shared
 
     // Form State
-    @State private var merchantName: String = ""
-    @State private var amountText: String = ""
+    @State private var merchantName: String
+    @State private var amountText: String
     @State private var selectedCurrency: Currency
     @State private var selectedCategoryId: UUID?
-    @State private var selectedCategoryName: String = ""
-    @State private var dateAdded: Date = Date()
-    @State private var frequency: RecurringFrequency = .monthly
-    // @State private var isActive: Bool = true  // Hidden for future use - always true for now
-    private let isActive: Bool = true  // Subscriptions are always active when created
-    // @State private var autoAddTransaction: Bool = true  // Hidden for future use - always true for now
-    private let autoAddTransaction: Bool = true  // Always auto-add transactions when due
-    @State private var reminderEnabled: Bool = true
-    @State private var reminderDays: ReminderDays = .one
-    @State private var note: String = ""
+    @State private var selectedCategoryName: String
+    @State private var frequency: RecurringFrequency
+    @State private var isActive: Bool
+    @State private var autoAddTransaction: Bool
+    @State private var reminderEnabled: Bool
+    @State private var reminderDays: ReminderDays
+    @State private var note: String
 
     // UI State
     @State private var showingCurrencyPicker = false
     @State private var showingNotificationAlert = false
-    @State private var showingPaywall = false
+    @State private var showingDeleteConfirmation = false
 
     @FocusState private var isMerchantFocused: Bool
     @FocusState private var isAmountFocused: Bool
 
-    init(isPresented: Binding<Bool>, onSave: ((Subscription) -> Void)? = nil) {
+    init(subscription: Subscription, isPresented: Binding<Bool>, onSave: ((Subscription) -> Void)? = nil, onDelete: ((Subscription) -> Void)? = nil) {
+        self.subscription = subscription
         self._isPresented = isPresented
         self.onSave = onSave
-        self._selectedCurrency = State(initialValue: CurrencyPreferences.shared.primaryCurrency)
+        self.onDelete = onDelete
+
+        // Initialize state from subscription
+        self._merchantName = State(initialValue: subscription.name)
+        self._amountText = State(initialValue: String(format: "%.0f", subscription.amount))
+        self._selectedCurrency = State(initialValue: subscription.currency)
+        self._selectedCategoryId = State(initialValue: subscription.categoryId)
+        self._selectedCategoryName = State(initialValue: subscription.category)
+        self._frequency = State(initialValue: subscription.frequency)
+        self._isActive = State(initialValue: subscription.isActive)
+        self._autoAddTransaction = State(initialValue: subscription.autoAddTransaction)
+        self._reminderEnabled = State(initialValue: subscription.reminderEnabled)
+        self._reminderDays = State(initialValue: ReminderDays(rawValue: subscription.reminderDaysBefore) ?? .one)
+        self._note = State(initialValue: subscription.note ?? "")
     }
 
     // MARK: - Computed Properties
@@ -55,14 +68,48 @@ struct AddSubscriptionSheet: View {
         Double(amountText.replacingOccurrences(of: ",", with: "")) ?? 0
     }
 
+    /// Get all transactions generated from this subscription
+    private var generatedTransactions: [Txn] {
+        userManager.currentUser.transactions
+            .filter { $0.subscriptionId == subscription.id }
+    }
+
+    /// Calculate next due date based on current frequency (from now)
+    private var calculatedNextDueDate: Date {
+        let calendar = Calendar.current
+        let now = Date()
+        switch frequency {
+        case .fiveMinutes:
+            return calendar.date(byAdding: .minute, value: 5, to: now) ?? now
+        case .daily:
+            return calendar.date(byAdding: .day, value: 1, to: now) ?? now
+        case .weekly:
+            return calendar.date(byAdding: .weekOfYear, value: 1, to: now) ?? now
+        case .monthly:
+            return calendar.date(byAdding: .month, value: 1, to: now) ?? now
+        case .quarterly:
+            return calendar.date(byAdding: .month, value: 3, to: now) ?? now
+        case .yearly:
+            return calendar.date(byAdding: .year, value: 1, to: now) ?? now
+        }
+    }
+
     // MARK: - Body
 
     var body: some View {
         VStack(spacing: 0) {
-            // Header
-            SheetHeader.basic(title: "Add Recurring Transaction") {
-                isPresented = false
-            }
+            // Header with delete button
+            SheetHeader.withCustomAction(
+                title: "Edit Recurring Transaction",
+                onBackTap: {
+                    isPresented = false
+                },
+                rightIcon: "trash-04",
+                rightSystemIcon: "trash",
+                onRightTap: {
+                    showingDeleteConfirmation = true
+                }
+            )
 
             ScrollView(showsIndicators: false) {
                 VStack(spacing: 24) {
@@ -89,20 +136,11 @@ struct AddSubscriptionSheet: View {
                         focusBinding: $isAmountFocused
                     )
 
-                    // Category Picker (shows both expense AND income categories for recurring transactions)
+                    // Category Picker (shows both expense AND income categories)
                     AppInputField.recurringCategory(
                         selectedCategoryId: $selectedCategoryId,
                         selectedCategoryName: $selectedCategoryName,
                         size: .md
-                    )
-
-                    // Start Date with Time (first billing date) - cannot be in future
-                    AppInputField.date(
-                        title: "Start Date",
-                        dateValue: $dateAdded,
-                        components: [.date, .hourAndMinute],
-                        size: .md,
-                        maxDate: Date()
                     )
 
                     // Optional Note
@@ -144,7 +182,7 @@ struct AddSubscriptionSheet: View {
                     .background(AppColors.linePrimary)
 
                 AppButton(
-                    title: "Save",
+                    title: "Save Changes",
                     action: saveSubscription,
                     hierarchy: .primary,
                     size: .extraSmall,
@@ -158,11 +196,6 @@ struct AddSubscriptionSheet: View {
             .background(AppColors.backgroundWhite)
         }
         .background(AppColors.backgroundWhite)
-        .onAppear {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                isMerchantFocused = true
-            }
-        }
         .sheet(isPresented: $showingCurrencyPicker) {
             CurrencyPickerSheet(
                 primaryCurrency: $selectedCurrency,
@@ -182,9 +215,38 @@ struct AddSubscriptionSheet: View {
         } message: {
             Text("To receive reminders before charges, please enable notifications in Settings.")
         }
-        .fullScreenCover(isPresented: $showingPaywall) {
-            CustomPaywallSheet(isPresented: $showingPaywall)
+        .alert("Delete Subscription", isPresented: $showingDeleteConfirmation) {
+            Button("Delete Future", role: .destructive) {
+                // Delete subscription only, keep existing transactions
+                onDelete?(subscription)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    isPresented = false
+                }
+            }
+            Button("Delete All", role: .destructive) {
+                // Delete subscription AND all generated transactions
+                deleteSubscriptionWithTransactions()
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    isPresented = false
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("You have \(generatedTransactions.count) past transaction\(generatedTransactions.count == 1 ? "" : "s") from this subscription. Keep them in your history or delete everything?")
         }
+    }
+
+    // MARK: - Delete with Transactions
+
+    private func deleteSubscriptionWithTransactions() {
+        // First delete all generated transactions
+        for txn in generatedTransactions {
+            userManager.removeTransaction(withId: txn.id)
+        }
+        print("🗑️ EditSubscriptionSheet: Deleted \(generatedTransactions.count) generated transactions")
+
+        // Then delete the subscription
+        onDelete?(subscription)
     }
 
     // MARK: - Is Active Section (Hidden for future use)
@@ -350,36 +412,14 @@ struct AddSubscriptionSheet: View {
 
     // MARK: - Actions
 
-    /// Calculate the next due date based on frequency from the start date
-    private func calculateNextDueDate(from startDate: Date) -> Date {
-        let calendar = Calendar.current
-        switch frequency {
-        case .fiveMinutes:
-            return calendar.date(byAdding: .minute, value: 5, to: startDate) ?? startDate
-        case .daily:
-            return calendar.date(byAdding: .day, value: 1, to: startDate) ?? startDate
-        case .weekly:
-            return calendar.date(byAdding: .weekOfYear, value: 1, to: startDate) ?? startDate
-        case .monthly:
-            return calendar.date(byAdding: .month, value: 1, to: startDate) ?? startDate
-        case .quarterly:
-            return calendar.date(byAdding: .month, value: 3, to: startDate) ?? startDate
-        case .yearly:
-            return calendar.date(byAdding: .year, value: 1, to: startDate) ?? startDate
-        }
-    }
-
     private func saveSubscription() {
-        // Check if user can add more subscriptions (Pro users unlimited, free users limited to 2)
-        if !subscriptionManager.canAddMoreSubscriptions {
-            showingPaywall = true
-            return
-        }
+        // Determine next due date
+        // If frequency changed, use calculated date; otherwise keep existing
+        let nextDue = (frequency != subscription.frequency) ? calculatedNextDueDate : subscription.nextDueDate
 
-        // Calculate next due date based on frequency from the start date
-        let nextDue = calculateNextDueDate(from: dateAdded)
-
-        let subscription = Subscription(
+        // Create updated subscription preserving the original ID and createdAt
+        let updatedSubscription = Subscription(
+            id: subscription.id,
             name: merchantName,
             amount: parsedAmount,
             currency: selectedCurrency,
@@ -391,26 +431,25 @@ struct AddSubscriptionSheet: View {
             reminderDaysBefore: reminderDays.rawValue,
             autoAddTransaction: autoAddTransaction,
             isActive: isActive,
-            walletId: AccountManager.shared.currentSubAccount?.id,
+            walletId: subscription.walletId,
             note: note.isEmpty ? nil : note,
-            createdAt: dateAdded // Use dateAdded as the start/created date
+            createdAt: subscription.createdAt,
+            lastGeneratedDate: subscription.lastGeneratedDate
         )
 
-        // Add to SubscriptionManager
-        SubscriptionManager.shared.addSubscription(subscription)
+        // Note: SubscriptionManager.updateSubscription is called by the parent view's onEdit callback
+        // This allows the parent to show confirmation dialogs before actually saving
 
         // Track analytics
-        AnalyticsManager.shared.track(.subscriptionCreated, properties: [
+        AnalyticsManager.shared.track(.subscriptionEdited, properties: [
             "name": merchantName,
             "amount": parsedAmount,
             "currency": selectedCurrency.rawValue,
             "frequency": frequency.rawValue,
-            "is_active": isActive,
-            "auto_add": autoAddTransaction,
-            "reminder_enabled": reminderEnabled
+            "is_active": isActive
         ])
 
-        onSave?(subscription)
+        onSave?(updatedSubscription)
         isPresented = false
     }
 }
@@ -418,10 +457,20 @@ struct AddSubscriptionSheet: View {
 // MARK: - Preview
 
 #Preview {
-    AddSubscriptionSheet(
+    EditSubscriptionSheet(
+        subscription: Subscription(
+            name: "Netflix",
+            amount: 549,
+            currency: .php,
+            category: "Entertainment",
+            frequency: .monthly,
+            nextDueDate: Date(),
+            reminderEnabled: true,
+            reminderDaysBefore: 3
+        ),
         isPresented: .constant(true),
         onSave: { subscription in
-            print("New subscription: \(subscription.name) - \(subscription.amount)")
+            print("Updated subscription: \(subscription.name)")
         }
     )
 }
