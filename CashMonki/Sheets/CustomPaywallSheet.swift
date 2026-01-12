@@ -179,6 +179,46 @@ struct CustomPaywallSheet: View {
                                 Spacer()
                             }
                             
+                            // Unlimited Recurring Transactions feature
+                            HStack(alignment: .top, spacing: 16) {
+                                // Calendar/repeat icon container
+                                VStack(alignment: .center, spacing: 10) {
+                                    Text("🔄")
+                                        .font(
+                                            Font.custom("Overused Grotesk", size: 26)
+                                                .weight(.medium)
+                                        )
+                                        .multilineTextAlignment(.center)
+                                        .foregroundColor(AppColors.foregroundWhite)
+                                }
+                                .padding(8)
+                                .frame(width: 46, height: 46, alignment: .center)
+                                .background(.white.opacity(0.05))
+                                .cornerRadius(200)
+
+                                // Text content
+                                VStack(alignment: .leading, spacing: 6) {
+                                    Text("Unlimited Recurring Transactions")
+                                        .font(
+                                            Font.custom("Overused Grotesk", size: 18)
+                                                .weight(.semibold)
+                                        )
+                                        .foregroundColor(AppColors.foregroundWhite)
+                                        .frame(maxWidth: .infinity, alignment: .topLeading)
+
+                                    Text("Track all your subscriptions and recurring bills automatically.")
+                                        .font(
+                                            Font.custom("Overused Grotesk", size: 16)
+                                                .weight(.medium)
+                                        )
+                                        .foregroundColor(AppColors.foregroundWhite)
+                                        .frame(maxWidth: .infinity, alignment: .topLeading)
+                                        .opacity(0.7)
+                                }
+
+                                Spacer()
+                            }
+
                             // Multiple Accounts feature
                             HStack(alignment: .top, spacing: 16) {
                                 // Briefcase icon container
@@ -195,7 +235,7 @@ struct CustomPaywallSheet: View {
                                 .frame(width: 46, height: 46, alignment: .center)
                                 .background(.white.opacity(0.05))
                                 .cornerRadius(200)
-                                
+
                                 // Text content
                                 VStack(alignment: .leading, spacing: 6) {
                                     Text("Multiple Accounts")
@@ -205,7 +245,7 @@ struct CustomPaywallSheet: View {
                                         )
                                         .foregroundColor(AppColors.foregroundWhite)
                                         .frame(maxWidth: .infinity, alignment: .topLeading)
-                                    
+
                                     Text("Switch easily between personal and business accounts.")
                                         .font(
                                             Font.custom("Overused Grotesk", size: 16)
@@ -215,7 +255,7 @@ struct CustomPaywallSheet: View {
                                         .frame(maxWidth: .infinity, alignment: .topLeading)
                                         .opacity(0.7)
                                 }
-                                
+
                                 Spacer()
                             }
                             

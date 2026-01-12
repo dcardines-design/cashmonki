@@ -65,7 +65,7 @@ struct AddTransactionSheet: View {
                     AppInputField.categoryById(selectedCategoryId: $selectedCategoryId, size: .md)
 
                     // Date Field with Time
-                    AppInputField.date(title: "Date", dateValue: $date, components: [.date, .hourAndMinute], size: .md)
+                    AppInputField.date(title: "Date", dateValue: $date, components: [.date, .hourAndMinute], size: .md, maxDate: Date())
 
                     // Merchant Name Field
                     AppInputField.text(
@@ -86,9 +86,9 @@ struct AddTransactionSheet: View {
                         size: .md,
                         focusBinding: $isNoteFocused
                     )
-                    
+
                     Spacer()
-                        .frame(height: 100)
+                        .frame(height: 20)
                 }
                 .padding(.horizontal, 20)
                 .padding(.top, 24)
@@ -114,6 +114,7 @@ struct AddTransactionSheet: View {
                 isPresented: $showingCurrencyPicker
             )
             .presentationDetents([.fraction(0.98)])
+            .presentationCornerRadius(20)
             .presentationDragIndicator(.hidden)
         }
     }
@@ -192,7 +193,7 @@ struct AddTransactionSheet: View {
         print("💱 AddTransactionSheet: Using selected currency: \(selectedCurrency.rawValue) (\(selectedCurrency.displayName))")
         
         // Create transaction with automatic currency conversion and correct sign
-        let transaction = rateManager.createTransaction(
+        let baseTransaction = rateManager.createTransaction(
             accountID: UserManager.shared.currentUser.id,
             walletID: currentAccountId,
             category: categoryName,
@@ -204,7 +205,42 @@ struct AddTransactionSheet: View {
             note: finalNote,
             isIncome: isIncome
         )
-        
+
+        // Create final transaction with recurring fields if enabled
+        let transaction = Txn(
+            txID: baseTransaction.txID,
+            accountID: baseTransaction.accountID,
+            walletID: baseTransaction.walletID,
+            category: baseTransaction.category,
+            categoryId: baseTransaction.categoryId,
+            amount: baseTransaction.amount,
+            date: baseTransaction.date,
+            createdAt: baseTransaction.createdAt,
+            receiptImage: nil,
+            hasReceiptImage: baseTransaction.hasReceiptImage,
+            merchantName: baseTransaction.merchantName,
+            paymentMethod: baseTransaction.paymentMethod,
+            receiptNumber: baseTransaction.receiptNumber,
+            invoiceNumber: baseTransaction.invoiceNumber,
+            items: baseTransaction.items,
+            note: baseTransaction.note,
+            originalAmount: baseTransaction.originalAmount,
+            originalCurrency: baseTransaction.originalCurrency,
+            primaryCurrency: baseTransaction.primaryCurrency,
+            secondaryCurrency: baseTransaction.secondaryCurrency,
+            exchangeRate: baseTransaction.exchangeRate,
+            secondaryAmount: baseTransaction.secondaryAmount,
+            secondaryExchangeRate: baseTransaction.secondaryExchangeRate,
+            userEnteredAmount: baseTransaction.userEnteredAmount,
+            userEnteredCurrency: baseTransaction.userEnteredCurrency,
+            // Recurring fields - always false for manual transactions
+            isRecurring: false,
+            recurringFrequency: nil,
+            recurringTemplateId: nil,
+            lastGeneratedDate: nil,
+            isRecurringActive: false
+        )
+
         print("🏗️ AddTransactionSheet: Created transaction:")
         print("   - id: \(transaction.id.uuidString.prefix(8))")
         print("   - category: '\(transaction.category)'")
@@ -219,6 +255,9 @@ struct AddTransactionSheet: View {
         print("📤 AddTransactionSheet: Calling onSave callback...")
         onSave(transaction)
         print("✅ AddTransactionSheet: onSave callback completed")
+
+        // Cancel today's reminder since user tracked
+        NotificationManager.shared.onTransactionAdded()
 
         // Track transaction creation
         AnalyticsManager.shared.trackTransactionCreated(
