@@ -20,14 +20,19 @@ class SubscriptionManager: ObservableObject {
     // MARK: - Free Tier Limits
 
     /// Maximum number of subscriptions for free users
-    static let freeSubscriptionLimit = 2
+    static let maxFreeSubscriptions = 2
 
     /// Check if user can add more subscriptions (Pro users unlimited, free users limited to 2)
     var canAddMoreSubscriptions: Bool {
-        if RevenueCatManager.shared.isProUser {
+        let isProUser = RevenueCatManager.shared.isProUser
+        let currentCount = subscriptions.count
+        let canAdd = isProUser || currentCount < Self.maxFreeSubscriptions
+        print("🔐 SubscriptionManager.canAddMoreSubscriptions: isProUser=\(isProUser), count=\(currentCount), max=\(Self.maxFreeSubscriptions), canAdd=\(canAdd)")
+        if isProUser {
             return true
         }
-        return subscriptions.count < Self.freeSubscriptionLimit
+        // Allow adding if current count is less than max (0 or 1 can add, 2 cannot)
+        return currentCount < Self.maxFreeSubscriptions
     }
 
     /// Number of remaining free subscription slots
@@ -35,7 +40,7 @@ class SubscriptionManager: ObservableObject {
         if RevenueCatManager.shared.isProUser {
             return Int.max
         }
-        return max(0, Self.freeSubscriptionLimit - subscriptions.count)
+        return max(0, Self.maxFreeSubscriptions - subscriptions.count)
     }
 
     // MARK: - Private Properties
