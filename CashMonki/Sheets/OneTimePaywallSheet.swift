@@ -102,6 +102,13 @@ struct OneTimePaywallSheet: View {
                                     description: "Snap and let AI handle everything, no typing, no hassle."
                                 )
 
+                                // Unlimited Recurring Transactions
+                                featureRow(
+                                    emoji: "🔄",
+                                    title: "Unlimited Subscriptions",
+                                    description: "Track all your recurring bills and income in one place."
+                                )
+
                                 // Unlimited Custom Categories
                                 featureRow(
                                     emoji: "📊",

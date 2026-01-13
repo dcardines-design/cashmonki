@@ -138,6 +138,46 @@ struct PromoPaywallSheet: View {
                                 Spacer()
                             }
 
+                            // Unlimited Subscriptions feature
+                            HStack(alignment: .top, spacing: 16) {
+                                // Refresh icon container
+                                VStack(alignment: .center, spacing: 10) {
+                                    Text("🔄")
+                                        .font(
+                                            Font.custom("Overused Grotesk", size: 26)
+                                                .weight(.medium)
+                                        )
+                                        .multilineTextAlignment(.center)
+                                        .foregroundColor(AppColors.foregroundWhite)
+                                }
+                                .padding(8)
+                                .frame(width: 46, height: 46, alignment: .center)
+                                .background(.white.opacity(0.05))
+                                .cornerRadius(200)
+
+                                // Text content
+                                VStack(alignment: .leading, spacing: 6) {
+                                    Text("Unlimited Subscriptions")
+                                        .font(
+                                            Font.custom("Overused Grotesk", size: 18)
+                                                .weight(.semibold)
+                                        )
+                                        .foregroundColor(AppColors.foregroundWhite)
+                                        .frame(maxWidth: .infinity, alignment: .topLeading)
+
+                                    Text("Track all your recurring bills and income in one place.")
+                                        .font(
+                                            Font.custom("Overused Grotesk", size: 16)
+                                                .weight(.medium)
+                                        )
+                                        .foregroundColor(AppColors.foregroundWhite)
+                                        .frame(maxWidth: .infinity, alignment: .topLeading)
+                                        .opacity(0.7)
+                                }
+
+                                Spacer()
+                            }
+
                             // Unlimited Custom Categories feature
                             HStack(alignment: .top, spacing: 16) {
                                 // Chart icon container
