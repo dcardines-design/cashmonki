@@ -42,7 +42,7 @@ struct CustomSubscriptionView: View {
                 
                 Text("Unlock unlimited transactions and advanced features")
                     .font(.subheadline)
-                    .foregroundColor(.secondary)
+                    .foregroundColor(AppColors.foregroundSecondary)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 20)
             }
@@ -136,11 +136,11 @@ struct SubscriptionOptionView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(package.storeProduct.localizedTitle)
                         .font(.headline)
-                        .foregroundColor(.primary)
+                        .foregroundColor(AppColors.foregroundPrimary)
                     
                     Text(package.storeProduct.localizedDescription)
                         .font(.caption)
-                        .foregroundColor(.secondary)
+                        .foregroundColor(AppColors.foregroundSecondary)
                         .lineLimit(2)
                 }
                 
@@ -150,7 +150,7 @@ struct SubscriptionOptionView: View {
                     Text(package.storeProduct.localizedPriceString)
                         .font(.title2)
                         .fontWeight(.bold)
-                        .foregroundColor(.primary)
+                        .foregroundColor(AppColors.foregroundPrimary)
                     
                     if package.packageType == .annual {
                         Text("Best Value")

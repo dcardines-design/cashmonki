@@ -111,7 +111,7 @@ struct OnboardingFlow: View {
             print("💰 OnboardingFlow: Paywall dismissed - finishing onboarding")
             finishOnboardingAfterPaywall()
         }) {
-            CustomPaywallSheet(isPresented: $showingPaywall)
+            OneTimePaywallSheet(isPresented: $showingPaywall)
                 .environmentObject(toastManager)
         }
     }
@@ -143,9 +143,115 @@ struct OnboardingFlow: View {
                     ))
                 } else {
                     Text("Email confirmation step error - contact support")
-                        .foregroundColor(.red)
+                        .foregroundColor(AppColors.accentRed)
                 }
                 */
+
+            case .valueFeature1:
+                ValueFeature1OnboardingView(
+                    isPresented: $isPresented,
+                    onContinue: {
+                        print("✨ OnboardingFlow: Value Feature 1 completed")
+
+                        // Set progression to 1 (VF1 completed)
+                        onboardingStateManager.setOnboardingProgress(to: 1)
+
+                        // Navigate to value feature 2
+                        isNavigatingForward = true
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.9, blendDuration: 0.05)) {
+                            currentStep = .valueFeature2
+                        }
+                    }
+                )
+                .transition(.asymmetric(
+                    insertion: isNavigatingForward ?
+                        .move(edge: .trailing).combined(with: .opacity) :
+                        .move(edge: .leading).combined(with: .opacity),
+                    removal: isNavigatingForward ?
+                        .move(edge: .leading).combined(with: .opacity) :
+                        .move(edge: .trailing).combined(with: .opacity)
+                ))
+
+            case .valueFeature2:
+                ValueFeature2OnboardingView(
+                    isPresented: $isPresented,
+                    onContinue: {
+                        print("✨ OnboardingFlow: Value Feature 2 completed")
+                        onboardingStateManager.setOnboardingProgress(to: 2)
+                        isNavigatingForward = true
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.9, blendDuration: 0.05)) {
+                            currentStep = .valueFeature3
+                        }
+                    },
+                    onBack: {
+                        isNavigatingForward = false
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.9, blendDuration: 0.05)) {
+                            currentStep = .valueFeature1
+                        }
+                    }
+                )
+                .transition(.asymmetric(
+                    insertion: isNavigatingForward ?
+                        .move(edge: .trailing).combined(with: .opacity) :
+                        .move(edge: .leading).combined(with: .opacity),
+                    removal: isNavigatingForward ?
+                        .move(edge: .leading).combined(with: .opacity) :
+                        .move(edge: .trailing).combined(with: .opacity)
+                ))
+
+            case .valueFeature3:
+                ValueFeature3OnboardingView(
+                    isPresented: $isPresented,
+                    onContinue: {
+                        print("✨ OnboardingFlow: Value Feature 3 completed")
+                        onboardingStateManager.setOnboardingProgress(to: 3)
+                        isNavigatingForward = true
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.9, blendDuration: 0.05)) {
+                            currentStep = .valueFeature4
+                        }
+                    },
+                    onBack: {
+                        isNavigatingForward = false
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.9, blendDuration: 0.05)) {
+                            currentStep = .valueFeature2
+                        }
+                    }
+                )
+                .transition(.asymmetric(
+                    insertion: isNavigatingForward ?
+                        .move(edge: .trailing).combined(with: .opacity) :
+                        .move(edge: .leading).combined(with: .opacity),
+                    removal: isNavigatingForward ?
+                        .move(edge: .leading).combined(with: .opacity) :
+                        .move(edge: .trailing).combined(with: .opacity)
+                ))
+
+            case .valueFeature4:
+                ValueFeature4OnboardingView(
+                    isPresented: $isPresented,
+                    onContinue: {
+                        print("✨ OnboardingFlow: Value Feature 4 completed - proceeding to name collection")
+                        onboardingStateManager.setOnboardingProgress(to: 4)
+                        isNavigatingForward = true
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.9, blendDuration: 0.05)) {
+                            currentStep = .nameCollection
+                        }
+                    },
+                    onBack: {
+                        isNavigatingForward = false
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.9, blendDuration: 0.05)) {
+                            currentStep = .valueFeature3
+                        }
+                    }
+                )
+                .transition(.asymmetric(
+                    insertion: isNavigatingForward ?
+                        .move(edge: .trailing).combined(with: .opacity) :
+                        .move(edge: .leading).combined(with: .opacity),
+                    removal: isNavigatingForward ?
+                        .move(edge: .leading).combined(with: .opacity) :
+                        .move(edge: .trailing).combined(with: .opacity)
+                ))
 
             case .nameCollection:
                 NameCollectionView(
@@ -153,39 +259,38 @@ struct OnboardingFlow: View {
                     onNameCollected: { name in
                         print("👤 OnboardingFlow: Name collected: \(name)")
                         collectedName = name
-                        
+
                         // Update the authenticated user's name
                         if AuthenticationManager.shared.currentUser != nil {
                             // Update user name in authentication manager and user manager
                             print("👤 OnboardingFlow: Calling UserManager.updateUserName with: '\(name)'")
                             UserManager.shared.updateUserName(name)
-                            
+
                             // Force UI refresh to ensure wallet name updates are reflected
                             DispatchQueue.main.async {
                                 print("🔄 OnboardingFlow: Forcing UI refresh for wallet name update")
                                 AccountManager.shared.objectWillChange.send()
                             }
                         }
-                        
-                        // Set progression to 2 (name completed)
-                        onboardingStateManager.setOnboardingProgress(to: 2)
-                        let nextStep = onboardingStateManager.getCurrentOnboardingStep()
-                        print("🔢 OnboardingFlow: Name completed, next step: \(nextStep)")
-                        isNavigatingForward = true // Forward navigation
+
+                        // Set progression to 5 (name completed)
+                        onboardingStateManager.setOnboardingProgress(to: 5)
+
+                        // Navigate explicitly to currency selection (don't rely on getCurrentOnboardingStep)
+                        print("🔢 OnboardingFlow: Name completed, navigating to currency selection")
+                        isNavigatingForward = true
                         withAnimation(.spring(response: 0.3, dampingFraction: 0.9, blendDuration: 0.05)) {
-                            currentStep = nextStep
+                            currentStep = .currencySelection
                         }
                     },
-                    // CURRENT: No back button on first screen (name collection is now first)
-                    onBack: nil,
-                    // FUTURE: Uncomment when re-enabling email step
-                    // onBack: {
-                    //     print("⬅️ OnboardingFlow: Back from name collection to email confirmation")
-                    //     isNavigatingForward = false
-                    //     withAnimation(.spring(response: 0.3, dampingFraction: 0.9, blendDuration: 0.05)) {
-                    //         currentStep = .emailConfirmation
-                    //     }
-                    // },
+                    // Back to value feature 4
+                    onBack: {
+                        print("⬅️ OnboardingFlow: Back from name collection to value feature 4")
+                        isNavigatingForward = false
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.9, blendDuration: 0.05)) {
+                            currentStep = .valueFeature4
+                        }
+                    },
                     isNewRegistration: isNewRegistration
                 )
                 .transition(.asymmetric(
@@ -206,13 +311,14 @@ struct OnboardingFlow: View {
                         print("💰 OnboardingFlow: Currency details: \(currency.rawValue) (\(currency.displayName)) \(currency.symbol)")
                         selectedCurrency = currency
                         
-                        // Set progression to 3 (currency completed)
-                        onboardingStateManager.setOnboardingProgress(to: 3)
-                        let nextStep = onboardingStateManager.getCurrentOnboardingStep()
-                        print("🔢 OnboardingFlow: Currency completed, next step: \(nextStep)")
+                        // Set progression to 6 (currency completed)
+                        onboardingStateManager.setOnboardingProgress(to: 6)
+
+                        // Navigate explicitly to goal selection (don't rely on getCurrentOnboardingStep)
+                        print("🔢 OnboardingFlow: Currency completed, navigating to goal selection")
                         isNavigatingForward = true // Forward navigation
                         withAnimation(.spring(response: 0.3, dampingFraction: 0.9, blendDuration: 0.05)) {
-                            currentStep = nextStep
+                            currentStep = .goalSelection
                         }
                     },
                     onBack: {
@@ -240,18 +346,19 @@ struct OnboardingFlow: View {
                         print("🎯 OnboardingFlow: ======= GOAL SELECTED =======")
                         print("🎯 OnboardingFlow: Goal selected: \(goal)")
                         print("🎯 OnboardingFlow: Waiting for goal data to be saved...")
-                        
+
                         // Give a small delay to ensure UserDefaults.set() completes before proceeding
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                            print("🎯 OnboardingFlow: Goals saved, proceeding to next step...")
-                            
-                            // Set progression to 4 (goals completed)
-                            onboardingStateManager.setOnboardingProgress(to: 4)
-                            let nextStep = onboardingStateManager.getCurrentOnboardingStep()
-                            print("🔢 OnboardingFlow: Goals completed, next step: \(nextStep)")
+                            print("🎯 OnboardingFlow: Goals saved, proceeding to stress selection...")
+
+                            // Set progression to 7 (goals completed)
+                            onboardingStateManager.setOnboardingProgress(to: 7)
+
+                            // Navigate explicitly to stress selection (don't rely on getCurrentOnboardingStep)
+                            print("🔢 OnboardingFlow: Goals completed, navigating to stress selection")
                             isNavigatingForward = true // Forward navigation
                             withAnimation(.spring(response: 0.3, dampingFraction: 0.9, blendDuration: 0.05)) {
-                                currentStep = nextStep
+                                currentStep = .stressSelection
                             }
                         }
                     },
@@ -265,22 +372,275 @@ struct OnboardingFlow: View {
                     }
                 )
                 .transition(.asymmetric(
-                    insertion: isNavigatingForward ? 
+                    insertion: isNavigatingForward ?
                         .move(edge: .trailing).combined(with: .opacity) :  // Forward: slide in from right
                         .move(edge: .leading).combined(with: .opacity),   // Back: slide in from left
-                    removal: isNavigatingForward ? 
-                        .move(edge: .leading).combined(with: .opacity) :   // Forward: slide out to left  
+                    removal: isNavigatingForward ?
+                        .move(edge: .leading).combined(with: .opacity) :   // Forward: slide out to left
                         .move(edge: .trailing).combined(with: .opacity)    // Back: slide out to right
                 ))
-                
+
+            case .stressSelection:
+                StressesOnboardingView(
+                    isPresented: $isPresented,
+                    onStressSelected: { stress in
+                        print("😫 OnboardingFlow: ======= STRESS SELECTED =======")
+                        print("😫 OnboardingFlow: Stress selected: \(stress)")
+                        print("😫 OnboardingFlow: Proceeding to overspent realization...")
+
+                        // Set progression to 8 (stress completed)
+                        onboardingStateManager.setOnboardingProgress(to: 8)
+
+                        // Navigate explicitly to overspent realization (don't rely on getCurrentOnboardingStep)
+                        print("🔢 OnboardingFlow: Stress completed, navigating to overspent realization")
+                        isNavigatingForward = true // Forward navigation
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.9, blendDuration: 0.05)) {
+                            currentStep = .overspentRealization
+                        }
+                    },
+                    onBack: {
+                        print("⬅️ OnboardingFlow: Back from stress selection to goal selection")
+                        print("🔄 OnboardingFlow: Setting isNavigatingForward = false BEFORE back animation")
+                        isNavigatingForward = false // Set direction BEFORE animation
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.9, blendDuration: 0.05)) {
+                            currentStep = .goalSelection
+                        }
+                    }
+                )
+                .transition(.asymmetric(
+                    insertion: isNavigatingForward ?
+                        .move(edge: .trailing).combined(with: .opacity) :  // Forward: slide in from right
+                        .move(edge: .leading).combined(with: .opacity),   // Back: slide in from left
+                    removal: isNavigatingForward ?
+                        .move(edge: .leading).combined(with: .opacity) :   // Forward: slide out to left
+                        .move(edge: .trailing).combined(with: .opacity)    // Back: slide out to right
+                ))
+
+            case .overspentRealization:
+                OverspentOnboardingView(
+                    isPresented: $isPresented,
+                    onOverspentSelected: { overspents in
+                        print("🙈 OnboardingFlow: ======= OVERSPENT SELECTIONS COMPLETED =======")
+                        print("🙈 OnboardingFlow: Overspent selected: \(overspents.joined(separator: ", "))")
+                        print("🙈 OnboardingFlow: Proceeding to tracking difficulty...")
+
+                        // Set progression to 9 (overspent completed)
+                        onboardingStateManager.setOnboardingProgress(to: 9)
+
+                        // Navigate explicitly to tracking difficulty (don't rely on getCurrentOnboardingStep)
+                        print("🔢 OnboardingFlow: Overspent completed, navigating to tracking difficulty")
+                        isNavigatingForward = true // Forward navigation
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.9, blendDuration: 0.05)) {
+                            currentStep = .trackingDifficulty
+                        }
+                    },
+                    onBack: {
+                        print("⬅️ OnboardingFlow: Back from overspent realization to stress selection")
+                        print("🔄 OnboardingFlow: Setting isNavigatingForward = false BEFORE back animation")
+                        isNavigatingForward = false // Set direction BEFORE animation
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.9, blendDuration: 0.05)) {
+                            currentStep = .stressSelection
+                        }
+                    }
+                )
+                .transition(.asymmetric(
+                    insertion: isNavigatingForward ?
+                        .move(edge: .trailing).combined(with: .opacity) :  // Forward: slide in from right
+                        .move(edge: .leading).combined(with: .opacity),   // Back: slide in from left
+                    removal: isNavigatingForward ?
+                        .move(edge: .leading).combined(with: .opacity) :   // Forward: slide out to left
+                        .move(edge: .trailing).combined(with: .opacity)    // Back: slide out to right
+                ))
+
+            case .trackingDifficulty:
+                TrackingDifficultyOnboardingView(
+                    isPresented: $isPresented,
+                    onDifficultySelected: { difficulties in
+                        print("😣 OnboardingFlow: ======= TRACKING DIFFICULTIES SELECTED =======")
+                        print("😣 OnboardingFlow: Tracking difficulties selected: \(difficulties.joined(separator: ", "))")
+                        print("😣 OnboardingFlow: Proceeding to ideal outcome...")
+
+                        // Set progression to 10 (tracking difficulty completed)
+                        onboardingStateManager.setOnboardingProgress(to: 10)
+
+                        // Navigate explicitly to ideal outcome (don't rely on getCurrentOnboardingStep)
+                        print("🔢 OnboardingFlow: Tracking difficulty completed, navigating to ideal outcome")
+                        isNavigatingForward = true // Forward navigation
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.9, blendDuration: 0.05)) {
+                            currentStep = .idealOutcome
+                        }
+                    },
+                    onBack: {
+                        print("⬅️ OnboardingFlow: Back from tracking difficulty to overspent realization")
+                        print("🔄 OnboardingFlow: Setting isNavigatingForward = false BEFORE back animation")
+                        isNavigatingForward = false // Set direction BEFORE animation
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.9, blendDuration: 0.05)) {
+                            currentStep = .overspentRealization
+                        }
+                    }
+                )
+                .transition(.asymmetric(
+                    insertion: isNavigatingForward ?
+                        .move(edge: .trailing).combined(with: .opacity) :  // Forward: slide in from right
+                        .move(edge: .leading).combined(with: .opacity),   // Back: slide in from left
+                    removal: isNavigatingForward ?
+                        .move(edge: .leading).combined(with: .opacity) :   // Forward: slide out to left
+                        .move(edge: .trailing).combined(with: .opacity)    // Back: slide out to right
+                ))
+
+            case .idealOutcome:
+                IdealOutcomeOnboardingView(
+                    isPresented: $isPresented,
+                    onOutcomeSelected: { outcomes in
+                        print("🥳 OnboardingFlow: ======= IDEAL OUTCOMES SELECTED =======")
+                        print("🥳 OnboardingFlow: Ideal outcomes selected: \(outcomes.joined(separator: ", "))")
+                        print("🥳 OnboardingFlow: Proceeding to tracking frequency...")
+
+                        // Set progression to 11 (ideal outcome completed)
+                        onboardingStateManager.setOnboardingProgress(to: 11)
+
+                        // Navigate explicitly to tracking frequency (don't rely on getCurrentOnboardingStep)
+                        print("🔢 OnboardingFlow: Ideal outcome completed, navigating to tracking frequency")
+                        isNavigatingForward = true // Forward navigation
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.9, blendDuration: 0.05)) {
+                            currentStep = .trackingFrequency
+                        }
+                    },
+                    onBack: {
+                        print("⬅️ OnboardingFlow: Back from ideal outcome to tracking difficulty")
+                        print("🔄 OnboardingFlow: Setting isNavigatingForward = false BEFORE back animation")
+                        isNavigatingForward = false // Set direction BEFORE animation
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.9, blendDuration: 0.05)) {
+                            currentStep = .trackingDifficulty
+                        }
+                    }
+                )
+                .transition(.asymmetric(
+                    insertion: isNavigatingForward ?
+                        .move(edge: .trailing).combined(with: .opacity) :  // Forward: slide in from right
+                        .move(edge: .leading).combined(with: .opacity),   // Back: slide in from left
+                    removal: isNavigatingForward ?
+                        .move(edge: .leading).combined(with: .opacity) :   // Forward: slide out to left
+                        .move(edge: .trailing).combined(with: .opacity)    // Back: slide out to right
+                ))
+
+            case .trackingFrequency:
+                TrackingFrequencyOnboardingView(
+                    isPresented: $isPresented,
+                    onFrequencySelected: { frequencies in
+                        print("🕐 OnboardingFlow: ======= TRACKING FREQUENCIES SELECTED =======")
+                        print("🕐 OnboardingFlow: Tracking frequencies selected: \(frequencies.joined(separator: ", "))")
+                        print("🕐 OnboardingFlow: Proceeding to tracking method...")
+
+                        // Set progression to 12 (tracking frequency completed)
+                        onboardingStateManager.setOnboardingProgress(to: 12)
+
+                        // Navigate explicitly to tracking method (don't rely on getCurrentOnboardingStep)
+                        print("🔢 OnboardingFlow: Tracking frequency completed, navigating to tracking method")
+                        isNavigatingForward = true // Forward navigation
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.9, blendDuration: 0.05)) {
+                            currentStep = .trackingMethod
+                        }
+                    },
+                    onBack: {
+                        print("⬅️ OnboardingFlow: Back from tracking frequency to ideal outcome")
+                        print("🔄 OnboardingFlow: Setting isNavigatingForward = false BEFORE back animation")
+                        isNavigatingForward = false // Set direction BEFORE animation
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.9, blendDuration: 0.05)) {
+                            currentStep = .idealOutcome
+                        }
+                    }
+                )
+                .transition(.asymmetric(
+                    insertion: isNavigatingForward ?
+                        .move(edge: .trailing).combined(with: .opacity) :  // Forward: slide in from right
+                        .move(edge: .leading).combined(with: .opacity),   // Back: slide in from left
+                    removal: isNavigatingForward ?
+                        .move(edge: .leading).combined(with: .opacity) :   // Forward: slide out to left
+                        .move(edge: .trailing).combined(with: .opacity)    // Back: slide out to right
+                ))
+
+            case .trackingMethod:
+                TrackingMethodOnboardingView(
+                    isPresented: $isPresented,
+                    onMethodSelected: { methods in
+                        print("📝 OnboardingFlow: ======= TRACKING METHODS SELECTED =======")
+                        print("📝 OnboardingFlow: Tracking methods selected: \(methods.joined(separator: ", "))")
+                        print("📝 OnboardingFlow: Proceeding to social proof...")
+
+                        // Set progression to 13 (tracking method completed)
+                        onboardingStateManager.setOnboardingProgress(to: 13)
+
+                        // Navigate explicitly to social proof
+                        print("🔢 OnboardingFlow: Tracking method completed, navigating to social proof")
+                        isNavigatingForward = true // Forward navigation
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.9, blendDuration: 0.05)) {
+                            currentStep = .socialProof
+                        }
+                    },
+                    onBack: {
+                        print("⬅️ OnboardingFlow: Back from tracking method to tracking frequency")
+                        print("🔄 OnboardingFlow: Setting isNavigatingForward = false BEFORE back animation")
+                        isNavigatingForward = false // Set direction BEFORE animation
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.9, blendDuration: 0.05)) {
+                            currentStep = .trackingFrequency
+                        }
+                    }
+                )
+                .transition(.asymmetric(
+                    insertion: isNavigatingForward ?
+                        .move(edge: .trailing).combined(with: .opacity) :  // Forward: slide in from right
+                        .move(edge: .leading).combined(with: .opacity),   // Back: slide in from left
+                    removal: isNavigatingForward ?
+                        .move(edge: .leading).combined(with: .opacity) :   // Forward: slide out to left
+                        .move(edge: .trailing).combined(with: .opacity)    // Back: slide out to right
+                ))
+
+            case .socialProof:
+                SocialProofOnboardingView(
+                    isPresented: $isPresented,
+                    onContinue: {
+                        print("⭐ OnboardingFlow: ======= SOCIAL PROOF COMPLETED =======")
+                        print("⭐ OnboardingFlow: Proceeding to transaction addition...")
+
+                        // Mark social proof as complete
+                        UserDefaults.standard.set(true, forKey: "hasCompletedSocialProof")
+
+                        // Set progression to 14 (social proof completed)
+                        onboardingStateManager.setOnboardingProgress(to: 14)
+
+                        // Navigate to transaction addition
+                        print("🔢 OnboardingFlow: Social proof completed, navigating to transaction addition")
+                        isNavigatingForward = true
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.9, blendDuration: 0.05)) {
+                            currentStep = .transactionAddition
+                        }
+                    },
+                    onBack: {
+                        print("⬅️ OnboardingFlow: Back from social proof to tracking method")
+                        isNavigatingForward = false
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.9, blendDuration: 0.05)) {
+                            currentStep = .trackingMethod
+                        }
+                    }
+                )
+                .transition(.asymmetric(
+                    insertion: isNavigatingForward ?
+                        .move(edge: .trailing).combined(with: .opacity) :
+                        .move(edge: .leading).combined(with: .opacity),
+                    removal: isNavigatingForward ?
+                        .move(edge: .leading).combined(with: .opacity) :
+                        .move(edge: .trailing).combined(with: .opacity)
+                ))
+
             case .transactionAddition:
                 OnboardingTransactionView(
                     isPresented: $isPresented,
                     onComplete: {
                         print("💰 OnboardingFlow: ======= TRANSACTION STEP COMPLETED =======")
                         print("💰 OnboardingFlow: Transaction onboarding completed, finishing overall onboarding...")
-                        // Set progression to 5 (onboarding complete)
-                        onboardingStateManager.setOnboardingProgress(to: 5)
+                        // Set progression to 16 (onboarding complete)
+                        onboardingStateManager.setOnboardingProgress(to: 16)
                         completeOnboarding()
                     },
                     onBack: {
@@ -289,9 +649,9 @@ struct OnboardingFlow: View {
                         print("🔥 TRANSITION DEBUG: isNavigatingForward before: \(isNavigatingForward)")
                         print("🔥 TRANSITION DEBUG: Setting isNavigatingForward = false")
                         isNavigatingForward = false
-                        print("🔥 TRANSITION DEBUG: Setting currentStep = .goalSelection with animation")
+                        print("🔥 TRANSITION DEBUG: Setting currentStep = .socialProof with animation")
                         withAnimation(.spring(response: 0.3, dampingFraction: 0.9, blendDuration: 0.05)) {
-                            currentStep = .goalSelection
+                            currentStep = .socialProof
                         }
                         print("🔥 TRANSITION DEBUG: Current step after: \(currentStep)")
                         print("🔥 TRANSITION DEBUG: isNavigatingForward after: \(isNavigatingForward)")
@@ -300,11 +660,11 @@ struct OnboardingFlow: View {
                 )
                 .environmentObject(toastManager)
                 .transition(.asymmetric(
-                    insertion: isNavigatingForward ? 
+                    insertion: isNavigatingForward ?
                         .move(edge: .trailing).combined(with: .opacity) :  // Forward: slide in from right
                         .move(edge: .leading).combined(with: .opacity),   // Back: slide in from left
-                    removal: isNavigatingForward ? 
-                        .move(edge: .leading).combined(with: .opacity) :   // Forward: slide out to left  
+                    removal: isNavigatingForward ?
+                        .move(edge: .leading).combined(with: .opacity) :   // Forward: slide out to left
                         .move(edge: .trailing).combined(with: .opacity)    // Back: slide out to right
                 ))
             }
@@ -375,10 +735,20 @@ struct OnboardingFlow: View {
         
         // Define step order
         let orderedSteps: [OnboardingStep] = [
-            .emailConfirmation,
+            .valueFeature1,
+            .valueFeature2,
+            .valueFeature3,
+            .valueFeature4,
             .nameCollection,
-            .currencySelection, 
+            .currencySelection,
             .goalSelection,
+            .stressSelection,
+            .overspentRealization,
+            .trackingDifficulty,
+            .idealOutcome,
+            .trackingFrequency,
+            .trackingMethod,
+            .socialProof,
             .transactionAddition
         ]
         
@@ -393,6 +763,10 @@ struct OnboardingFlow: View {
             let nextStep = orderedSteps[i]
             
             switch nextStep {
+            case .valueFeature1, .valueFeature2, .valueFeature3, .valueFeature4:
+                // Value features don't have gates, just proceed through them
+                print("🎯 OnboardingFlow: Next step: \(nextStep)")
+                return nextStep
             case .emailConfirmation:
                 if gateResults[.emailVerification] == false {
                     print("🎯 OnboardingFlow: Next incomplete step: \(nextStep)")
@@ -413,6 +787,34 @@ struct OnboardingFlow: View {
                     print("🎯 OnboardingFlow: Next incomplete step: \(nextStep)")
                     return nextStep
                 }
+            case .stressSelection:
+                // Stress selection doesn't have a gate, just proceed through it
+                print("🎯 OnboardingFlow: Next step: stress selection")
+                return nextStep
+            case .overspentRealization:
+                // Overspent realization doesn't have a gate, just proceed through it
+                print("🎯 OnboardingFlow: Next step: overspent realization")
+                return nextStep
+            case .trackingDifficulty:
+                // Tracking difficulty doesn't have a gate, just proceed through it
+                print("🎯 OnboardingFlow: Next step: tracking difficulty")
+                return nextStep
+            case .idealOutcome:
+                // Ideal outcome doesn't have a gate, just proceed through it
+                print("🎯 OnboardingFlow: Next step: ideal outcome")
+                return nextStep
+            case .trackingFrequency:
+                // Tracking frequency doesn't have a gate, just proceed through it
+                print("🎯 OnboardingFlow: Next step: tracking frequency")
+                return nextStep
+            case .trackingMethod:
+                // Tracking method doesn't have a gate, just proceed through it
+                print("🎯 OnboardingFlow: Next step: tracking method")
+                return nextStep
+            case .socialProof:
+                // Social proof doesn't have a gate, just proceed through it
+                print("🎯 OnboardingFlow: Next step: social proof")
+                return nextStep
             case .transactionAddition:
                 let transactionGateComplete = stateManager.checkTransactionGate()
                 if !transactionGateComplete {
@@ -794,18 +1196,27 @@ struct OnboardingFlow: View {
     private func calculateProgress() -> (current: Int, total: Int, percentage: Double) {
         // Determine which steps this user actually needs
         var userSteps: [OnboardingStep] = []
-        
-        // Always need email confirmation
-        userSteps.append(.emailConfirmation)
-        
+
+        // Always start with value features
+        userSteps.append(.valueFeature1)
+        userSteps.append(.valueFeature2)
+        userSteps.append(.valueFeature3)
+        userSteps.append(.valueFeature4)
+
         // Check if user needs name collection
         if shouldShowNameCollection() {
             userSteps.append(.nameCollection)
         }
-        
-        // Always need currency and goals
+
+        // Always need currency, goals, stress selection, overspent realization, tracking difficulty, ideal outcome, tracking frequency, tracking method, and transaction
         userSteps.append(.currencySelection)
-        userSteps.append(.goalSelection) 
+        userSteps.append(.goalSelection)
+        userSteps.append(.stressSelection)
+        userSteps.append(.overspentRealization)
+        userSteps.append(.trackingDifficulty)
+        userSteps.append(.idealOutcome)
+        userSteps.append(.trackingFrequency)
+        userSteps.append(.trackingMethod)
         userSteps.append(.transactionAddition)
         
         // Find current step position

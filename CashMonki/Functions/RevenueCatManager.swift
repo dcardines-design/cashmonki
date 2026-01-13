@@ -187,17 +187,39 @@ class RevenueCatManager: NSObject, ObservableObject {
             let loadedOfferings = try await Purchases.shared.offerings()
             offerings = loadedOfferings
 
-            if let current = loadedOfferings.current {
-                print("✅ RevenueCat: Loaded offering '\(current.identifier)' with \(current.availablePackages.count) packages")
-                for package in current.availablePackages {
-                    print("   📦 \(package.storeProduct.localizedTitle) - \(package.storeProduct.localizedPriceString)")
+            // Log ALL offerings
+            print("✅ RevenueCat: ======= ALL OFFERINGS =======")
+            print("   Total offerings: \(loadedOfferings.all.count)")
+            print("   Offering IDs: \(loadedOfferings.all.keys.sorted())")
+
+            for (id, offering) in loadedOfferings.all.sorted(by: { $0.key < $1.key }) {
+                let isCurrent = (offering.identifier == loadedOfferings.current?.identifier)
+                print("   📋 Offering: '\(id)' \(isCurrent ? "⭐ CURRENT" : "")")
+                print("      Packages: \(offering.availablePackages.count)")
+                for package in offering.availablePackages {
+                    print("      📦 \(package.identifier): \(package.storeProduct.productIdentifier)")
+                    print("         - \(package.storeProduct.localizedTitle)")
+                    print("         - \(package.storeProduct.localizedPriceString)")
+                    if let intro = package.storeProduct.introductoryDiscount {
+                        print("         - Intro: \(intro.price) for \(intro.subscriptionPeriod.value) \(intro.subscriptionPeriod.unit)")
+                    }
                 }
+            }
+            print("✅ RevenueCat: ======= END OFFERINGS =======")
+
+            if let current = loadedOfferings.current {
+                print("✅ RevenueCat: Current offering is '\(current.identifier)'")
             } else {
-                print("⚠️ RevenueCat: No current offering available")
+                print("⚠️ RevenueCat: No current offering set")
             }
         } catch {
             print("❌ RevenueCat: Failed to load offerings - \(error.localizedDescription)")
         }
+    }
+
+    /// Get a specific offering by identifier (for promo paywalls)
+    func getOffering(identifier: String) -> Offering? {
+        return offerings?.all[identifier]
     }
 
     // MARK: - Purchases

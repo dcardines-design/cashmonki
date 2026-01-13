@@ -60,6 +60,9 @@ struct HomePage: View {
     @State internal var selectedTransactionForDetail: Txn?
     @State internal var showingUsageLimitModal: Bool = false
     @State internal var showingCustomPaywall: Bool = false
+    @State internal var showingCameraPermissionAlert: Bool = false
+    @State internal var showingAddSubscription: Bool = false
+    @State internal var selectedSubscriptionForDetail: Subscription?
 
     // Note: Roast feature state moved to ContentView for global availability
 
@@ -289,6 +292,16 @@ struct HomePage: View {
                     }
                 )
             }
+            .alert("Camera Access Disabled", isPresented: $showingCameraPermissionAlert) {
+                Button("Open Settings") {
+                    if let settingsURL = URL(string: UIApplication.openSettingsURLString) {
+                        UIApplication.shared.open(settingsURL)
+                    }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("To scan receipts, please enable camera access in Settings.")
+            }
             .onChange(of: capturedImage) { _, newImage in
                 if let newImage = newImage {
                     let transitionStart = Date()
@@ -339,10 +352,41 @@ struct HomePage: View {
                     }
                 )
                 .presentationDetents([.fraction(0.98)])
+                .presentationCornerRadius(20)
                 .presentationDragIndicator(.hidden)
             }
             .fullScreenCover(isPresented: $showingCustomPaywall) {
                 CustomPaywallSheet(isPresented: $showingCustomPaywall)
+            }
+            .sheet(isPresented: $showingAddSubscription) {
+                AddSubscriptionSheet(isPresented: $showingAddSubscription) { subscription in
+                    print("📋 HomePage: New subscription added: \(subscription.name)")
+                    toastManager.showSuccess("Subscription added!")
+                }
+                .presentationDetents([.fraction(0.98)])
+                .presentationCornerRadius(20)
+                .presentationDragIndicator(.hidden)
+            }
+            .sheet(item: $selectedSubscriptionForDetail) { subscription in
+                RecurringDetailSheet(
+                    subscription: subscription,
+                    onDismiss: {
+                        selectedSubscriptionForDetail = nil
+                    },
+                    onEdit: { updatedSubscription in
+                        SubscriptionManager.shared.updateSubscription(updatedSubscription)
+                        print("📋 HomePage: Subscription updated: \(updatedSubscription.name)")
+                        toastManager.showSuccess("Subscription updated!")
+                    },
+                    onDelete: { deletedSubscription in
+                        SubscriptionManager.shared.deleteSubscription(deletedSubscription)
+                        print("📋 HomePage: Subscription deleted: \(deletedSubscription.name)")
+                        toastManager.showDeleted("Transaction deleted")
+                    }
+                )
+                .presentationDetents([.fraction(0.98)])
+                .presentationCornerRadius(20)
+                .presentationDragIndicator(.hidden)
             }
             // Note: Roast sheet moved to ContentView for global availability
             // TODO: Add toast functionality back when toast extension is available
@@ -366,6 +410,7 @@ struct HomePage: View {
             combinedTabSelectors
             actionTiles
             recentTransactionsSection
+            recurringTransactionsSection
         }
         .padding(.horizontal, 20)
         .padding(.top, 24)
@@ -635,28 +680,55 @@ struct HomePage: View {
             return total + getTransactionImpact(txn)
         }
         
-        // Apply chart filter to the period total
+        // Apply chart filter to the period total (with currency conversion)
+        let primaryCurrency = CurrencyPreferences.shared.primaryCurrency
+        let rateManager = CurrencyRateManager.shared
+
         switch chartFilter {
         case .balance:
-            return periodTotal // Show full period total
+            return periodTotal // Show full period total (already converted by getTransactionImpact)
         case .income:
-            // Only sum positive transactions (income)
-            let incomeTotal = periodTransactions
-                .filter { $0.amount > 0 }
-                .reduce(0) { total, txn in total + txn.amount }
+            // Only sum positive transactions (income) with currency conversion
+            let incomeTotal = periodTransactions.reduce(0.0) { total, txn in
+                let convertedAmount = convertTransactionAmount(txn, primaryCurrency: primaryCurrency, rateManager: rateManager)
+                return total + (convertedAmount > 0 ? convertedAmount : 0)
+            }
             return incomeTotal
         case .expense:
-            // Only sum negative transactions (expenses) as positive
-            let expenseTotal = periodTransactions
-                .filter { $0.amount < 0 }
-                .reduce(0) { total, txn in total + abs(txn.amount) }
+            // Only sum negative transactions (expenses) as positive with currency conversion
+            let expenseTotal = periodTransactions.reduce(0.0) { total, txn in
+                let convertedAmount = convertTransactionAmount(txn, primaryCurrency: primaryCurrency, rateManager: rateManager)
+                return total + (convertedAmount < 0 ? abs(convertedAmount) : 0)
+            }
             return expenseTotal
         }
     }
-    
-    // Helper function to get transaction impact (same as line chart)
+
+    // Helper function to convert transaction amount to primary currency
+    private func convertTransactionAmount(_ transaction: Txn, primaryCurrency: Currency, rateManager: CurrencyRateManager) -> Double {
+        if transaction.primaryCurrency == primaryCurrency {
+            return transaction.amount
+        } else {
+            return rateManager.convertAmount(
+                transaction.amount,
+                from: transaction.primaryCurrency,
+                to: primaryCurrency
+            )
+        }
+    }
+
+    // Helper function to get transaction impact (same as line chart, with currency conversion)
     private func getTransactionImpact(_ transaction: Txn) -> Double {
-        return transaction.amount // Transaction amounts already have correct sign
+        let primaryCurrency = CurrencyPreferences.shared.primaryCurrency
+        if transaction.primaryCurrency == primaryCurrency {
+            return transaction.amount
+        } else {
+            return CurrencyRateManager.shared.convertAmount(
+                transaction.amount,
+                from: transaction.primaryCurrency,
+                to: primaryCurrency
+            )
+        }
     }
 
     // MARK: - Computed Properties
@@ -694,12 +766,79 @@ struct HomePage: View {
     internal var previousPeriodLabel: String {
         switch rangeSelection {
         case .day: return "Yesterday"
-        case .week: return "Last week"  
+        case .week: return "Last week"
         case .month: return "Last month"
         case .quarter: return "Last quarter"
         }
     }
-    
+
+    /// Label for previous balance in Balance mode (clearer than "Last week")
+    internal var previousBalanceLabel: String {
+        switch rangeSelection {
+        case .day: return "Yesterday"
+        case .week: return "Week ago"
+        case .month: return "Month ago"
+        case .quarter: return "Quarter ago"
+        }
+    }
+
+    /// Cumulative balance up to now (for Balance mode bar chart)
+    internal var cumulativeBalanceNow: Double {
+        let transactions = accountManager.filteredTransactions
+        let now = Date()
+        let primaryCurrency = currencyPrefs.primaryCurrency
+        let rateManager = CurrencyRateManager.shared
+
+        return transactions
+            .filter { $0.date <= now }
+            .reduce(0.0) { sum, txn in
+                let convertedAmount: Double
+                if txn.primaryCurrency == primaryCurrency {
+                    convertedAmount = txn.amount
+                } else {
+                    convertedAmount = rateManager.convertAmount(txn.amount, from: txn.primaryCurrency, to: primaryCurrency)
+                }
+                return sum + convertedAmount
+            }
+    }
+
+    /// Cumulative balance at start of current period (for Balance mode bar chart)
+    internal var cumulativeBalanceAtPeriodStart: Double {
+        let transactions = accountManager.filteredTransactions
+        let cal = Calendar.current
+        let now = Date()
+        let primaryCurrency = currencyPrefs.primaryCurrency
+        let rateManager = CurrencyRateManager.shared
+
+        // Get start of current period
+        let periodStart: Date = {
+            switch rangeSelection {
+            case .day:
+                return cal.startOfDay(for: now)
+            case .week:
+                return cal.dateInterval(of: .weekOfYear, for: now)?.start ?? now
+            case .month:
+                return cal.dateInterval(of: .month, for: now)?.start ?? now
+            case .quarter:
+                let currentMonth = cal.component(.month, from: now)
+                let quarterStartMonth = ((currentMonth - 1) / 3) * 3 + 1
+                return cal.date(from: DateComponents(year: cal.component(.year, from: now), month: quarterStartMonth, day: 1)) ?? now
+            }
+        }()
+
+        return transactions
+            .filter { $0.date < periodStart }
+            .reduce(0.0) { sum, txn in
+                let convertedAmount: Double
+                if txn.primaryCurrency == primaryCurrency {
+                    convertedAmount = txn.amount
+                } else {
+                    convertedAmount = rateManager.convertAmount(txn.amount, from: txn.primaryCurrency, to: primaryCurrency)
+                }
+                return sum + convertedAmount
+            }
+    }
+
     internal var percentageChange: Double {
         guard cachedPreviousPeriodTotal != 0 else { return 0.0 }
         return ((cachedCurrentPeriodTotal - cachedPreviousPeriodTotal) / cachedPreviousPeriodTotal) * 100
@@ -850,6 +989,24 @@ struct HomePage: View {
                     lastKnownTransactionCount.wrappedValue = accountManager.filteredTransactions.count
                     updateCachedTotalsIfNeeded()
                     updateRecentTransactions()
+
+                    // OPTIMIZATION: Pre-warm camera session for instant scan access
+                    // This starts the camera in the background so it's ready when user taps "Scan"
+                    if !CameraManager.isPrewarmed {
+                        CameraManager.prewarm()
+                    }
+                }
+                .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in
+                    // Stop camera when app goes to background to save battery
+                    print("🔥 Camera: App backgrounding - stopping session to save battery")
+                    CameraManager.shared.stopSession()
+                }
+                .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
+                    // Re-warm camera when app comes back to foreground
+                    print("🔥 Camera: App foregrounding - re-warming session")
+                    if !CameraManager.isPrewarmed {
+                        CameraManager.prewarm()
+                    }
                 }
                 .onReceive(userManager.objectWillChange.debounce(for: .milliseconds(100), scheduler: RunLoop.main)) { [self] _ in
                     print("🔔 HomePage: objectWillChange received from UserManager (debounced)")

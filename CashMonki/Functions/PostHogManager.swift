@@ -26,6 +26,15 @@ enum AnalyticsEvent: String {
     case onboardingStepCompleted = "onboarding_step_completed"
     case onboardingCompleted = "onboarding_completed"
     case onboardingSkipped = "onboarding_skipped"
+    case onboardingGoalsSelected = "onboarding_goals_selected"
+    case onboardingStressSelected = "onboarding_stress_selected"
+    case onboardingOverspentSelected = "onboarding_overspent_selected"
+    case onboardingTrackingDifficultySelected = "onboarding_tracking_difficulty_selected"
+    case onboardingIdealOutcomeSelected = "onboarding_ideal_outcome_selected"
+    case onboardingTrackingFrequencySelected = "onboarding_tracking_frequency_selected"
+    case onboardingTrackingMethodSelected = "onboarding_tracking_method_selected"
+    case onboardingValueFeatureViewed = "onboarding_value_feature_viewed"
+    case onboardingNameCollected = "onboarding_name_collected"
 
     // Transactions
     case transactionCreated = "transaction_created"
@@ -37,6 +46,10 @@ enum AnalyticsEvent: String {
     case receiptScanStarted = "receipt_scan_started"
     case receiptScanCompleted = "receipt_scan_completed"
     case receiptScanFailed = "receipt_scan_failed"
+
+    // Roast My Receipt
+    case roastMessageTriggered = "roast_message_triggered"
+    case roastMessageAttached = "roast_message_attached"
 
     // Wallets
     case walletCreated = "wallet_created"
@@ -53,6 +66,12 @@ enum AnalyticsEvent: String {
     case budgetCreated = "budget_created"
     case budgetEdited = "budget_edited"
     case budgetDeleted = "budget_deleted"
+
+    // Recurring / Subscriptions (expense tracking)
+    case subscriptionCreated = "recurring_subscription_created"
+    case subscriptionEdited = "recurring_subscription_edited"
+    case subscriptionDeleted = "recurring_subscription_deleted"
+    case subscriptionPaused = "recurring_subscription_paused"
 
     // Currency
     case currencyChanged = "currency_changed"

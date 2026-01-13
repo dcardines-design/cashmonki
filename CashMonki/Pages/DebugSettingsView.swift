@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import UserNotifications
 #if canImport(FirebaseAuth)
 import FirebaseAuth
 #endif
@@ -111,6 +112,41 @@ struct DebugSettingsSection: View {
                 icon: "🔧"
             ) {
                 userManager.forceManualSyncToFirebase()
+            }
+
+            Divider()
+                .padding(.leading, 52)
+
+            debugSettingsRow(
+                title: "Test Notification (3 sec)",
+                subtitle: "Send a test notification in 3 seconds",
+                icon: "🔔"
+            ) {
+                testNotification()
+            }
+
+            Divider()
+                .padding(.leading, 52)
+
+            debugSettingsRow(
+                title: "Load Sample Subscriptions",
+                subtitle: "Add sample recurring subscriptions (Netflix, Spotify, iCloud)",
+                icon: "📋"
+            ) {
+                SubscriptionManager.shared.loadSampleData()
+                toastManager.showSuccess("Sample subscriptions loaded!")
+            }
+
+            Divider()
+                .padding(.leading, 52)
+
+            debugSettingsRow(
+                title: "Clear All Subscriptions",
+                subtitle: "Remove all recurring subscriptions",
+                icon: "🧹"
+            ) {
+                SubscriptionManager.shared.clearAllSubscriptions()
+                toastManager.showSuccess("Subscriptions cleared!")
             }
         }
     }
@@ -331,6 +367,27 @@ struct DebugSettingsSection: View {
             results.append("Config: Empty")
             environmentTestResult = results.joined(separator: " | ")
             toastManager.showError("No API key found!")
+        }
+    }
+
+    private func testNotification() {
+        print("🔔 DEBUG: Testing notification...")
+
+        let content = UNMutableNotificationContent()
+        content.title = "🧪 Test Notification"
+        content.body = "If you see this, notifications are working!"
+        content.sound = .default
+
+        // Fire in 3 seconds
+        let trigger = UNTimeIntervalNotificationTrigger(timeInterval: 3, repeats: false)
+        let request = UNNotificationRequest(identifier: "test_notification", content: content, trigger: trigger)
+
+        UNUserNotificationCenter.current().add(request) { error in
+            if let error = error {
+                print("🔔 DEBUG: Failed to schedule test notification - \(error.localizedDescription)")
+            } else {
+                print("🔔 DEBUG: Test notification scheduled - fires in 3 seconds")
+            }
         }
     }
 }

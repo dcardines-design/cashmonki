@@ -553,8 +553,8 @@ enum MigrationState: String, CaseIterable {
         case .notStarted: return .gray
         case .assessmentCompleted: return .orange
         case .inProgress, .rollingBack: return .blue
-        case .completed: return .green
-        case .failed: return .red
+        case .completed: return AppColors.successForeground
+        case .failed: return AppColors.accentRed
         }
     }
 }
@@ -675,7 +675,7 @@ enum LogLevel: String, CaseIterable {
         switch self {
         case .info: return .blue
         case .warning: return .orange
-        case .error: return .red
+        case .error: return AppColors.accentRed
         }
     }
 }

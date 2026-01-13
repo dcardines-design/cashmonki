@@ -99,10 +99,10 @@ struct SyncStatusIndicator: View {
         case .notSynced:
             return .gray
         case .error:
-            return .red
+            return AppColors.accentRed
         }
     }
-    
+
     private var statusBackgroundColor: Color {
         switch syncStatus {
         case .syncing:
@@ -114,7 +114,7 @@ struct SyncStatusIndicator: View {
         case .notSynced:
             return Color.gray.opacity(0.1)
         case .error:
-            return Color.red.opacity(0.1)
+            return AppColors.accentRed.opacity(0.1)
         }
     }
     
@@ -157,7 +157,7 @@ struct SyncDetailsSheet: View {
                             .foregroundColor(AppColors.destructiveForeground)
                             .padding(.horizontal, 12)
                             .padding(.vertical, 8)
-                            .background(Color.red.opacity(0.1))
+                            .background(AppColors.accentRed.opacity(0.1))
                             .cornerRadius(8)
                     }
                 }
@@ -232,7 +232,7 @@ struct SyncDetailsSheet: View {
         HStack {
             Text(title)
                 .font(.caption)
-                .foregroundColor(.secondary)
+                .foregroundColor(AppColors.foregroundSecondary)
             Spacer()
             Text(value)
                 .font(.caption)
@@ -314,7 +314,7 @@ struct SyncStatusIndicator_Previews: PreviewProvider {
                 }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 6)
-                .background(Color.red.opacity(0.1))
+                .background(AppColors.accentRed.opacity(0.1))
                 .cornerRadius(16)
             }
         }

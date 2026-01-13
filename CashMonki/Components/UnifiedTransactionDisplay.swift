@@ -15,6 +15,7 @@ struct UnifiedTransactionDisplay: View {
     let onTransactionUpdate: ((Txn) -> Void)?
     @ObservedObject private var categoriesManager = CategoriesManager.shared
     @ObservedObject private var userManager = UserManager.shared
+    @ObservedObject private var currencyPrefs = CurrencyPreferences.shared
     
     // MARK: - Display Styles
     enum DisplayStyle {
@@ -36,29 +37,53 @@ struct UnifiedTransactionDisplay: View {
         self.onTransactionUpdate = onTransactionUpdate
     }
     
-    /// Check if the transaction category is an income category
+    /// Check if the transaction category is an income category (by looking up category type)
     private var isIncomeCategory: Bool {
-        // Use transaction amount to determine income vs expense
-        // This handles cases where expense categories are used for income (like utility refunds)
-        // or income categories are used for expenses (like salary deductions)
+        // Look up category type from CategoriesManager (more reliable than amount sign)
+        if let catId = transaction.categoryId {
+            if let result = categoriesManager.findCategoryOrSubcategoryById(catId) {
+                if let cat = result.category {
+                    return cat.type == .income
+                } else if let subcat = result.subcategory {
+                    return subcat.type == .income
+                }
+            }
+        }
+        // Fallback to name lookup
+        let result = categoriesManager.findCategoryOrSubcategory(by: transaction.category)
+        if let cat = result.category {
+            return cat.type == .income
+        } else if let subcat = result.subcategory {
+            return subcat.type == .income
+        }
+        // Final fallback to amount sign
         return transaction.amount > 0
     }
-    
+
     /// Get the appropriate category type for emoji lookup
     private var categoryType: CategoryType {
         return isIncomeCategory ? .income : .expense
     }
-    
+
     /// Get the appropriate color for the amount text
     private var amountTextColor: Color {
-        // Use design system colors for consistency
-        // Green for income (positive amounts), red for expenses (negative amounts)
-        return transaction.amount > 0 ? AppColors.successForeground : Color.red
+        // Use category type for color (more reliable than amount sign)
+        return isIncomeCategory ? AppColors.successForeground : AppColors.accentRed
     }
 
     /// Get the current display name for the category (handles renamed categories)
     private var categoryDisplayName: String {
         categoriesManager.getCategoryDisplayName(for: transaction)
+    }
+
+    /// Get emoji by UUID first, fallback to name for legacy transactions
+    private var categoryEmoji: String {
+        // UUID-first lookup with name fallback (handles category reinitializations)
+        if let categoryId = transaction.categoryId {
+            return TxnCategoryIcon.emojiFor(categoryId: categoryId, categoryName: transaction.category)
+        }
+        // Fallback to name-based lookup for legacy transactions without categoryId
+        return categoriesManager.emojiFor(category: categoryDisplayName, type: categoryType)
     }
     
     /// Check if we should show secondary amount (user entered or converted amount)
@@ -102,7 +127,7 @@ struct UnifiedTransactionDisplay: View {
                     .fill(AppColors.surfacePrimary)
                     .frame(width: 34, height: 34)
                 
-                Text(categoriesManager.emojiFor(category: categoryDisplayName, type: categoryType))
+                Text(categoryEmoji)
                     .font(.system(size: 17))
             }
 
@@ -143,7 +168,7 @@ struct UnifiedTransactionDisplay: View {
                     .fill(AppColors.surfacePrimary)
                     .frame(width: 34, height: 34)
                 
-                Text(categoriesManager.emojiFor(category: categoryDisplayName, type: categoryType))
+                Text(categoryEmoji)
                     .font(.system(size: 17))
             }
 
@@ -198,7 +223,7 @@ struct UnifiedTransactionDisplay: View {
                     .fill(AppColors.surfacePrimary)
                     .frame(width: 24, height: 24)
                 
-                Text(categoriesManager.emojiFor(category: categoryDisplayName, type: categoryType))
+                Text(categoryEmoji)
                     .font(.system(size: 12))
             }
 
@@ -235,7 +260,7 @@ struct UnifiedTransactionDisplay: View {
                         .fill(AppColors.surfacePrimary)
                         .frame(width: 40, height: 40)
                     
-                    Text(categoriesManager.emojiFor(category: categoryDisplayName, type: categoryType))
+                    Text(categoryEmoji)
                         .font(.system(size: 20))
                 }
 
@@ -323,8 +348,21 @@ struct UnifiedTransactionDisplay: View {
     }
     
     private var primaryAmountText: String {
-        let amount = abs(transaction.amount)
-        return formatCurrency(amount, currency: transaction.primaryCurrency)
+        let currentPrimaryCurrency = currencyPrefs.primaryCurrency
+
+        // Convert from transaction's stored currency to user's current primary currency
+        let convertedAmount: Double
+        if transaction.primaryCurrency != currentPrimaryCurrency {
+            convertedAmount = CurrencyRateManager.shared.convertAmount(
+                abs(transaction.amount),
+                from: transaction.primaryCurrency,
+                to: currentPrimaryCurrency
+            )
+        } else {
+            convertedAmount = abs(transaction.amount)
+        }
+
+        return formatCurrency(convertedAmount, currency: currentPrimaryCurrency)
     }
     
     private var originalAmountText: String {
@@ -353,6 +391,9 @@ struct UnifiedTransactionDisplay: View {
         let formatter = DateFormatter()
         formatter.amSymbol = "am"
         formatter.pmSymbol = "pm"
+
+        // Force 12-hour format regardless of locale (avoids "19" looking like a year)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
 
         // Hide year if current year, show shorthand ('24) if different year
         let calendar = Calendar.current

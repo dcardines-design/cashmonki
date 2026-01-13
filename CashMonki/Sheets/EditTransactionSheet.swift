@@ -44,12 +44,33 @@ struct EditTransactionSheet: View {
     @State private var note: String
     @State private var showingCurrencyPicker = false
     @State private var showingDeleteAlert = false
+    // Recurring transaction state
+    @State private var isRecurring: Bool
+    @State private var recurringFrequency: RecurringFrequency
+    @State private var showingFrequencyPicker: Bool = false
+    // Recurring confirmation dialogs
+    @State private var showingRecurringEditConfirmation = false
+    @State private var showingRecurringDeleteConfirmation = false
+    @State private var pendingUpdatedTransaction: Txn?
     @FocusState private var isAmountFocused: Bool
     @FocusState private var isMerchantFocused: Bool
     @FocusState private var isNoteFocused: Bool
     
     @ObservedObject private var categoriesManager = CategoriesManager.shared
     @ObservedObject private var rateManager = CurrencyRateManager.shared
+    @ObservedObject private var recurringManager = RecurringTransactionManager.shared
+
+    // MARK: - Recurring Transaction Type Detection
+
+    /// Check if this transaction is a recurring template (parent)
+    private var isRecurringTemplate: Bool {
+        recurringManager.isTemplate(transaction)
+    }
+
+    /// Check if this transaction is a generated child of a recurring template
+    private var isGeneratedChild: Bool {
+        recurringManager.isGeneratedChild(transaction)
+    }
     
     // Smart decimal formatting - hides .00, shows .01 when needed
     static func formatAmountForInput(_ amount: Double) -> String {
@@ -94,8 +115,28 @@ struct EditTransactionSheet: View {
         self._selectedCategoryId = State(initialValue: transaction.categoryId)
         self._selectedCurrency = State(initialValue: displayCurrency)
         self._note = State(initialValue: transaction.note ?? "")
-        
+
+        // Initialize recurring state from transaction
+        // For generated children, check if they have a parent template (recurringTemplateId != nil)
+        let recurringManager = RecurringTransactionManager.shared
+        let isTemplate = recurringManager.isTemplate(transaction)
+        let isChild = recurringManager.isGeneratedChild(transaction)
+
+        // Toggle should show ON for both templates and generated children
+        self._isRecurring = State(initialValue: isTemplate || isChild)
+
+        // Get frequency from transaction or parent template
+        var frequency: RecurringFrequency = .monthly
+        if let txFrequency = transaction.recurringFrequency {
+            frequency = txFrequency
+        } else if isChild, let parentTemplate = recurringManager.getParentTemplate(for: transaction.id) {
+            frequency = parentTemplate.recurringFrequency ?? .monthly
+        }
+        self._recurringFrequency = State(initialValue: frequency)
+
         print("🐛 EditTransactionSheet INIT - note field initialized with: '\(transaction.note ?? "")'")
+        print("🐛 EditTransactionSheet INIT - isTemplate: \(isTemplate), isChild: \(isChild)")
+        print("🐛 EditTransactionSheet INIT - isRecurring toggle: \(isTemplate || isChild), frequency: \(frequency.displayName)")
     }
     
     var body: some View {
@@ -131,7 +172,7 @@ struct EditTransactionSheet: View {
                     )
 
                     // Date field with Time using AppInputField
-                    AppInputField.date(title: "Date", dateValue: $selectedDate, components: [.date, .hourAndMinute], size: .md)
+                    AppInputField.date(title: "Date", dateValue: $selectedDate, components: [.date, .hourAndMinute], size: .md, maxDate: Date())
 
                     // Merchant field
                     AppInputField.text(
@@ -152,9 +193,32 @@ struct EditTransactionSheet: View {
                         size: .md,
                         focusBinding: $isNoteFocused
                     )
-                    
+
+                    // COMMENTED OUT FOR APP STORE SUBMISSION - TODO: Uncomment later
+                    // Recurring Toggle Row
+                    /*
+                    HStack(spacing: 4) {
+                        Text("This transaction repeats")
+                            .font(AppFonts.overusedGroteskMedium(size: 16))
+                            .foregroundColor(AppColors.foregroundPrimary)
+
+                        Button(action: { showingFrequencyPicker = true }) {
+                            Text(recurringFrequency.displayName)
+                                .font(AppFonts.overusedGroteskMedium(size: 16))
+                                .foregroundColor(AppColors.accentBackground)
+                        }
+
+                        Spacer()
+
+                        Toggle("", isOn: $isRecurring)
+                            .toggleStyle(SwitchToggleStyle(tint: AppColors.accentBackground))
+                            .labelsHidden()
+                    }
+                    .padding(.vertical, 4)
+                    */
+
                     Spacer()
-                        .frame(height: 100)
+                        .frame(height: 20)
                 }
                 .padding(.horizontal, 20)
                 .padding(.top, 24)
@@ -174,6 +238,16 @@ struct EditTransactionSheet: View {
                 isPresented: $showingCurrencyPicker
             )
             .presentationDetents([.fraction(0.98)])
+            .presentationCornerRadius(20)
+            .presentationDragIndicator(.hidden)
+        }
+        .sheet(isPresented: $showingFrequencyPicker) {
+            RecurringFrequencyPickerSheet(
+                isPresented: $showingFrequencyPicker,
+                selectedFrequency: $recurringFrequency
+            )
+            .presentationDetents([.height(520)])
+            .presentationCornerRadius(20)
             .presentationDragIndicator(.hidden)
         }
         .appAlert(
@@ -184,6 +258,40 @@ struct EditTransactionSheet: View {
                 deleteTransaction()
             }
         )
+        .confirmationDialog("Apply changes to", isPresented: $showingRecurringEditConfirmation, titleVisibility: .visible) {
+            Button("This only") {
+                handleRecurringEditOption(.thisOnly)
+            }
+            Button("Future ones") {
+                handleRecurringEditOption(.allFuture)
+            }
+            Button("All of them") {
+                handleRecurringEditOption(.allPastAndFuture)
+            }
+            Button("Cancel", role: .cancel) {}
+        }
+        .confirmationDialog(
+            isRecurringTemplate ? "Delete subscription?" : "Delete this transaction?",
+            isPresented: $showingRecurringDeleteConfirmation,
+            titleVisibility: .visible
+        ) {
+            if isRecurringTemplate {
+                Button("Stop repeating") {
+                    handleRecurringDeleteTemplateOption(.subscriptionOnly)
+                }
+                Button("Delete all", role: .destructive) {
+                    handleRecurringDeleteTemplateOption(.allOccurrences)
+                }
+            } else {
+                Button("Delete this only") {
+                    handleRecurringDeleteChildOption(.thisOnly)
+                }
+                Button("Stop all future", role: .destructive) {
+                    handleRecurringDeleteChildOption(.stopAllFuture)
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        }
     }
     
     // COMMENTED OUT: Unused secondary amount field (convertedAmount computed property)
@@ -278,9 +386,16 @@ struct EditTransactionSheet: View {
                 secondaryAmount: transaction.secondaryAmount,
                 secondaryExchangeRate: transaction.secondaryExchangeRate,
                 userEnteredAmount: transaction.userEnteredAmount, // Keep existing user entry
-                userEnteredCurrency: transaction.userEnteredCurrency // Keep existing user entry currency
+                userEnteredCurrency: transaction.userEnteredCurrency, // Keep existing user entry currency
+                // Preserve recurring fields from original transaction
+                isRecurring: transaction.isRecurring,
+                recurringFrequency: transaction.recurringFrequency,
+                recurringTemplateId: transaction.recurringTemplateId,
+                lastGeneratedDate: transaction.lastGeneratedDate,
+                isRecurringActive: transaction.isRecurringActive,
+                subscriptionId: transaction.subscriptionId // Preserve subscription link
             )
-            
+
             print("🔍 EditTransactionSheet (saveCategoryOnly): Saving category change - '\(categoryName)' with amount \(finalAmount)")
             print("🔥 SAVE CATEGORY ONLY - About to call onTransactionUpdate callback")
             onTransactionUpdate?(updatedTransaction)
@@ -456,9 +571,17 @@ struct EditTransactionSheet: View {
                 secondaryAmount: secondaryAmount,
                 secondaryExchangeRate: secondaryExchangeRate,
                 userEnteredAmount: abs(amountValue), // Keep for backward compatibility
-                userEnteredCurrency: selectedCurrency // Keep for backward compatibility
+                userEnteredCurrency: selectedCurrency, // Keep for backward compatibility
+                // Recurring fields
+                // If toggle is OFF for a generated child, unlink from parent (make standalone)
+                isRecurring: isRecurring && !isGeneratedChild, // Only templates can be recurring
+                recurringFrequency: (isRecurring && !isGeneratedChild) ? recurringFrequency : nil,
+                recurringTemplateId: isRecurring ? transaction.recurringTemplateId : nil, // Remove link if toggled OFF
+                lastGeneratedDate: transaction.lastGeneratedDate, // Preserve existing
+                isRecurringActive: isRecurring && !isGeneratedChild, // Only templates can be active
+                subscriptionId: transaction.subscriptionId // Preserve subscription link
             )
-        
+
         // Track transaction edit
         AnalyticsManager.shared.track(.transactionEdited, properties: [
             "amount": abs(updatedTransaction.amount),
@@ -468,7 +591,15 @@ struct EditTransactionSheet: View {
             "has_note": updatedTransaction.note != nil && !updatedTransaction.note!.isEmpty
         ])
 
-        // Call the update callback
+        // If editing a recurring template, show confirmation dialog
+        if isRecurringTemplate {
+            print("🔄 SAVE TRANSACTION - This is a recurring template, showing confirmation")
+            pendingUpdatedTransaction = updatedTransaction
+            showingRecurringEditConfirmation = true
+            return
+        }
+
+        // For non-recurring or generated children, proceed normally
         print("🔥 SAVE TRANSACTION - About to call onTransactionUpdate callback")
         print("🔥 SAVE TRANSACTION - Final category: '\(updatedTransaction.category)'")
         print("🔥 SAVE TRANSACTION - Final categoryId: '\(updatedTransaction.categoryId?.uuidString.prefix(8) ?? "nil")'")
@@ -488,8 +619,99 @@ struct EditTransactionSheet: View {
             dismiss()
         }
     }
-    
+
+    // MARK: - Recurring Edit Confirmation Handler
+
+    private func handleRecurringEditOption(_ option: RecurringEditOption) {
+        guard let updatedTransaction = pendingUpdatedTransaction else {
+            print("⚠️ handleRecurringEditOption - No pending transaction")
+            return
+        }
+
+        switch option {
+        case .thisOnly:
+            // Just update the template, no children affected
+            print("✏️ Recurring Edit - This only: updating template")
+            onTransactionUpdate?(updatedTransaction)
+
+        case .allFuture:
+            // Update template + future children
+            print("✏️ Recurring Edit - All future: updating template and future children")
+            onTransactionUpdate?(updatedTransaction)
+            recurringManager.updateFutureChildren(templateId: transaction.id) { child in
+                createUpdatedChild(child, from: updatedTransaction)
+            }
+
+        case .allPastAndFuture:
+            // Update template + all children
+            print("✏️ Recurring Edit - All past & future: updating template and all children")
+            onTransactionUpdate?(updatedTransaction)
+            recurringManager.updateAllChildren(templateId: transaction.id) { child in
+                createUpdatedChild(child, from: updatedTransaction)
+            }
+        }
+
+        toastManager.showChangesSaved()
+
+        if let onDismiss = onDismiss {
+            onDismiss()
+        } else {
+            dismiss()
+        }
+    }
+
+    /// Create an updated child transaction by applying template changes
+    private func createUpdatedChild(_ child: Txn, from template: Txn) -> Txn {
+        // Apply template changes (amount, category, merchant, note) but keep child-specific fields (date, id)
+        return Txn(
+            txID: child.txID,
+            accountID: child.accountID,
+            walletID: child.walletID,
+            category: template.category,
+            categoryId: template.categoryId,
+            amount: template.amount,
+            date: child.date,  // Keep child's date
+            createdAt: child.createdAt,
+            receiptImage: nil,
+            hasReceiptImage: child.hasReceiptImage,
+            merchantName: template.merchantName,
+            paymentMethod: child.paymentMethod,
+            receiptNumber: child.receiptNumber,
+            invoiceNumber: child.invoiceNumber,
+            items: child.items,
+            note: template.note,
+            originalAmount: template.originalAmount,
+            originalCurrency: template.originalCurrency,
+            primaryCurrency: child.primaryCurrency,
+            secondaryCurrency: child.secondaryCurrency,
+            exchangeRate: template.exchangeRate,
+            secondaryAmount: template.secondaryAmount,
+            secondaryExchangeRate: template.secondaryExchangeRate,
+            userEnteredAmount: template.userEnteredAmount,
+            userEnteredCurrency: template.userEnteredCurrency,
+            isRecurring: false,
+            recurringFrequency: nil,
+            recurringTemplateId: child.recurringTemplateId,
+            lastGeneratedDate: nil,
+            isRecurringActive: false,
+            subscriptionId: child.subscriptionId // Preserve subscription link
+        )
+    }
+
     private func deleteTransaction() {
+        // If this is a recurring transaction (template or child), show confirmation
+        if isRecurringTemplate || isGeneratedChild {
+            print("🔄 DELETE TRANSACTION - This is a recurring transaction, showing confirmation")
+            showingRecurringDeleteConfirmation = true
+            return
+        }
+
+        // For non-recurring transactions, proceed with normal delete
+        performDelete()
+    }
+
+    /// Actually perform the delete operation
+    private func performDelete() {
         // Track transaction deletion
         AnalyticsManager.shared.track(.transactionDeleted, properties: [
             "amount": abs(transaction.amount),
@@ -500,6 +722,54 @@ struct EditTransactionSheet: View {
 
         // Call the delete callback - parent will handle closing sheets and showing toast
         onTransactionDelete?(transaction)
+
+        if let onDismiss = onDismiss {
+            onDismiss()
+        } else {
+            dismiss()
+        }
+    }
+
+    // MARK: - Recurring Delete Confirmation Handler
+
+    private func handleRecurringDeleteTemplateOption(_ option: RecurringDeleteTemplateOption) {
+        switch option {
+        case .subscriptionOnly:
+            // Delete template only, convert children to standalone
+            print("🗑️ Recurring Delete Template - Subscription only")
+            recurringManager.deleteTemplate(templateId: transaction.id, deleteChildren: false)
+
+        case .allOccurrences:
+            // Delete template and all children
+            print("🗑️ Recurring Delete Template - All occurrences")
+            recurringManager.deleteTemplate(templateId: transaction.id, deleteChildren: true)
+        }
+
+        // Notify parent and dismiss (no need to call onTransactionDelete as manager handles it)
+        toastManager.showDeleted("Transaction deleted")
+
+        if let onDismiss = onDismiss {
+            onDismiss()
+        } else {
+            dismiss()
+        }
+    }
+
+    private func handleRecurringDeleteChildOption(_ option: RecurringDeleteChildOption) {
+        switch option {
+        case .thisOnly:
+            // Delete just this child
+            print("🗑️ Recurring Delete Child - This only")
+            recurringManager.deleteGeneratedChild(childId: transaction.id, stopFuture: false)
+
+        case .stopAllFuture:
+            // Delete child and deactivate parent
+            print("🗑️ Recurring Delete Child - Stop all future")
+            recurringManager.deleteGeneratedChild(childId: transaction.id, stopFuture: true)
+        }
+
+        // Notify parent and dismiss
+        toastManager.showDeleted("Transaction deleted")
 
         if let onDismiss = onDismiss {
             onDismiss()

@@ -19,6 +19,19 @@ struct CategoryPickerSheet: View {
     @State private var selectedTab: CategoryTab = .expense
     @ObservedObject private var categoriesManager = CategoriesManager.shared
 
+    // Persist the last selected tab for next time
+    @AppStorage("lastSelectedCategoryTab") private static var lastSelectedTabRaw: String = "expense"
+
+    /// Save the current tab preference
+    private func saveTabPreference() {
+        Self.lastSelectedTabRaw = selectedTab == .income ? "income" : "expense"
+    }
+
+    /// Get the saved tab preference
+    static var savedTabPreference: CategoryTab {
+        return lastSelectedTabRaw == "income" ? .income : .expense
+    }
+
     // Track whether we're using ID-based or String-based selection
     private let useIdBasedSelection: Bool
     
@@ -86,8 +99,9 @@ struct CategoryPickerSheet: View {
         self.initialTab = initialTab
         self.expenseOnly = expenseOnly
         self.useIdBasedSelection = false
-        // Set smart default based on initialTab (expense only if expenseOnly mode)
-        self._selectedTab = State(initialValue: expenseOnly ? .expense : (initialTab ?? .expense))
+        // Set smart default: expenseOnly mode → .expense, else initialTab → saved preference
+        let defaultTab = expenseOnly ? .expense : (initialTab ?? Self.savedTabPreference)
+        self._selectedTab = State(initialValue: defaultTab)
     }
 
     init(selectedCategoryId: Binding<UUID?>, isPresented: Binding<Bool>, initialTab: CategoryTab? = nil, expenseOnly: Bool = false) {
@@ -97,8 +111,9 @@ struct CategoryPickerSheet: View {
         self.initialTab = initialTab
         self.expenseOnly = expenseOnly
         self.useIdBasedSelection = true
-        // Set smart default based on initialTab (expense only if expenseOnly mode)
-        self._selectedTab = State(initialValue: expenseOnly ? .expense : (initialTab ?? .expense))
+        // Set smart default: expenseOnly mode → .expense, else initialTab → saved preference
+        let defaultTab = expenseOnly ? .expense : (initialTab ?? Self.savedTabPreference)
+        self._selectedTab = State(initialValue: defaultTab)
     }
     
     enum CategoryTab {
@@ -165,9 +180,14 @@ struct CategoryPickerSheet: View {
                 // Search in category name
                 let categoryMatches = category.name.localizedCaseInsensitiveContains(searchText)
 
-                // Search in subcategory names (built-in subcategories)
+                // Search in category tags (e.g., "gas" finds "Fuel")
+                let categoryTagsMatch = CategorySearchTags.matchesTags(categoryName: category.name, query: searchText)
+
+                // Search in subcategory names and tags (built-in subcategories)
                 let subcategoryMatches = category.subcategories.contains { subcategory in
-                    let matches = subcategory.name.localizedCaseInsensitiveContains(searchText)
+                    let nameMatches = subcategory.name.localizedCaseInsensitiveContains(searchText)
+                    let tagsMatch = CategorySearchTags.matchesTags(categoryName: subcategory.name, query: searchText)
+                    let matches = nameMatches || tagsMatch
                     #if DEBUG
                     if !searchText.isEmpty && (searchText.lowercased().contains("haircuts") || searchText.lowercased().contains("hair")) {
                         print("🔍   - Subcategory '\(subcategory.name)' matches '\(searchText)': \(matches)")
@@ -180,10 +200,11 @@ struct CategoryPickerSheet: View {
                 // This ensures new subcategories (stored as separate categories with parentId) are searchable
                 let hasMatchingChildCategory = categories.contains { childCategory in
                     childCategory.parentId == category.id &&
-                    childCategory.name.localizedCaseInsensitiveContains(searchText)
+                    (childCategory.name.localizedCaseInsensitiveContains(searchText) ||
+                     CategorySearchTags.matchesTags(categoryName: childCategory.name, query: searchText))
                 }
 
-                let result = categoryMatches || subcategoryMatches || hasMatchingChildCategory
+                let result = categoryMatches || categoryTagsMatch || subcategoryMatches || hasMatchingChildCategory
                 #if DEBUG
                 if !searchText.isEmpty && (searchText.lowercased().contains("haircuts") || searchText.lowercased().contains("hair")) {
                     print("🔍   - Category '\(category.name)' result: \(result) (category: \(categoryMatches), subcategory: \(subcategoryMatches), hasMatchingChild: \(hasMatchingChildCategory))")
@@ -235,10 +256,11 @@ struct CategoryPickerSheet: View {
             // Collect both built-in subcategories and categories with this category as parent
             var allChildren: [DisplayCategoryData] = []
             
-            // Add built-in subcategories (filter during search)
-            let subcategoriesToShow = searchText.isEmpty ? category.subcategories : 
+            // Add built-in subcategories (filter during search - includes tag matching)
+            let subcategoriesToShow = searchText.isEmpty ? category.subcategories :
                 category.subcategories.filter { subcategory in
-                    subcategory.name.localizedCaseInsensitiveContains(searchText)
+                    subcategory.name.localizedCaseInsensitiveContains(searchText) ||
+                    CategorySearchTags.matchesTags(categoryName: subcategory.name, query: searchText)
                 }
             
             #if DEBUG
@@ -271,10 +293,13 @@ struct CategoryPickerSheet: View {
             let childCategories = filteredCategories.filter { childCategory in
                 // Include if parent is this category, but exclude if this category is a "No Parent" container
                 let hasThisParent = childCategory.parentId == category.id && !category.name.hasPrefix("No Parent")
-                
-                // During search, also filter by search term
+
+                // During search, also filter by search term (includes tag matching)
                 if !searchText.isEmpty {
-                    return hasThisParent && childCategory.name.localizedCaseInsensitiveContains(searchText)
+                    return hasThisParent && (
+                        childCategory.name.localizedCaseInsensitiveContains(searchText) ||
+                        CategorySearchTags.matchesTags(categoryName: childCategory.name, query: searchText)
+                    )
                 }
                 return hasThisParent
             }
@@ -362,6 +387,7 @@ struct CategoryPickerSheet: View {
                                 isSelected: isNoCategorySelected,
                                 onTap: {
                                     selectNoCategory()
+                                    saveTabPreference()
                                     searchText = ""
                                     isPresented = false
                                 }
@@ -376,11 +402,13 @@ struct CategoryPickerSheet: View {
                                 childSelectionCheck: isCategorySelected,
                                 onParentTap: {
                                     selectCategory(group.parent.categoryData)
+                                    saveTabPreference()
                                     searchText = ""
                                     isPresented = false
                                 },
                                 onChildTap: { childCategory in
                                     selectCategory(childCategory)
+                                    saveTabPreference()
                                     searchText = ""
                                     isPresented = false
                                 }
@@ -456,10 +484,11 @@ struct CategoryPickerSheet: View {
         }
         .sheet(isPresented: $showingEditCategories) {
             EditCategoriesSheet(
-                isPresented: $showingEditCategories, 
+                isPresented: $showingEditCategories,
                 initialTab: selectedTab == .income ? .income : .expense
             )
             .presentationDetents([.fraction(0.98)])
+            .presentationCornerRadius(20)
             .presentationDragIndicator(.hidden)
         }
     }

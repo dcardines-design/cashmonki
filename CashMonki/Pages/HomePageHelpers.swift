@@ -740,6 +740,40 @@ extension HomePage {
         let primaryCurrency = CurrencyPreferences.shared.primaryCurrency
         return "\(primaryCurrency.symbol)\(formatted)"
     }
+
+    /// Returns the whole number part with currency symbol (e.g., "₱7,347")
+    func currencyWholeNumber(_ value: Double) -> String {
+        let nf = NumberFormatter()
+        nf.numberStyle = .decimal
+        nf.groupingSeparator = ","
+        nf.minimumFractionDigits = 0
+        nf.maximumFractionDigits = 2
+        let formatted = nf.string(from: NSNumber(value: value)) ?? "0"
+        let primaryCurrency = CurrencyPreferences.shared.primaryCurrency
+
+        // Split at decimal point and return just the whole number part with symbol
+        if let dotIndex = formatted.firstIndex(of: ".") {
+            let wholeNumber = String(formatted[..<dotIndex])
+            return "\(primaryCurrency.symbol)\(wholeNumber)"
+        }
+        return "\(primaryCurrency.symbol)\(formatted)"
+    }
+
+    /// Returns just the decimal part if exists (e.g., ".93"), or empty string if no decimals
+    func currencyDecimalPart(_ value: Double) -> String {
+        let nf = NumberFormatter()
+        nf.numberStyle = .decimal
+        nf.groupingSeparator = ","
+        nf.minimumFractionDigits = 0
+        nf.maximumFractionDigits = 2
+        let formatted = nf.string(from: NSNumber(value: value)) ?? "0"
+
+        // Split at decimal point and return just the decimal part
+        if let dotIndex = formatted.firstIndex(of: ".") {
+            return String(formatted[dotIndex...])
+        }
+        return ""
+    }
     
     func formatChartAmount(_ value: Double) -> String {
         let formatter = NumberFormatter()

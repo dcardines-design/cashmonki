@@ -16,6 +16,7 @@ struct BudgetSpendingSheet: View {
     @ObservedObject private var userManager = UserManager.shared
     @ObservedObject private var budgetManager = BudgetManager.shared
     @ObservedObject private var currencyPrefs = CurrencyPreferences.shared
+    @ObservedObject private var rateManager = CurrencyRateManager.shared
     @EnvironmentObject var toastManager: ToastManager
 
     @State private var selectedTransactionForDetail: Txn?
@@ -150,6 +151,7 @@ struct BudgetSpendingSheet: View {
                 }
             )
             .presentationDetents([.fraction(0.98)])
+            .presentationCornerRadius(20)
             .presentationDragIndicator(.hidden)
         }
         .confirmationDialog(
@@ -181,6 +183,7 @@ struct BudgetSpendingSheet: View {
                 }
             )
             .presentationDetents([.fraction(0.98)])
+            .presentationCornerRadius(20)
             .presentationDragIndicator(.hidden)
         }
     }
@@ -191,8 +194,8 @@ struct BudgetSpendingSheet: View {
         VStack(alignment: .leading, spacing: 16) {
             // Row 1: Category + Menu icon
             HStack(spacing: 12) {
-                // Emoji in circle
-                Text(TxnCategoryIcon.emojiFor(category: budget.categoryName))
+                // Emoji in circle (lookup by UUID with name fallback)
+                Text(TxnCategoryIcon.emojiFor(categoryId: budget.categoryId, categoryName: budget.categoryName))
                     .font(.system(size: 18))
                     .frame(width: 34, height: 34)
                     .background(AppColors.surfacePrimary)
@@ -273,7 +276,13 @@ struct BudgetSpendingSheet: View {
     private var transactionsSection: some View {
         VStack(alignment: .leading, spacing: 24) {
             ForEach(Array(groupedTransactions.enumerated()), id: \.offset) { _, section in
-                let dailyTotal = section.1.reduce(0) { $0 + $1.amount }
+                let primaryCurrency = currencyPrefs.primaryCurrency
+                let dailyTotal = section.1.reduce(0.0) { total, txn in
+                    let converted = txn.primaryCurrency == primaryCurrency
+                        ? txn.amount
+                        : rateManager.convertAmount(txn.amount, from: txn.primaryCurrency, to: primaryCurrency)
+                    return total + converted
+                }
 
                 VStack(alignment: .leading, spacing: 10) {
                     // Date header with daily total

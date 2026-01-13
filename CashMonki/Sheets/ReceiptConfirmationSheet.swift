@@ -11,7 +11,7 @@ struct ReceiptConfirmationSheet: View {
     let originalImage: UIImage
     let analysis: ReceiptAnalysis
     let primaryCurrency: Currency
-    let onConfirm: (ReceiptAnalysis, String?) -> Void
+    let onConfirm: (ReceiptAnalysis, String?, Bool, RecurringFrequency?) -> Void
     let onCancel: () -> Void
     
     @State private var amount: String
@@ -21,7 +21,11 @@ struct ReceiptConfirmationSheet: View {
     @State private var note: String = ""
     @State private var selectedCurrency: Currency
     @State private var showingCurrencyPicker = false
-    
+    // Recurring transaction state
+    @State private var isRecurring: Bool = false
+    @State private var recurringFrequency: RecurringFrequency = .monthly
+    @State private var showingFrequencyPicker: Bool = false
+
     @ObservedObject private var categoriesManager = CategoriesManager.shared
     
     // Smart decimal formatting - hides .00, shows .01 when needed
@@ -204,28 +208,58 @@ struct ReceiptConfirmationSheet: View {
     /// Check if the form is valid for confirming
     private var isFormValid: Bool {
         let trimmedAmount = amount.trimmingCharacters(in: .whitespacesAndNewlines)
-        
+
         // Use smart parser to validate international currency formats
         // Supports: US (1,234.56), European (1.234,56), Vietnamese (60.000.00), etc.
         return !trimmedAmount.isEmpty && (Self.parseAmount(trimmedAmount, currency: selectedCurrency) ?? 0) > 0
     }
     
-    init(originalImage: UIImage, analysis: ReceiptAnalysis, primaryCurrency: Currency, onConfirm: @escaping (ReceiptAnalysis, String?) -> Void, onCancel: @escaping () -> Void) {
+    init(originalImage: UIImage, analysis: ReceiptAnalysis, primaryCurrency: Currency, onConfirm: @escaping (ReceiptAnalysis, String?, Bool, RecurringFrequency?) -> Void, onCancel: @escaping () -> Void) {
         self.originalImage = originalImage
         self.analysis = analysis
         self.primaryCurrency = primaryCurrency
         self.onConfirm = onConfirm
         self.onCancel = onCancel
-        
+
         // Initialize state with analysis data
         self._amount = State(initialValue: Self.formatAmountForInput(analysis.totalAmount))
         self._merchant = State(initialValue: analysis.merchantName)
         self._selectedDate = State(initialValue: analysis.date)
         self._selectedCurrency = State(initialValue: analysis.currency)
+
+        // DEBUG: Log the date being used
+        print("🔴🔴🔴 RECEIPT CONFIRMATION SHEET INIT 🔴🔴🔴")
+        print("🔴 INIT DATE: Receipt analysis date: \(analysis.date)")
+        print("🔴 INIT DATE: Today's date: \(Date())")
+        let daysDiff = Calendar.current.dateComponents([.day], from: analysis.date, to: Date()).day ?? 0
+        print("🔴 INIT DATE: Days difference: \(daysDiff) days")
+        if daysDiff > 30 {
+            print("⚠️⚠️⚠️ WARNING: Receipt is \(daysDiff) days old! ⚠️⚠️⚠️")
+        }
         // Find category ID from analysis category name
         let categoryId = CategoriesManager.shared.findCategoryOrSubcategory(by: analysis.category).category?.id ??
                         CategoriesManager.shared.findCategoryOrSubcategory(by: analysis.category).subcategory?.id
         self._selectedCategoryId = State(initialValue: categoryId)
+
+        // Generate casual note from line items if available
+        self._note = State(initialValue: Self.generateNoteFromItems(analysis.items))
+    }
+
+    /// Generate a casual note from receipt line items
+    private static func generateNoteFromItems(_ items: [ReceiptItem]) -> String {
+        guard !items.isEmpty else { return "" }
+
+        // Format each item casually
+        let itemDescriptions = items.prefix(10).map { item -> String in
+            let name = item.description.lowercased()
+            if item.quantity > 1 {
+                return "\(item.quantity)x \(name)"
+            }
+            return name
+        }
+
+        // Join with commas for a casual list
+        return itemDescriptions.joined(separator: ", ")
     }
     
     var body: some View {
@@ -255,7 +289,7 @@ struct ReceiptConfirmationSheet: View {
                     AppInputField.categoryById(selectedCategoryId: $selectedCategoryId, size: .md)
 
                     // Date field with time
-                    AppInputField.date(title: "Date", dateValue: $selectedDate, components: [.date, .hourAndMinute], size: .md)
+                    AppInputField.date(title: "Date", dateValue: $selectedDate, components: [.date, .hourAndMinute], size: .md, maxDate: Date())
 
                     // Merchant field
                     AppInputField.text(
@@ -274,7 +308,30 @@ struct ReceiptConfirmationSheet: View {
                         isRequired: false,
                         size: .md
                     )
-                    
+
+                    // COMMENTED OUT FOR APP STORE SUBMISSION - TODO: Uncomment later
+                    // Recurring Toggle Row
+                    /*
+                    HStack(spacing: 4) {
+                        Text("This transaction repeats")
+                            .font(AppFonts.overusedGroteskMedium(size: 16))
+                            .foregroundColor(AppColors.foregroundPrimary)
+
+                        Button(action: { showingFrequencyPicker = true }) {
+                            Text(recurringFrequency.displayName)
+                                .font(AppFonts.overusedGroteskMedium(size: 16))
+                                .foregroundColor(AppColors.accentBackground)
+                        }
+
+                        Spacer()
+
+                        Toggle("", isOn: $isRecurring)
+                            .toggleStyle(SwitchToggleStyle(tint: AppColors.accentBackground))
+                            .labelsHidden()
+                    }
+                    .padding(.vertical, 4)
+                    */
+
                     // Receipt section
                     VStack(alignment: .leading, spacing: 12) {
                         Text("Receipt")
@@ -319,7 +376,7 @@ struct ReceiptConfirmationSheet: View {
                     )
                     // Pass note separately (trimmed, nil if empty)
                     let finalNote = note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : note.trimmingCharacters(in: .whitespacesAndNewlines)
-                    onConfirm(updatedAnalysis, finalNote)
+                    onConfirm(updatedAnalysis, finalNote, isRecurring, isRecurring ? recurringFrequency : nil)
                 },
                 isEnabled: isFormValid
             )
@@ -331,6 +388,16 @@ struct ReceiptConfirmationSheet: View {
                 isPresented: $showingCurrencyPicker
             )
             .presentationDetents([.fraction(0.98)])
+            .presentationCornerRadius(20)
+            .presentationDragIndicator(.hidden)
+        }
+        .sheet(isPresented: $showingFrequencyPicker) {
+            RecurringFrequencyPickerSheet(
+                isPresented: $showingFrequencyPicker,
+                selectedFrequency: $recurringFrequency
+            )
+            .presentationDetents([.height(520)])
+            .presentationCornerRadius(20)
             .presentationDragIndicator(.hidden)
         }
     }

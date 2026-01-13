@@ -40,7 +40,7 @@ struct AnimatedImageView: UIViewRepresentable {
         case .gif:
             let imageView = UIImageView()
             imageView.contentMode = .scaleAspectFit
-            imageView.backgroundColor = UIColor.red.withAlphaComponent(0.2) // Debug background
+            imageView.backgroundColor = .clear
             containerView.addSubview(imageView)
             imageView.translatesAutoresizingMaskIntoConstraints = false
             NSLayoutConstraint.activate([

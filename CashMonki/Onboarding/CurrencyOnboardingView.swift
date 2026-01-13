@@ -49,7 +49,7 @@ struct CurrencyOnboardingView: View {
                     
                 }
                 .padding(.horizontal, 20)
-                .padding(.top, 40)
+                .padding(.top, 30)
                 .padding(.bottom, 40)
             }
             
@@ -123,20 +123,8 @@ struct CurrencyOnboardingView: View {
                     .frame(width: 24, height: 24)
                     .foregroundColor(AppColors.foregroundSecondary)
             }
-            
+
             Spacer()
-            
-            // Title
-            Text("Get Started")
-                .font(AppFonts.overusedGroteskSemiBold(size: 17))
-                .foregroundColor(AppColors.foregroundPrimary)
-            
-            Spacer()
-            
-            // Invisible element for balance
-            Rectangle()
-                .fill(Color.clear)
-                .frame(width: 24, height: 24)
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 16)

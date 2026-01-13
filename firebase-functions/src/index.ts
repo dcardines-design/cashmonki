@@ -504,7 +504,7 @@ app.post('/api/analyze-receipt', optionalAuth, async (req: AuthenticatedRequest,
                   "merchant_name": "exact business name from receipt",
                   "amount": 20.50,
                   "currency": "USD",
-                  "date": "YYYY-MM-DD or YYYY-MM-DD HH:MM",
+                  "date": "2025-01-07",
                   "category": "category name",
                   "items": [
                     {"name": "item or service name", "price": 20.50, "quantity": 1}
@@ -512,11 +512,22 @@ app.post('/api/analyze-receipt', optionalAuth, async (req: AuthenticatedRequest,
                   "confidence": 0.95
                 }
 
-                DATE EXTRACTION:
-                Take a close look at the receipt to find any references to dates and times, even if the receipt is in another language.
-                If you find a date, convert it to YYYY-MM-DD format (e.g., "2025-12-27").
-                If you also find a time (like 17:08 or 5:08 PM), include it as YYYY-MM-DD HH:MM in 24-hour format (e.g., "2025-12-27 17:08").
-                If no date is visible, use "TODAY".
+                DATE EXTRACTION - CRITICAL (PAY EXTRA ATTENTION):
+                1. CAREFULLY scan the ENTIRE receipt for date information - look at top, bottom, and middle sections
+                2. Common date locations: near receipt number, transaction time, payment details, header, or footer
+                3. Date formats vary by region: MM/DD/YYYY (US), DD/MM/YYYY (Europe/Asia), YYYY-MM-DD (ISO)
+                4. Look for keywords: "Date:", "Fecha:", "日期:", "날짜:", "Tanggal:", "วันที่:", or just standalone dates
+                5. Convert ANY found date to YYYY-MM-DD format (e.g., "01/07/2025" or "7 Jan 2025" → "2025-01-07")
+                6. If time is visible (e.g., "14:30", "2:30 PM"), include it as YYYY-MM-DD HH:MM in 24-hour format (e.g., "2025-01-07 14:30")
+                7. ONLY use "TODAY" if absolutely NO date is visible anywhere on the receipt
+
+                YEAR VALIDATION - VERY IMPORTANT:
+                - The current year is 2026. Most recent receipts should be from 2026 or late 2025.
+                - If you see a date like "01/06/25" or "1/6/25", this likely means January 6, 2025 NOT 1925.
+                - If you see "1/6/26" this means 2026.
+                - Double-check 2-digit years: "25" = 2025, "26" = 2026, "24" = 2024
+                - Receipts older than 1 year are unusual - verify the year carefully
+                - If the receipt shows a date from more than 6 months ago, look extra carefully to confirm the year is correct
 
                 IMPORTANT:
                 - Return ONLY the JSON object, no other text

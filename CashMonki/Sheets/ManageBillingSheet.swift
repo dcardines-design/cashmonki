@@ -80,19 +80,37 @@ struct ManageBillingSheet: View {
             }
         }
         #endif
-        
+
         // Use RevenueCat entitlement info
         if let subscription = currentSubscription {
-            return subscription.productIdentifier.contains("yearly") ? "Pro Annual" : "Pro Monthly"
+            let productId = subscription.productIdentifier
+
+            // Check for promo products
+            if productId == "pro_yearly_cashmonki_pro" {
+                return "Pro Annual"
+            } else if productId == "pro_monthly_cashmonki_pro" {
+                return "Pro Monthly"
+            }
+
+            return productId.contains("yearly") ? "Pro Annual" : "Pro Monthly"
         }
-        
+
         return "Free"
     }
-    
+
     private var planPrice: String {
         guard let subscription = currentSubscription else { return "Free" }
-        
-        if subscription.productIdentifier.contains("yearly") {
+        let productId = subscription.productIdentifier
+
+        // Check for promo products first (20% off pricing)
+        if productId == "pro_yearly_cashmonki_pro" {
+            return "$79.99 / year"
+        } else if productId == "pro_monthly_cashmonki_pro" {
+            return "$7.99 / month"
+        }
+
+        // Regular pricing
+        if productId.contains("yearly") {
             return "$99.99 / year"
         } else {
             return "$9.99 / month"
@@ -113,12 +131,22 @@ struct ManageBillingSheet: View {
             }
         }
         #endif
-        
+
         // Use RevenueCat entitlement info
         if let subscription = currentSubscription {
-            return subscription.productIdentifier.contains("yearly") ? "US$99.99" : "US$9.99"
+            let productId = subscription.productIdentifier
+
+            // Check for promo products first (20% off pricing)
+            if productId == "pro_yearly_cashmonki_pro" {
+                return "US$79.99"
+            } else if productId == "pro_monthly_cashmonki_pro" {
+                return "US$7.99"
+            }
+
+            // Regular pricing
+            return productId.contains("yearly") ? "US$99.99" : "US$9.99"
         }
-        
+
         return "US$0.00"
     }
     
@@ -381,7 +409,7 @@ struct ManageBillingSheet: View {
                         VStack(alignment: .leading, spacing: 4) {
                             Text("🎯 RevenueCat Subscription: \(revenueCatManager.isSubscriptionActive ? "ACTIVE" : "INACTIVE")")
                                 .font(Font.custom("Overused Grotesk", size: 12).weight(.medium))
-                                .foregroundColor(revenueCatManager.isSubscriptionActive ? .green : .red)
+                                .foregroundColor(revenueCatManager.isSubscriptionActive ? AppColors.successForeground : AppColors.accentRed)
                             
                             if let subscription = currentSubscription {
                                 Text("📱 Product ID: \(subscription.productIdentifier)")

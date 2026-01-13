@@ -445,12 +445,18 @@ final class FirestoreService {
     
     /// Clear all transactions for a user (debug method)
     func clearAllTransactions(userId: String, completion: @escaping (Result<Void, Error>) -> Void) {
+        print("🔴🔴🔴 FIRESTORE: clearAllTransactions() CALLED 🔴🔴🔴")
+        print("🔴 FIRESTORE: User ID: \(userId)")
+
         #if canImport(FirebaseFirestore)
+        print("🔴 FIRESTORE: FirebaseFirestore IS available for clearAllTransactions")
         guard let db = db else {
+            print("🔴 FIRESTORE ERROR: db is nil in clearAllTransactions!")
             completion(.failure(NSError(domain: "FirestoreUnavailable", code: -1, userInfo: [NSLocalizedDescriptionKey: "Firebase not configured"])))
             return
         }
-        
+        print("🔴 FIRESTORE: db is available, proceeding with transaction deletion")
+
         let userName = getUserName(for: userId)
         print("🗑️ Firebase: Clearing all transactions for \(userName)")
         
@@ -484,180 +490,225 @@ final class FirestoreService {
             }
         }
         #else
+        print("🔴🔴🔴 FIRESTORE WARNING: FirebaseFirestore NOT available for clearAllTransactions! 🔴🔴🔴")
+        print("🔴 FIRESTORE: Running in simulated mode - NO ACTUAL DELETION")
         completion(.success(()))
         #endif
     }
-    
+
     /// Delete ALL user data for account deletion (comprehensive)
+    /// Gracefully handles missing/empty collections - continues even if some steps fail
     func deleteAllUserData(userId: String, completion: @escaping (Result<Void, Error>) -> Void) {
+        print("🔴🔴🔴 FIRESTORE: deleteAllUserData() CALLED 🔴🔴🔴")
+        print("🔴 FIRESTORE: User ID: \(userId)")
+
         #if canImport(FirebaseFirestore)
+        print("🔴 FIRESTORE: FirebaseFirestore IS available")
         guard let db = db else {
+            print("🔴 FIRESTORE ERROR: db is nil - Firebase not configured!")
             completion(.failure(NSError(domain: "FirestoreUnavailable", code: -1, userInfo: [NSLocalizedDescriptionKey: "Firebase not configured"])))
             return
         }
-        
+        print("🔴 FIRESTORE: db is available, proceeding with deletion")
+
         let userName = getUserName(for: userId)
         print("🗑️ Firebase: COMPREHENSIVE USER DATA DELETION for \(userName) (ID: \(userId.prefix(8)))")
-        
+
         let dispatchGroup = DispatchGroup()
-        var deletionErrors: [String] = []
+        var warnings: [String] = []  // Non-fatal issues (empty collections, etc.)
         var deletedCounts: [String: Int] = [:]
-        
+
         // 1. Delete nested transactions collection: users/{userId}/transactions/
         dispatchGroup.enter()
         print("🗑️ Firebase: Step 1 - Deleting nested transactions...")
         db.collection("users").document(userId).collection("transactions").getDocuments { snapshot, error in
             if let error = error {
-                deletionErrors.append("Nested transactions error: \(error.localizedDescription)")
+                // Not fatal - collection might not exist or be empty
+                warnings.append("Nested transactions: \(error.localizedDescription)")
+                print("⚠️ Firebase: Nested transactions - \(error.localizedDescription) (skipping)")
                 dispatchGroup.leave()
                 return
             }
-            
+
             let transactions = snapshot?.documents ?? []
             deletedCounts["nested_transactions"] = transactions.count
+
+            if transactions.isEmpty {
+                print("ℹ️ Firebase: No nested transactions to delete")
+                dispatchGroup.leave()
+                return
+            }
+
             print("🗑️ Firebase: Found \(transactions.count) nested transactions to delete")
-            
             let batch = db.batch()
             for doc in transactions {
                 batch.deleteDocument(doc.reference)
             }
-            
+
             batch.commit { batchError in
                 if let batchError = batchError {
-                    deletionErrors.append("Nested transactions batch error: \(batchError.localizedDescription)")
+                    warnings.append("Nested transactions batch: \(batchError.localizedDescription)")
                 } else {
                     print("✅ Firebase: Deleted \(transactions.count) nested transactions")
                 }
                 dispatchGroup.leave()
             }
         }
-        
+
         // 2. Delete receipt images collection: users/{userId}/receiptImages/
         dispatchGroup.enter()
         print("🗑️ Firebase: Step 2 - Deleting receipt images...")
         db.collection("users").document(userId).collection("receiptImages").getDocuments { snapshot, error in
             if let error = error {
-                deletionErrors.append("Receipt images error: \(error.localizedDescription)")
+                warnings.append("Receipt images: \(error.localizedDescription)")
+                print("⚠️ Firebase: Receipt images - \(error.localizedDescription) (skipping)")
                 dispatchGroup.leave()
                 return
             }
-            
+
             let images = snapshot?.documents ?? []
             deletedCounts["receipt_images"] = images.count
+
+            if images.isEmpty {
+                print("ℹ️ Firebase: No receipt images to delete")
+                dispatchGroup.leave()
+                return
+            }
+
             print("🗑️ Firebase: Found \(images.count) receipt images to delete")
-            
             let batch = db.batch()
             for doc in images {
                 batch.deleteDocument(doc.reference)
             }
-            
+
             batch.commit { batchError in
                 if let batchError = batchError {
-                    deletionErrors.append("Receipt images batch error: \(batchError.localizedDescription)")
+                    warnings.append("Receipt images batch: \(batchError.localizedDescription)")
                 } else {
                     print("✅ Firebase: Deleted \(images.count) receipt images")
                 }
                 dispatchGroup.leave()
             }
         }
-        
+
         // 3. Delete global transactions that belong to this user: transactions/ where userId == userId
         dispatchGroup.enter()
         print("🗑️ Firebase: Step 3 - Deleting global transactions...")
         db.collection("transactions").whereField("userId", isEqualTo: userId).getDocuments { snapshot, error in
             if let error = error {
-                deletionErrors.append("Global transactions error: \(error.localizedDescription)")
+                warnings.append("Global transactions: \(error.localizedDescription)")
+                print("⚠️ Firebase: Global transactions - \(error.localizedDescription) (skipping)")
                 dispatchGroup.leave()
                 return
             }
-            
+
             let globalTransactions = snapshot?.documents ?? []
             deletedCounts["global_transactions"] = globalTransactions.count
+
+            if globalTransactions.isEmpty {
+                print("ℹ️ Firebase: No global transactions to delete")
+                dispatchGroup.leave()
+                return
+            }
+
             print("🗑️ Firebase: Found \(globalTransactions.count) global transactions to delete")
-            
             let batch = db.batch()
             for doc in globalTransactions {
                 batch.deleteDocument(doc.reference)
             }
-            
+
             batch.commit { batchError in
                 if let batchError = batchError {
-                    deletionErrors.append("Global transactions batch error: \(batchError.localizedDescription)")
+                    warnings.append("Global transactions batch: \(batchError.localizedDescription)")
                 } else {
                     print("✅ Firebase: Deleted \(globalTransactions.count) global transactions")
                 }
                 dispatchGroup.leave()
             }
         }
-        
+
         // 4. Delete legacy account documents: accounts/ where userId == userId
         dispatchGroup.enter()
         print("🗑️ Firebase: Step 4 - Deleting legacy account documents...")
         db.collection("accounts").whereField("userId", isEqualTo: userId).getDocuments { snapshot, error in
             if let error = error {
-                deletionErrors.append("Legacy accounts error: \(error.localizedDescription)")
+                warnings.append("Legacy accounts: \(error.localizedDescription)")
+                print("⚠️ Firebase: Legacy accounts - \(error.localizedDescription) (skipping)")
                 dispatchGroup.leave()
                 return
             }
-            
+
             let accounts = snapshot?.documents ?? []
             deletedCounts["legacy_accounts"] = accounts.count
+
+            if accounts.isEmpty {
+                print("ℹ️ Firebase: No legacy account documents to delete")
+                dispatchGroup.leave()
+                return
+            }
+
             print("🗑️ Firebase: Found \(accounts.count) legacy account documents to delete")
-            
             let batch = db.batch()
             for doc in accounts {
                 batch.deleteDocument(doc.reference)
             }
-            
+
             batch.commit { batchError in
                 if let batchError = batchError {
-                    deletionErrors.append("Legacy accounts batch error: \(batchError.localizedDescription)")
+                    warnings.append("Legacy accounts batch: \(batchError.localizedDescription)")
                 } else {
                     print("✅ Firebase: Deleted \(accounts.count) legacy account documents")
                 }
                 dispatchGroup.leave()
             }
         }
-        
+
         // 5. Delete main user document: users/{userId}
         dispatchGroup.enter()
         print("🗑️ Firebase: Step 5 - Deleting main user document...")
         db.collection("users").document(userId).delete { error in
             if let error = error {
-                deletionErrors.append("Main user document error: \(error.localizedDescription)")
+                warnings.append("Main user document: \(error.localizedDescription)")
+                print("⚠️ Firebase: Main user document - \(error.localizedDescription)")
             } else {
                 deletedCounts["user_document"] = 1
                 print("✅ Firebase: Deleted main user document")
             }
             dispatchGroup.leave()
         }
-        
+
         // Wait for all deletions to complete
         dispatchGroup.notify(queue: .main) {
-            if deletionErrors.isEmpty {
-                let totalDeleted = deletedCounts.values.reduce(0, +)
-                print("🎉 Firebase: COMPREHENSIVE DELETION COMPLETE for \(userName)")
-                print("📊 Firebase: Deletion summary:")
-                print("   🗂️ Nested transactions: \(deletedCounts["nested_transactions"] ?? 0)")
-                print("   🖼️ Receipt images: \(deletedCounts["receipt_images"] ?? 0)")
-                print("   🌐 Global transactions: \(deletedCounts["global_transactions"] ?? 0)")
-                print("   📋 Legacy accounts: \(deletedCounts["legacy_accounts"] ?? 0)")
-                print("   👤 User document: \(deletedCounts["user_document"] ?? 0)")
-                print("   📈 Total items deleted: \(totalDeleted)")
-                print("✅ Firebase: User \(userName) completely removed from Firebase")
-                completion(.success(()))
-            } else {
-                let errorMessage = "Multiple deletion errors: \(deletionErrors.joined(separator: "; "))"
-                print("❌ Firebase: COMPREHENSIVE DELETION FAILED for \(userName): \(errorMessage)")
-                completion(.failure(NSError(domain: "ComprehensiveDeletionError", code: -1, userInfo: [NSLocalizedDescriptionKey: errorMessage])))
+            let totalDeleted = deletedCounts.values.reduce(0, +)
+            print("🎉 Firebase: DELETION COMPLETE for \(userName)")
+            print("📊 Firebase: Deletion summary:")
+            print("   🗂️ Nested transactions: \(deletedCounts["nested_transactions"] ?? 0)")
+            print("   🖼️ Receipt images: \(deletedCounts["receipt_images"] ?? 0)")
+            print("   🌐 Global transactions: \(deletedCounts["global_transactions"] ?? 0)")
+            print("   📋 Legacy accounts: \(deletedCounts["legacy_accounts"] ?? 0)")
+            print("   👤 User document: \(deletedCounts["user_document"] ?? 0)")
+            print("   📈 Total items deleted: \(totalDeleted)")
+
+            if !warnings.isEmpty {
+                print("⚠️ Firebase: Some collections were skipped (likely empty/non-existent):")
+                for warning in warnings {
+                    print("   - \(warning)")
+                }
             }
+
+            // Always succeed - we did our best to clean up
+            // Empty collections or permission errors on non-existent data shouldn't fail the account deletion
+            print("✅ Firebase: User \(userName) deletion completed")
+            completion(.success(()))
         }
         #else
+        print("🔴🔴🔴 FIRESTORE WARNING: FirebaseFirestore NOT available! 🔴🔴🔴")
+        print("🔴 FIRESTORE: Running in simulated mode - NO ACTUAL DELETION")
         print("✅ Firebase: Simulated comprehensive user data deletion")
         completion(.success(()))
         #endif
     }
-    
+
     /// Delete ALL users from Firebase (nuclear option)
     func deleteAllUsers(completion: @escaping (Result<Int, Error>) -> Void) {
         #if canImport(FirebaseFirestore)

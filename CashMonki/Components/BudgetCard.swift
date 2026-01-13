@@ -85,8 +85,8 @@ struct BudgetCard: View {
             VStack(alignment: .leading, spacing: 16) {
                 // Row 1: Category + Menu icon
                 HStack(spacing: 12) {
-                    // Emoji in circle
-                    Text(TxnCategoryIcon.emojiFor(category: budget.categoryName))
+                    // Emoji in circle (lookup by UUID with name fallback)
+                    Text(TxnCategoryIcon.emojiFor(categoryId: budget.categoryId, categoryName: budget.categoryName))
                         .font(.system(size: 18))
                         .frame(width: 34, height: 34)
                         .background(AppColors.surfacePrimary)

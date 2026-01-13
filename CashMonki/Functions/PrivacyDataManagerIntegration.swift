@@ -519,11 +519,11 @@ extension PrivacyDataManagerIntegration {
         case .notInitialized, .noData:
             return .gray
         case .noLegacyData, .ready, .migrationCompleted:
-            return .green
+            return AppColors.successForeground
         case .pendingMigration:
             return .orange
         case .validationFailed, .migrationFailed:
-            return .red
+            return AppColors.accentRed
         case .migrating:
             return .blue
         }

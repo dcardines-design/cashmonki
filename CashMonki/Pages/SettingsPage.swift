@@ -103,6 +103,11 @@ struct SettingsPage: View {
     // Roast My Receipt feature toggle (shared via AppStorage)
     @AppStorage("isRoastReceiptEnabled") private var isRoastReceiptEnabled = false
 
+    // Remind Me To Track toggle (shared via AppStorage)
+    @AppStorage("isRemindToTrackEnabled") private var isRemindToTrackEnabled = true
+    @ObservedObject private var notificationManager = NotificationManager.shared
+    @State private var showingNotificationPermissionAlert = false
+
     // Secret version tap state (7 taps = toggle internal device mode)
     @State private var versionTapCount = 0
     @State private var versionTapTimer: Timer?
@@ -206,6 +211,7 @@ struct SettingsPage: View {
                     isPresented: $showingCurrencyPicker
                 )
                 .presentationDetents([.fraction(0.98)])
+                .presentationCornerRadius(20)
                 .presentationDragIndicator(.hidden)
             }
             .sheet(isPresented: $showingSecondaryCurrencyPicker) {
@@ -214,6 +220,7 @@ struct SettingsPage: View {
                     isPresented: $showingSecondaryCurrencyPicker
                 )
                 .presentationDetents([.fraction(0.98)])
+                .presentationCornerRadius(20)
                 .presentationDragIndicator(.hidden)
             }
             // COMMENTED OUT: Language picker (localization not yet implemented)
@@ -229,28 +236,43 @@ struct SettingsPage: View {
                 EditNameSheet(isPresented: $showingEditNameSheet)
                     .environmentObject(toastManager)
                 .presentationDetents([.fraction(0.98)])
+                .presentationCornerRadius(20)
                 .presentationDragIndicator(.hidden)
             }
             .sheet(isPresented: $showingEditCategoriesSheet) {
                 EditCategoriesSheet(isPresented: $showingEditCategoriesSheet)
                 .presentationDetents([.fraction(0.98)])
+                .presentationCornerRadius(20)
                 .presentationDragIndicator(.hidden)
             }
             .alert("Delete Everything?", isPresented: $showingDeleteAccountSheet) {
                 TextField("Type DELETE to confirm", text: $deleteConfirmationText)
                     .autocapitalization(.allCharacters)
                 Button("Cancel", role: .cancel) {
+                    print("🔴 DELETE ALERT: Cancel button tapped")
                     deleteConfirmationText = ""
                 }
                 Button("Delete", role: .destructive) {
+                    print("🔴 DELETE ALERT: Delete button tapped, text entered: '\(deleteConfirmationText)'")
                     if deleteConfirmationText.uppercased() == "DELETE" {
+                        print("🔴 DELETE ALERT: Text matches 'DELETE' - calling deleteAccount()")
                         deleteConfirmationText = ""
                         deleteAccount()
+                    } else {
+                        print("🔴 DELETE ALERT: Text does NOT match 'DELETE' - ignoring")
                     }
                 }
                 .disabled(deleteConfirmationText.uppercased() != "DELETE")
             } message: {
                 Text("This will permanently delete all your data. Type DELETE to confirm.\n\nNote: This does not cancel your subscription. To cancel, go to Settings → Manage Billing → Manage Subscription.")
+            }
+            .onChange(of: showingDeleteAccountSheet) { oldValue, newValue in
+                print("🔴 DELETE ALERT STATE CHANGED: \(oldValue) → \(newValue)")
+                if newValue {
+                    print("🔴 DELETE ALERT: Alert should now be VISIBLE")
+                } else {
+                    print("🔴 DELETE ALERT: Alert should now be HIDDEN")
+                }
             }
             .confirmationDialog("Customer Support", isPresented: $showingSupportOptions, titleVisibility: .visible) {
                 Button("Send Email") {
@@ -410,11 +432,11 @@ struct SettingsPage: View {
                             Text("❌ Paywall Error")
                                 .font(.title2)
                                 .fontWeight(.bold)
-                                .foregroundColor(.red)
+                                .foregroundColor(AppColors.accentRed)
                             
                             Text("Unable to load subscription options")
                                 .font(.body)
-                                .foregroundColor(.secondary)
+                                .foregroundColor(AppColors.foregroundSecondary)
                             
                             VStack(alignment: .leading, spacing: 8) {
                                 Text("Debug Info:")
@@ -422,10 +444,10 @@ struct SettingsPage: View {
                                     .fontWeight(.semibold)
                                 Text("• Offerings count: \(revenueCatManager.offerings?.all.count ?? 0)")
                                     .font(.caption)
-                                    .foregroundColor(.secondary)
+                                    .foregroundColor(AppColors.foregroundSecondary)
                                 Text("• Available IDs: \(revenueCatManager.debugAvailableOfferingIds.joined(separator: ", "))")
                                     .font(.caption)
-                                    .foregroundColor(.secondary)
+                                    .foregroundColor(AppColors.foregroundSecondary)
                             }
                             .padding()
                             .background(Color(.systemGray6))
@@ -441,7 +463,7 @@ struct SettingsPage: View {
                             Button("Cancel") {
                                 showingNativePaywall = false
                             }
-                            .foregroundColor(.red)
+                            .foregroundColor(AppColors.accentRed)
                         }
                         .padding()
                     }
@@ -490,7 +512,7 @@ struct SettingsPage: View {
                 #else
                 let _ = print("❌ PAYWALL DEBUG: RevenueCatUI NOT AVAILABLE - This is why you see 'not available'")
                 Text("RevenueCat Paywall Not Available")
-                    .foregroundColor(.red)
+                    .foregroundColor(AppColors.accentRed)
                 #endif
             }
             .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("PresentNativePaywall"))) { _ in
@@ -764,10 +786,8 @@ struct SettingsPage: View {
             supportSection
             legalSection
 
-            // Debug section only visible in debug builds
-            #if DEBUG
+            // Debug section (temporarily always visible for testing)
             debugSection
-            #endif
 
             // Footer
             VStack(spacing: 8) {
@@ -1020,10 +1040,73 @@ struct SettingsPage: View {
 
                 settingsRow(
                     title: "Rate Cashmonki",
-                    subtitle: "Make a developer smile today (please)",
+                    subtitle: "5 stars = 5x money karma",
                     icon: "🙈"
                 ) {
                     requestAppReview()
+                }
+
+                Divider()
+                    .padding(.leading, 52)
+
+                // Remind Me To Track toggle
+                HStack(spacing: 12) {
+                    Text(isRemindToTrackEnabled && notificationManager.isAuthorized ? "🔔" : "🔕")
+                        .font(.system(size: 24))
+                        .frame(width: 28, height: 28)
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Remind Me To Track")
+                            .font(AppFonts.overusedGroteskMedium(size: 16))
+                            .foregroundStyle(AppColors.foregroundPrimary)
+
+                        Text("One daily nudge to log your spending")
+                            .font(AppFonts.overusedGroteskMedium(size: 14))
+                            .foregroundStyle(AppColors.foregroundSecondary)
+                    }
+
+                    Spacer()
+
+                    Toggle("", isOn: Binding(
+                        get: { isRemindToTrackEnabled && notificationManager.isAuthorized },
+                        set: { newValue in
+                            if newValue {
+                                // Trying to turn ON - check permission first
+                                notificationManager.checkAndRequestPermission { status in
+                                    switch status {
+                                    case .granted:
+                                        isRemindToTrackEnabled = true
+                                        NotificationManager.shared.scheduleDailyReminder()
+                                    case .denied:
+                                        showingNotificationPermissionAlert = true
+                                    case .notDetermined:
+                                        break
+                                    }
+                                }
+                            } else {
+                                // Turning OFF - always allow
+                                isRemindToTrackEnabled = false
+                                NotificationManager.shared.cancelAllReminders()
+                            }
+                        }
+                    ))
+                    .labelsHidden()
+                    .tint(Color(red: 0.33, green: 0.18, blue: 1))
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+                .onAppear {
+                    notificationManager.refreshPermissionStatus()
+                }
+                .alert("Notifications Disabled", isPresented: $showingNotificationPermissionAlert) {
+                    Button("Open Settings") {
+                        if let settingsURL = URL(string: UIApplication.openSettingsURLString) {
+                            UIApplication.shared.open(settingsURL)
+                        }
+                    }
+                    Button("Cancel", role: .cancel) {}
+                } message: {
+                    Text("To receive daily reminders, please enable notifications in Settings.")
                 }
 
                 // COMMENTED OUT: Add first transaction guide
@@ -1059,30 +1142,26 @@ struct SettingsPage: View {
         VStack(spacing: 0) {
             sectionHeader("Feature Usage")
             
-            VStack(spacing: 0) {
-                // Feature usage header image (outside the white card)
-                Button(action: {
-                    // TODO: Navigate to detailed feature usage analytics
-                    print("🔍 Feature Usage: Opening detailed analytics...")
-                }) {
-                    Image("feature usage card image")
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(PlainButtonStyle())
-                
-                // Progress bars and content card (white background)
-                featureUsageCard
-            }
-            .clipShape(RoundedRectangle(cornerRadius: 16))
+            featureUsageCard
+                .clipShape(RoundedRectangle(cornerRadius: 16))
         }
     }
     
     private var featureUsageCard: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            // Receipt Scanned section
-            VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 0) {
+            // Feature usage header image (animated GIF)
+            GifImageView(
+                gifName: "feature-usage-card-image",
+                size: CGSize(width: 300, height: 68)
+            )
+            .frame(maxWidth: .infinity)
+            .frame(height: 68)
+            .clipped()
+
+            // Content section with padding
+            VStack(alignment: .leading, spacing: 20) {
+                // Receipt Scanned section
+                VStack(alignment: .leading, spacing: 8) {
                 HStack {
                     Text("✨ Receipt Scanned")
                         .font(Font.custom("Overused Grotesk", size: 16).weight(.medium))
@@ -1176,16 +1255,17 @@ struct SettingsPage: View {
                 .clipShape(RoundedRectangle(cornerRadius: 5))
             }
             
-            // Get Cashmonki Pro button / Manage Billing for pro users
-            AppButton.secondary(revenueCatManager.isProUser ? "Manage Billing" : "Get Cashmonki Pro ⭐", size: .extraSmall) {
-                if revenueCatManager.isProUser {
-                    showingManageBilling = true // Show manage billing for pro users
-                } else {
-                    showingCustomPaywall = true // Show paywall for free users
+                // Get Cashmonki Pro button / Manage Billing for pro users
+                AppButton.secondary(revenueCatManager.isProUser ? "Manage Billing" : "Get Cashmonki Pro ⭐", size: .extraSmall) {
+                    if revenueCatManager.isProUser {
+                        showingManageBilling = true // Show manage billing for pro users
+                    } else {
+                        showingCustomPaywall = true // Show paywall for free users
+                    }
                 }
             }
+            .padding(20)
         }
-        .padding(20)
         .frame(maxWidth: .infinity, alignment: .topLeading)
         .background(.white)
         .opacity(1.0)
@@ -1299,7 +1379,10 @@ struct SettingsPage: View {
                     subtitle: "Permanently delete your account and all data",
                     icon: "🗑️"
                 ) {
+                    print("🔴 DELETE BUTTON TAPPED: Setting showingDeleteAccountSheet = true")
+                    print("🔴 DELETE: Current value before: \(showingDeleteAccountSheet)")
                     showingDeleteAccountSheet = true
+                    print("🔴 DELETE: Current value after: \(showingDeleteAccountSheet)")
                 }
                 
                 Divider()
@@ -1663,24 +1746,24 @@ struct SettingsPage: View {
                     // Single line - center vertically
                     Text(title)
                         .font(AppFonts.overusedGroteskMedium(size: 16))
-                        .foregroundStyle(.primary)
+                        .foregroundStyle(AppColors.foregroundPrimary)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 } else {
                     // Two lines - align to top
                     VStack(alignment: .leading, spacing: 2) {
                         Text(title)
                             .font(AppFonts.overusedGroteskMedium(size: 16))
-                            .foregroundStyle(.primary)
+                            .foregroundStyle(AppColors.foregroundPrimary)
                         Text(subtitle)
                             .font(AppFonts.overusedGroteskMedium(size: 14))
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(AppColors.foregroundSecondary)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                
+
                 AppIcon(assetName: "chevron-right", fallbackSystemName: "chevron.right")
                     .font(AppFonts.overusedGroteskMedium(size: 14))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(AppColors.foregroundSecondary)
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 16)
@@ -1718,15 +1801,15 @@ struct SettingsPage: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Sync with Firebase")
                             .font(AppFonts.overusedGroteskMedium(size: 16))
-                            .foregroundStyle(.primary)
-                        
+                            .foregroundStyle(AppColors.foregroundPrimary)
+
                         Text(syncSettingsSubtitle)
                             .font(AppFonts.overusedGroteskMedium(size: 14))
                             .foregroundStyle(syncSettingsTextColor)
                     }
-                    
+
                     Spacer()
-                    
+
                     if userManager.isSyncing {
                         ProgressView()
                             .scaleEffect(0.8)
@@ -1734,7 +1817,7 @@ struct SettingsPage: View {
                     } else {
                         AppIcon(assetName: "chevron-right", fallbackSystemName: "chevron.right")
                             .font(AppFonts.overusedGroteskMedium(size: 14))
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(AppColors.foregroundSecondary)
                     }
                 }
                 .padding(.horizontal, 16)
@@ -1773,15 +1856,15 @@ struct SettingsPage: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Pull Data from Firebase")
                             .font(AppFonts.overusedGroteskMedium(size: 16))
-                            .foregroundStyle(.primary)
-                        
+                            .foregroundStyle(AppColors.foregroundPrimary)
+
                         Text("Fetch latest transactions from cloud storage")
                             .font(AppFonts.overusedGroteskMedium(size: 14))
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(AppColors.foregroundSecondary)
                     }
-                    
+
                     Spacer()
-                    
+
                     if isPullingData {
                         ProgressView()
                             .scaleEffect(0.8)
@@ -1789,7 +1872,7 @@ struct SettingsPage: View {
                     } else {
                         AppIcon(assetName: "chevron-right", fallbackSystemName: "chevron.right")
                             .font(AppFonts.overusedGroteskMedium(size: 14))
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(AppColors.foregroundSecondary)
                     }
                 }
                 .padding(.horizontal, 16)
@@ -1812,14 +1895,14 @@ struct SettingsPage: View {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Pull Data Result")
                             .font(AppFonts.overusedGroteskSemiBold(size: 16))
-                            .foregroundColor(result.hasPrefix("✅") ? (AppColors.successForeground) : .red)
+                            .foregroundColor(result.hasPrefix("✅") ? (AppColors.successForeground) : AppColors.accentRed)
                         
                         Text(result)
                             .font(AppFonts.overusedGroteskMedium(size: 14))
-                            .foregroundColor(.secondary)
+                            .foregroundColor(AppColors.foregroundSecondary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
-                    
+
                     Spacer()
                 }
                 .padding(.horizontal, 16)
@@ -1827,7 +1910,7 @@ struct SettingsPage: View {
             }
         }
     }
-    
+
     private func pullFirebaseDataToLocal() {
         print("⬇️ Settings: Starting Firebase data pull")
         
@@ -1932,18 +2015,18 @@ struct SettingsPage: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Generate Sample Data")
                             .font(AppFonts.overusedGroteskMedium(size: 16))
-                            .foregroundStyle(.primary)
-                        
+                            .foregroundStyle(AppColors.foregroundPrimary)
+
                         Text("Creates fixed transactions for October 23")
                             .font(AppFonts.overusedGroteskMedium(size: 14))
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(AppColors.foregroundSecondary)
                     }
-                    
+
                     Spacer()
-                    
+
                     AppIcon(assetName: "chevron-right", fallbackSystemName: "chevron.right")
                         .font(AppFonts.overusedGroteskMedium(size: 14))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(AppColors.foregroundSecondary)
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 16)
@@ -1981,14 +2064,18 @@ struct SettingsPage: View {
     
     /// Delete all transactions from Firebase
     private func deleteAllTransactionsFromFirebase() {
+        print("🔴🔴🔴 DELETE ALL TRANSACTIONS FUNCTION CALLED 🔴🔴🔴")
         print("🗑️ Settings: Delete all transactions from Firebase requested")
         isDeletingAllTransactions = true
         deleteAllResult = nil
-        
+
         // Use Firebase UID for consistent Firebase operations
         let firebaseUserID = AuthenticationManager.shared.currentUser?.firebaseUID ?? userManager.currentUser.id.uuidString
-        
+        print("🔴 DELETE TX: Using Firebase User ID: \(firebaseUserID.prefix(12))...")
+        print("🔴 DELETE TX: About to call FirestoreService.shared.clearAllTransactions()")
+
         FirestoreService.shared.clearAllTransactions(userId: firebaseUserID) { result in
+            print("🔴 DELETE TX: FirestoreService.clearAllTransactions callback received")
             DispatchQueue.main.async {
                 self.isDeletingAllTransactions = false
                 
@@ -1996,10 +2083,15 @@ struct SettingsPage: View {
                 case .success():
                     self.deleteAllResult = "✅ Successfully deleted all transactions from Firebase"
                     print("✅ Settings: All transactions deleted successfully")
-                    
+
                     // Also clear local transactions
                     self.userManager.currentUser.transactions.removeAll()
                     self.userManager.objectWillChange.send()
+
+                    // Reset subscription due dates to prevent immediate recreation
+                    // (processSubscriptions runs on 30-second timer and would recreate if nextDueDate is in the past)
+                    SubscriptionManager.shared.resetAllDueDates()
+                    print("📅 Settings: Reset all subscription due dates to future")
                     
                 case .failure(let error):
                     self.deleteAllResult = "❌ Failed to delete transactions: \(error.localizedDescription)"
@@ -2326,8 +2418,14 @@ struct SettingsPage: View {
         AuthenticationManager.shared.logout()
         print("🧹 Settings: Logged out from AuthenticationManager")
         
-        // 7. Clear any other managers/caches if needed
-        // TODO: Add other manager resets here if we have them
+        // 7. Clear subscriptions explicitly
+        SubscriptionManager.shared.clearAllSubscriptions()
+        print("🧹 Settings: Cleared all subscriptions")
+
+        // 8. Cancel all pending notifications
+        NotificationManager.shared.cancelAllReminders()
+        NotificationManager.shared.cancelAllSubscriptionReminders()
+        print("🧹 Settings: Cancelled all notifications")
 
         print("✅ Settings: COMPLETE account deletion and data wipe finished")
         print("🎯 Settings: App is now in fresh state - new user can register")
@@ -2354,14 +2452,19 @@ struct SettingsPage: View {
     // MARK: - Delete Account
     
     private func deleteAccount() {
+        print("🔴🔴🔴 DELETE ACCOUNT FUNCTION CALLED 🔴🔴🔴")
+        print("🔴 DELETE: deleteAccount() function has been invoked")
         print("🗑️ Settings: Delete account requested")
         isDeletingAccount = true
-        
+
         // Use Firebase UID for consistent Firebase operations
         let firebaseUserID = AuthenticationManager.shared.currentUser?.firebaseUID ?? userManager.currentUser.id.uuidString
-        
+        print("🔴 DELETE: Using Firebase User ID: \(firebaseUserID.prefix(12))...")
+        print("🔴 DELETE: About to call FirestoreService.shared.deleteAllUserData()")
+
         // 1. Delete ALL user data from Firebase (comprehensive deletion)
         FirestoreService.shared.deleteAllUserData(userId: firebaseUserID) { result in
+            print("🔴 DELETE: FirestoreService.deleteAllUserData callback received")
             switch result {
             case .success():
                 print("✅ Settings: ALL user data deleted from Firebase")
@@ -2587,11 +2690,11 @@ struct SettingsPage: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text("Sync Data Online")
                     .font(AppFonts.overusedGroteskMedium(size: 16))
-                    .foregroundStyle(.primary)
-                
+                    .foregroundStyle(AppColors.foregroundPrimary)
+
                 Text(firebaseSyncSubtitle)
                     .font(AppFonts.overusedGroteskMedium(size: 14))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(AppColors.foregroundSecondary)
             }
             
             Spacer()
@@ -2671,17 +2774,17 @@ struct SettingsPage: View {
                     
                     Text(error)
                         .font(AppFonts.overusedGroteskMedium(size: 14))
-                        .foregroundColor(.secondary)
+                        .foregroundColor(AppColors.foregroundSecondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-                
+
                 Spacer()
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
         }
     }
-    
+
     @ViewBuilder
     private var apiTestResultView: some View {
         if let result = apiTestResult {
@@ -2695,21 +2798,21 @@ struct SettingsPage: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Receipt AI Test Result")
                         .font(AppFonts.overusedGroteskSemiBold(size: 16))
-                        .foregroundColor(result.hasPrefix("✅") ? (AppColors.successForeground) : .red)
-                    
+                        .foregroundColor(result.hasPrefix("✅") ? (AppColors.successForeground) : AppColors.accentRed)
+
                     Text(result)
                         .font(AppFonts.overusedGroteskMedium(size: 14))
-                        .foregroundColor(.secondary)
+                        .foregroundColor(AppColors.foregroundSecondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-                
+
                 Spacer()
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
         }
     }
-    
+
     @ViewBuilder
     private var pullDataResultView: some View {
         if let result = pullDataResult {
@@ -2723,21 +2826,21 @@ struct SettingsPage: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Firebase Pull Result")
                         .font(AppFonts.overusedGroteskSemiBold(size: 16))
-                        .foregroundColor(result.hasPrefix("✅") ? (AppColors.successForeground) : .red)
-                    
+                        .foregroundColor(result.hasPrefix("✅") ? (AppColors.successForeground) : AppColors.accentRed)
+
                     Text(result)
                         .font(AppFonts.overusedGroteskMedium(size: 14))
-                        .foregroundColor(.secondary)
+                        .foregroundColor(AppColors.foregroundSecondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-                
+
                 Spacer()
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
         }
     }
-    
+
     @ViewBuilder
     private var deleteAllResultView: some View {
         if let result = deleteAllResult {
@@ -2751,21 +2854,21 @@ struct SettingsPage: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Delete All Transactions Result")
                         .font(AppFonts.overusedGroteskSemiBold(size: 16))
-                        .foregroundColor(result.hasPrefix("✅") ? (AppColors.successForeground) : .red)
-                    
+                        .foregroundColor(result.hasPrefix("✅") ? (AppColors.successForeground) : AppColors.accentRed)
+
                     Text(result)
                         .font(AppFonts.overusedGroteskMedium(size: 14))
-                        .foregroundColor(.secondary)
+                        .foregroundColor(AppColors.foregroundSecondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-                
+
                 Spacer()
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
         }
     }
-    
+
     // MARK: - Tab Item Arrays
     
     private var basicTabItems: [AppTabGroup.TabItem] {
@@ -2800,8 +2903,8 @@ struct SettingsPage: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Pull Data from Cloud")
                         .font(AppFonts.overusedGroteskMedium(size: 16))
-                        .foregroundStyle(.primary)
-                    
+                        .foregroundStyle(AppColors.foregroundPrimary)
+
                     Text(pullDataSubtitle)
                         .font(AppFonts.overusedGroteskMedium(size: 14))
                         .foregroundStyle(pullDataTextColor)

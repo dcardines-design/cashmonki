@@ -50,7 +50,7 @@ struct BudgetSummaryCard: View {
             return BudgetData(
                 id: budget.id,
                 categoryName: budget.categoryName,
-                emoji: TxnCategoryIcon.emojiFor(category: budget.categoryName),
+                emoji: TxnCategoryIcon.emojiFor(categoryId: budget.categoryId, categoryName: budget.categoryName),
                 spent: spent,
                 budget: budgetAmount
             )
@@ -209,13 +209,13 @@ struct BudgetSummaryCard: View {
                 VStack(alignment: .leading, spacing: 8) {
                     Text(periodLabel)
                         .font(AppFonts.overusedGroteskMedium(size: 18))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(AppColors.foregroundSecondary)
 
                     // Total amounts (spent / total budget)
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
                         Text(currencyPrefs.formatPrimaryAmount(totalSpent))
                             .font(AppFonts.overusedGroteskSemiBold(size: 34))
-                            .foregroundStyle(.primary)
+                            .foregroundStyle(AppColors.foregroundPrimary)
 
                         HStack(spacing: 4) {
                             Text("/")

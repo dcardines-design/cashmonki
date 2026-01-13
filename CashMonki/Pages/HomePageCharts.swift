@@ -284,69 +284,89 @@ extension HomePage {
             let labelSpacing: CGFloat = 6 // Spacing below bars
             let topMargin: CGFloat = 0 // Small margin from top of content area
             let bottomMargin: CGFloat = 4 // Small margin above labels
-            
+
             // Calculate usable height: total - top margin - label area - bottom margin
             let maxBarHeight = availableHeight - topMargin - labelHeight - labelSpacing - bottomMargin
-            
+
+            // For Balance mode, use cumulative balance; otherwise use period totals
+            let currentValue = chartFilter == .balance ? cumulativeBalanceNow : cachedCurrentPeriodTotal
+            let previousValue = chartFilter == .balance ? cumulativeBalanceAtPeriodStart : cachedPreviousPeriodTotal
+
+            // Labels for Balance mode vs other modes
+            let currentLabel = chartFilter == .balance ? "Current" : currentPeriodLabel
+            let previousLabel = chartFilter == .balance ? previousBalanceLabel : previousPeriodLabel
+
+            // Dynamic bar color based on chart filter
+            let currentBarColor: Color = {
+                switch chartFilter {
+                case .balance:
+                    return currentValue >= 0 ? AppColors.chartIncome2 : AppColors.chartExpense1
+                case .income:
+                    return AppColors.chartIncome2 // Green for income
+                case .expense:
+                    return AppColors.chartExpense1 // Red for expenses
+                }
+            }()
+
             HStack(alignment: .bottom, spacing: 12) {
                 // Last period bar
                 VStack(alignment: .center, spacing: 0) {
                     Spacer()
-                    
+
                     // Bar aligned to bottom
                     ZStack {
-                        let maxTotalValue = max(abs(cachedCurrentPeriodTotal), abs(cachedPreviousPeriodTotal), 1)
-                        let heightRatio = abs(cachedPreviousPeriodTotal) / maxTotalValue
+                        let maxTotalValue = max(abs(currentValue), abs(previousValue), 1)
+                        let heightRatio = abs(previousValue) / maxTotalValue
                         let calculatedHeight = heightRatio * maxBarHeight
                         let finalHeight = max(40, calculatedHeight)
-                        
+
                         RoundedRectangle(cornerRadius: 8)
                             .fill(AppColors.chartPreviousPeriod)
                             .frame(height: finalHeight)
-                            .animation(.spring(response: 0.4, dampingFraction: 0.9, blendDuration: 0.1), value: cachedPreviousPeriodTotal)
-                        
+                            .animation(.spring(response: 0.4, dampingFraction: 0.9, blendDuration: 0.1), value: previousValue)
+
                         // Amount text on the bar
-                        Text(currencyPrefs.formatPrimaryAmount(cachedPreviousPeriodTotal))
+                        Text(currencyPrefs.formatPrimaryAmount(previousValue))
                             .font(AppFonts.overusedGroteskMedium(size: 14))
                             .foregroundStyle(.white)
-                            .animation(.easeInOut(duration: 0.3).delay(0.05), value: cachedPreviousPeriodTotal)
+                            .animation(.easeInOut(duration: 0.3).delay(0.05), value: previousValue)
                     }
-                    
+
                     // Label at the bottom
-                    Text(previousPeriodLabel)
+                    Text(previousLabel)
                         .font(AppFonts.overusedGroteskMedium(size: 12))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(AppColors.foregroundSecondary)
                         .padding(.top, 6)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
-                
-                // Current period bar  
+
+                // Current period bar
                 VStack(alignment: .center, spacing: 0) {
                     Spacer()
-                    
+
                     // Bar aligned to bottom
                     ZStack {
-                        let maxTotalValue = max(abs(cachedCurrentPeriodTotal), abs(cachedPreviousPeriodTotal), 1)
-                        let heightRatio = abs(cachedCurrentPeriodTotal) / maxTotalValue
+                        let maxTotalValue = max(abs(currentValue), abs(previousValue), 1)
+                        let heightRatio = abs(currentValue) / maxTotalValue
                         let calculatedHeight = heightRatio * maxBarHeight
                         let finalHeight = max(40, calculatedHeight)
-                        
+
                         RoundedRectangle(cornerRadius: 8)
-                            .fill(AppColors.primary)
+                            .fill(currentBarColor)
                             .frame(height: finalHeight)
-                            .animation(.spring(response: 0.4, dampingFraction: 0.9, blendDuration: 0.1).delay(0.05), value: cachedCurrentPeriodTotal)
-                        
+                            .animation(.spring(response: 0.4, dampingFraction: 0.9, blendDuration: 0.1).delay(0.05), value: currentValue)
+
                         // Amount text on the bar
-                        Text(currencyPrefs.formatPrimaryAmount(cachedCurrentPeriodTotal))
+                        Text(currencyPrefs.formatPrimaryAmount(currentValue))
                             .font(AppFonts.overusedGroteskMedium(size: 14))
                             .foregroundStyle(.white)
-                            .animation(.easeInOut(duration: 0.3).delay(0.1), value: cachedCurrentPeriodTotal)
+                            .animation(.easeInOut(duration: 0.3).delay(0.1), value: currentValue)
                     }
-                    
+
                     // Label at the bottom
-                    Text(currentPeriodLabel)
+                    Text(currentLabel)
                         .font(AppFonts.overusedGroteskMedium(size: 12))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(AppColors.foregroundSecondary)
                         .padding(.top, 6)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
@@ -551,7 +571,8 @@ extension HomePage {
                                 .foregroundColor(AppColors.foregroundPrimary)
                                 .animation(.easeInOut(duration: 0.6), value: chartFilter)
                                 .animation(.easeInOut(duration: 0.6), value: rangeSelection)
-                            Text(rangeSelection == .day ? "Today" : currentPeriodLabel)
+                            // For Balance mode, use clearer labels
+                            Text(chartFilter == .balance ? "Current" : (rangeSelection == .day ? "Today" : currentPeriodLabel))
                                 .font(Font.custom("Overused Grotesk", size: 12).weight(.medium))
                                 .multilineTextAlignment(.center)
                                 .foregroundColor(AppColors.foregroundSecondary)
@@ -628,14 +649,16 @@ extension HomePage {
                                 .font(Font.custom("Overused Grotesk", size: 12).weight(.medium))
                                 .multilineTextAlignment(.center)
                                 .foregroundColor(AppColors.foregroundPrimary)
-                            Text(rangeSelection == .day ? "Yesterday" : previousPeriodLabel)
+                            // For Balance mode, use clearer labels
+                            Text(chartFilter == .balance ? previousBalanceLabel : (rangeSelection == .day ? "Yesterday" : previousPeriodLabel))
                                 .font(Font.custom("Overused Grotesk", size: 12).weight(.medium))
                                 .multilineTextAlignment(.center)
                                 .foregroundColor(AppColors.foregroundSecondary)
                         }
                         .padding(0)
                     } else {
-                        Text(rangeSelection == .day ? "Yesterday" : previousPeriodLabel)
+                        // For Balance mode, use clearer labels
+                        Text(chartFilter == .balance ? previousBalanceLabel : (rangeSelection == .day ? "Yesterday" : previousPeriodLabel))
                             .font(Font.custom("Overused Grotesk", size: 12).weight(.medium))
                             .multilineTextAlignment(.center)
                             .foregroundColor(AppColors.foregroundSecondary)

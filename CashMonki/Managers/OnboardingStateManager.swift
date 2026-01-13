@@ -53,17 +53,39 @@ enum OnboardingState: Codable {
 /// OnboardingStep enum for consistency
 enum OnboardingStep: String, Codable, CaseIterable {
     case emailConfirmation
+    case valueFeature1
+    case valueFeature2
+    case valueFeature3
+    case valueFeature4
     case nameCollection
     case currencySelection
     case goalSelection
+    case stressSelection
+    case overspentRealization
+    case trackingDifficulty
+    case idealOutcome
+    case trackingFrequency
+    case trackingMethod
+    case socialProof
     case transactionAddition
-    
+
     var displayName: String {
         switch self {
         case .emailConfirmation: return "Email Confirmation"
+        case .valueFeature1: return "Feature: Receipt Scanning"
+        case .valueFeature2: return "Feature: Smart Categories"
+        case .valueFeature3: return "Feature: Insights"
+        case .valueFeature4: return "Feature: Budgets"
         case .nameCollection: return "Name Collection"
         case .currencySelection: return "Currency Selection"
         case .goalSelection: return "Goal Selection"
+        case .stressSelection: return "Stress Selection"
+        case .overspentRealization: return "Overspent Realization"
+        case .trackingDifficulty: return "Tracking Difficulty"
+        case .idealOutcome: return "Ideal Outcome"
+        case .trackingFrequency: return "Tracking Frequency"
+        case .trackingMethod: return "Tracking Method"
+        case .socialProof: return "Social Proof"
         case .transactionAddition: return "Transaction Addition"
         }
     }
@@ -151,55 +173,96 @@ class OnboardingStateManager: ObservableObject {
     // MARK: - Numerical Progression System
     
     /// Get current onboarding step based on user's progression number
-    /// 0=not started, 1=email done, 2=name done, 3=currency done, 4=goals done, 5=complete
+    /// 0=not started, 1=email done, 2=name done, 3=currency done, 4=goals done, 5=stress done, 6=overspent done, 7=tracking done, 8=ideal done, 9=complete
     func getCurrentOnboardingStep() -> OnboardingStep {
         let user = UserManager.shared.currentUser
-        
+
         // Auto-migrate legacy users if they haven't been migrated
         if user.onboardingCompleted == 0 && !hasMigrationCompleted() {
             migrateLegacyUserToNumericalSystem()
         }
-        
+
         let progressNumber = user.onboardingCompleted
         print("🔢 OnboardingStateManager: Current progression number: \(progressNumber)")
-        
+
         switch progressNumber {
         case 0:
-            // Not started - determine initial step
-            return determineInitialStep()
+            // Not started - show value feature 1
+            print("🔢 Next step: Value Feature 1 (not started)")
+            return .valueFeature1
         case 1:
-            // Email done, show name collection
-            print("🔢 Next step: Name Collection (email completed)")
-            return .nameCollection
+            // VF1 done, show value feature 2
+            print("🔢 Next step: Value Feature 2 (feature 1 completed)")
+            return .valueFeature2
         case 2:
+            // VF2 done, show value feature 3
+            print("🔢 Next step: Value Feature 3 (feature 2 completed)")
+            return .valueFeature3
+        case 3:
+            // VF3 done, show value feature 4
+            print("🔢 Next step: Value Feature 4 (feature 3 completed)")
+            return .valueFeature4
+        case 4:
+            // VF4 done, show name collection
+            print("🔢 Next step: Name Collection (features completed)")
+            return .nameCollection
+        case 5:
             // Name done, show currency selection
             print("🔢 Next step: Currency Selection (name completed)")
             return .currencySelection
-        case 3:
+        case 6:
             // Currency done, show goal selection
             print("🔢 Next step: Goal Selection (currency completed)")
             return .goalSelection
-        case 4:
-            // Goals done, show transaction addition
-            print("🔢 Next step: Transaction Addition (goals completed)")
+        case 7:
+            // Goals done, show stress selection
+            print("🔢 Next step: Stress Selection (goals completed)")
+            return .stressSelection
+        case 8:
+            // Stress done, show overspent realization
+            print("🔢 Next step: Overspent Realization (stress completed)")
+            return .overspentRealization
+        case 9:
+            // Overspent done, show tracking difficulty
+            print("🔢 Next step: Tracking Difficulty (overspent completed)")
+            return .trackingDifficulty
+        case 10:
+            // Tracking difficulty done, show ideal outcome
+            print("🔢 Next step: Ideal Outcome (tracking difficulty completed)")
+            return .idealOutcome
+        case 11:
+            // Ideal outcome done, show tracking frequency
+            print("🔢 Next step: Tracking Frequency (ideal outcome completed)")
+            return .trackingFrequency
+        case 12:
+            // Tracking frequency done, show tracking method
+            print("🔢 Next step: Tracking Method (tracking frequency completed)")
+            return .trackingMethod
+        case 13:
+            // Tracking method done, show social proof
+            print("🔢 Next step: Social Proof (tracking method completed)")
+            return .socialProof
+        case 14:
+            // Social proof done, show transaction addition
+            print("🔢 Next step: Transaction Addition (social proof completed)")
             return .transactionAddition
-        case 5:
+        case 15, 16:
             // Fully complete
             print("🔢 Onboarding fully complete")
             return .transactionAddition // Fallback, shouldn't show onboarding
         default:
             // Invalid progression number - fix it
-            if progressNumber > 5 {
-                print("🚨 INVALID progression number \(progressNumber) > 5 - correcting to 5 (complete)")
-                UserManager.shared.updateOnboardingProgress(5)
+            if progressNumber > 16 {
+                print("🚨 INVALID progression number \(progressNumber) > 16 - correcting to 16 (complete)")
+                UserManager.shared.updateOnboardingProgress(16)
                 return .transactionAddition
             } else if progressNumber < 0 {
                 print("🚨 INVALID progression number \(progressNumber) < 0 - correcting to 0 (not started)")
                 UserManager.shared.updateOnboardingProgress(0)
-                return determineInitialStep()
+                return .valueFeature1
             } else {
-                print("⚠️ Unknown progression number \(progressNumber), defaulting to email confirmation")
-                return .emailConfirmation
+                print("⚠️ Unknown progression number \(progressNumber), defaulting to value feature 1")
+                return .valueFeature1
             }
         }
     }
@@ -251,41 +314,41 @@ class OnboardingStateManager: ObservableObject {
     /// Set user to specific onboarding progression number
     func setOnboardingProgress(to targetProgress: Int) {
         let currentProgress = UserManager.shared.currentUser.onboardingCompleted
-        
+
         // Validate target progression
-        if targetProgress < 0 || targetProgress > 5 {
-            print("🚨 OnboardingStateManager: INVALID target progression \(targetProgress) - must be 0-5")
+        if targetProgress < 0 || targetProgress > 16 {
+            print("🚨 OnboardingStateManager: INVALID target progression \(targetProgress) - must be 0-16")
             return
         }
-        
+
         // CRITICAL FIX: Never downgrade progression to prevent race conditions
         if targetProgress < currentProgress {
             print("🚨 OnboardingStateManager: PREVENTING downgrade from \(currentProgress) to \(targetProgress)")
             print("   - This prevents race conditions during migration")
             return
         }
-        
+
         print("🔢 Setting onboarding progression: \(currentProgress) → \(targetProgress)")
         UserManager.shared.updateOnboardingProgress(targetProgress)
-        
+
         // Mark as complete if we've reached the final step
-        if targetProgress >= 5 {
-            print("🎉 OnboardingStateManager: Reached progression 5 - marking onboarding as complete")
+        if targetProgress >= 16 {
+            print("🎉 OnboardingStateManager: Reached progression 16 - marking onboarding as complete")
             markAsComplete()
         }
     }
-    
+
     /// Legacy method - use setOnboardingProgress(to:) instead
     @available(*, deprecated, message: "Use setOnboardingProgress(to:) instead")
     func advanceToNextStep() {
         let currentProgress = UserManager.shared.currentUser.onboardingCompleted
-        let nextProgress = min(currentProgress + 1, 5) // Safety cap at 5
+        let nextProgress = min(currentProgress + 1, 16) // Safety cap at 16
         setOnboardingProgress(to: nextProgress)
     }
-    
+
     /// Check if onboarding is fully complete
     func isOnboardingComplete() -> Bool {
-        return UserManager.shared.currentUser.onboardingCompleted >= 5
+        return UserManager.shared.currentUser.onboardingCompleted >= 16
     }
     
     /// Migrate existing users from legacy gate system to numerical progression
@@ -337,10 +400,19 @@ class OnboardingStateManager: ObservableObject {
             print("🔄 Migration: Goal selection ✅ → progression: 4")
         }
         
-        // Transaction addition (step 5)
+        // For legacy users who completed everything before stress/overspent/tracking/ideal existed,
+        // check if they have transaction and mark as fully complete
         if checkTransactionGate() {
-            highestCompletedStep = 5
-            print("🔄 Migration: Transaction addition ✅ → progression: 5 (complete)")
+            highestCompletedStep = 16
+            print("🔄 Migration: Transaction addition ✅ → progression: 16 (complete)")
+            // Also mark all new steps as complete since they didn't exist for this user
+            UserDefaults.standard.set(true, forKey: "hasCompletedValueFeatures")
+            UserDefaults.standard.set(true, forKey: "hasCompletedStressSelection")
+            UserDefaults.standard.set(true, forKey: "hasCompletedOverspentSelection")
+            UserDefaults.standard.set(true, forKey: "hasCompletedTrackingDifficultySelection")
+            UserDefaults.standard.set(true, forKey: "hasCompletedIdealOutcomeSelection")
+            UserDefaults.standard.set(true, forKey: "hasCompletedTrackingFrequencySelection")
+            UserDefaults.standard.set(true, forKey: "hasCompletedTrackingMethodSelection")
         }
         
         print("🔄 Migration: Final progression number: \(highestCompletedStep)")
@@ -561,9 +633,9 @@ class OnboardingStateManager: ObservableObject {
         
         // CRITICAL FIX: Check for invalid progression numbers first
         let currentProgress = UserManager.shared.currentUser.onboardingCompleted
-        if currentProgress > 5 {
-            print("🚨 OnboardingStateManager: INVALID progression \(currentProgress) > 5 - fixing to 5 and completing onboarding")
-            UserManager.shared.updateOnboardingProgress(5)
+        if currentProgress > 15 {
+            print("🚨 OnboardingStateManager: INVALID progression \(currentProgress) > 15 - fixing to 15 and completing onboarding")
+            UserManager.shared.updateOnboardingProgress(15)
             markAsComplete()
             return false
         } else if currentProgress < 0 {
@@ -672,7 +744,7 @@ class OnboardingStateManager: ObservableObject {
     /// Determine what step user should be on based on completed gates
     private func determineCurrentStep() -> OnboardingStep {
         let gateResults = validateAllGates()
-        
+
         if !gateResults[.emailVerification]! {
             return .emailConfirmation
         } else if !gateResults[.nameCollection]! {
@@ -681,6 +753,20 @@ class OnboardingStateManager: ObservableObject {
             return .currencySelection
         } else if !gateResults[.goalSelection]! {
             return .goalSelection
+        } else if !checkStressSelectionGate() {
+            return .stressSelection
+        } else if !checkOverspentSelectionGate() {
+            return .overspentRealization
+        } else if !checkTrackingDifficultyGate() {
+            return .trackingDifficulty
+        } else if !checkIdealOutcomeGate() {
+            return .idealOutcome
+        } else if !checkTrackingFrequencyGate() {
+            return .trackingFrequency
+        } else if !checkTrackingMethodGate() {
+            return .trackingMethod
+        } else if !checkSocialProofGate() {
+            return .socialProof
         } else if !checkTransactionGate() {
             return .transactionAddition
         } else {
@@ -688,7 +774,56 @@ class OnboardingStateManager: ObservableObject {
             return .transactionAddition
         }
     }
-    
+
+    /// Check if social proof screen is complete
+    func checkSocialProofGate() -> Bool {
+        let hasCompleted = UserDefaults.standard.bool(forKey: "hasCompletedSocialProof")
+        print("🔍 OnboardingStateManager: Social proof gate - complete: \(hasCompleted)")
+        return hasCompleted
+    }
+
+    /// Check if stress selection is complete
+    func checkStressSelectionGate() -> Bool {
+        let hasCompleted = UserDefaults.standard.bool(forKey: "hasCompletedStressSelection")
+        print("🔍 OnboardingStateManager: Stress gate - complete: \(hasCompleted)")
+        return hasCompleted
+    }
+
+    /// Check if overspent realization is complete
+    func checkOverspentSelectionGate() -> Bool {
+        let hasCompleted = UserDefaults.standard.bool(forKey: "hasCompletedOverspentSelection")
+        print("🔍 OnboardingStateManager: Overspent gate - complete: \(hasCompleted)")
+        return hasCompleted
+    }
+
+    /// Check if tracking difficulty selection is complete
+    func checkTrackingDifficultyGate() -> Bool {
+        let hasCompleted = UserDefaults.standard.bool(forKey: "hasCompletedTrackingDifficultySelection")
+        print("🔍 OnboardingStateManager: Tracking difficulty gate - complete: \(hasCompleted)")
+        return hasCompleted
+    }
+
+    /// Check if ideal outcome selection is complete
+    func checkIdealOutcomeGate() -> Bool {
+        let hasCompleted = UserDefaults.standard.bool(forKey: "hasCompletedIdealOutcomeSelection")
+        print("🔍 OnboardingStateManager: Ideal outcome gate - complete: \(hasCompleted)")
+        return hasCompleted
+    }
+
+    /// Check if tracking frequency selection is complete
+    func checkTrackingFrequencyGate() -> Bool {
+        let hasCompleted = UserDefaults.standard.bool(forKey: "hasCompletedTrackingFrequencySelection")
+        print("🔍 OnboardingStateManager: Tracking frequency gate - complete: \(hasCompleted)")
+        return hasCompleted
+    }
+
+    /// Check if tracking method selection is complete
+    func checkTrackingMethodGate() -> Bool {
+        let hasCompleted = UserDefaults.standard.bool(forKey: "hasCompletedTrackingMethodSelection")
+        print("🔍 OnboardingStateManager: Tracking method gate - complete: \(hasCompleted)")
+        return hasCompleted
+    }
+
     // MARK: - App Lifecycle Handling
     
     private func setupNotificationObservers() {
@@ -743,12 +878,24 @@ class OnboardingStateManager: ObservableObject {
             UserDefaults.standard.set(false, forKey: "hasCompletedCurrencySelection")
             UserDefaults.standard.set(false, forKey: "hasSetPrimaryCurrency")
             UserDefaults.standard.set(false, forKey: "hasCompletedGoalSelection")
-            
-            // Clear goal values if resetting to name collection
+            UserDefaults.standard.set(false, forKey: "hasCompletedStressSelection")
+            UserDefaults.standard.set(false, forKey: "hasCompletedOverspentSelection")
+            UserDefaults.standard.set(false, forKey: "hasCompletedTrackingDifficultySelection")
+            UserDefaults.standard.set(false, forKey: "hasCompletedIdealOutcomeSelection")
+            UserDefaults.standard.set(false, forKey: "hasCompletedTrackingFrequencySelection")
+            UserDefaults.standard.set(false, forKey: "hasCompletedTrackingMethodSelection")
+
+            // Clear goal/stress/overspent/tracking/ideal/frequency/method values if resetting to name collection
             UserDefaults.standard.removeObject(forKey: "selectedPrimaryGoal")
             UserDefaults.standard.removeObject(forKey: "selectedPrimaryGoals")
+            UserDefaults.standard.removeObject(forKey: "selectedMoneyStress")
+            UserDefaults.standard.removeObject(forKey: "selectedOverspentRealization")
+            UserDefaults.standard.removeObject(forKey: "selectedTrackingDifficulty")
+            UserDefaults.standard.removeObject(forKey: "selectedIdealOutcome")
+            UserDefaults.standard.removeObject(forKey: "selectedTrackingFrequency")
+            UserDefaults.standard.removeObject(forKey: "selectedTrackingMethod")
         }
-        
+
         // Always clear transaction step flags when resetting
         UserDefaults.standard.set(false, forKey: "hasReachedTransactionStep")
         UserDefaults.standard.set(false, forKey: "hasSkippedTransactionOnboarding")
@@ -759,12 +906,23 @@ class OnboardingStateManager: ObservableObject {
     /// Helper to get onboarding step for a specific progression number
     private func getCurrentOnboardingStepForProgression(_ progression: Int) -> OnboardingStep {
         switch progression {
-        case 0: return .emailConfirmation
-        case 1: return .nameCollection
-        case 2: return .currencySelection
-        case 3: return .goalSelection
-        case 4, 5: return .transactionAddition
-        default: return .emailConfirmation
+        case 0: return .valueFeature1
+        case 1: return .valueFeature2
+        case 2: return .valueFeature3
+        case 3: return .valueFeature4
+        case 4: return .nameCollection
+        case 5: return .currencySelection
+        case 6: return .goalSelection
+        case 7: return .stressSelection
+        case 8: return .overspentRealization
+        case 9: return .trackingDifficulty
+        case 10: return .idealOutcome
+        case 11: return .trackingFrequency
+        case 12: return .trackingMethod
+        case 13: return .socialProof
+        case 14: return .transactionAddition
+        case 15, 16: return .transactionAddition
+        default: return .valueFeature1
         }
     }
     

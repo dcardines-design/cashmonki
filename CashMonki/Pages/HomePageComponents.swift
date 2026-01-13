@@ -19,11 +19,18 @@ extension HomePage {
         VStack(alignment: .leading, spacing: 8) {
             Text(sectionTitle)
                 .font(AppFonts.overusedGroteskMedium(size: 18))
-                .foregroundStyle(.secondary)
-            
+                .foregroundStyle(AppColors.foregroundSecondary)
+
             HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text(currency(cachedCurrentPeriodTotal))
-                    .font(AppFonts.overusedGroteskSemiBold(size: 40))
+                // Amount with decimal in tertiary color
+                HStack(alignment: .firstTextBaseline, spacing: 0) {
+                    Text(currencyWholeNumber(cachedCurrentPeriodTotal))
+                        .font(AppFonts.overusedGroteskSemiBold(size: 40))
+
+                    Text(currencyDecimalPart(cachedCurrentPeriodTotal))
+                        .font(AppFonts.overusedGroteskSemiBold(size: 40))
+                        .foregroundColor(AppColors.foregroundTertiary)
+                }
                 
                 HStack(spacing: 4) {
                     // Only show arrow icon if percentage change is not 0%
@@ -149,10 +156,30 @@ extension HomePage {
                         showingCustomPaywall = true
                         return
                     }
-                    
-                    originalTileClicked = .scan
-                    currentPhotoSource = .camera
-                    isCameraPresented = true
+
+                    // Check camera permission before opening camera
+                    CameraManager.checkPermissionStatus { status in
+                        switch status {
+                        case .granted:
+                            // 🕐 CAMERA LAG DEBUG - Start timing from button tap
+                            let scanButtonTapped = Date()
+                            print("🕐🕐🕐 CAMERA LAG DEBUG: ==== SCAN BUTTON TAPPED ====")
+                            print("🕐 CAMERA LAG DEBUG: Button tap timestamp: \(scanButtonTapped)")
+                            CameraLagDebug.shared.scanButtonTappedAt = scanButtonTapped
+
+                            originalTileClicked = .scan
+                            currentPhotoSource = .camera
+                            isCameraPresented = true
+
+                            print("🕐 CAMERA LAG DEBUG: isCameraPresented set to true, time: \(String(format: "%.3f", Date().timeIntervalSince(scanButtonTapped) * 1000))ms since tap")
+                        case .denied:
+                            // Show alert to open Settings
+                            showingCameraPermissionAlert = true
+                        case .notDetermined:
+                            // Permission dialog shown, wait for result
+                            break
+                        }
+                    }
                 }
             }
             
@@ -173,13 +200,13 @@ extension HomePage {
         VStack(alignment: .leading, spacing: 10) {
             Text("Recently added")
                 .font(AppFonts.overusedGroteskMedium(size: 16))
-                .foregroundStyle(.secondary)
+                .foregroundColor(AppColors.foregroundSecondary)
             
             VStack(spacing: 0) {
                 if recentTransactions.isEmpty {
                     Text("No transactions yet")
                         .font(AppFonts.overusedGroteskMedium(size: 14))
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(AppColors.foregroundTertiary)
                         .padding(.vertical, 20)
                 } else {
                     // Individual transaction list
@@ -221,7 +248,52 @@ extension HomePage {
         }
         .opacity(1.0) // Force UI refresh through refreshTrigger state change
     }
-    
+
+    // MARK: - Recurring / Subscriptions Section
+
+    internal var recurringTransactionsSection: some View {
+        let subscriptions = SubscriptionManager.shared.subscriptions.filter { $0.isActive }
+        let totalMonthly = SubscriptionManager.shared.totalMonthlySpend
+
+        return Group {
+            VStack(alignment: .leading, spacing: 10) {
+                // Header row
+                HStack {
+                    Text("Recurring / Subscriptions")
+                        .font(AppFonts.overusedGroteskMedium(size: 16))
+                        .foregroundColor(AppColors.foregroundSecondary)
+                    Spacer()
+                    Text("\(CurrencyPreferences.shared.formatPrimaryAmount(totalMonthly))/monthly")
+                        .font(AppFonts.overusedGroteskMedium(size: 16))
+                        .foregroundColor(AppColors.foregroundSecondary)
+                }
+
+                // 2-column grid for subscription cards
+                if !subscriptions.isEmpty {
+                    LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
+                        ForEach(Array(subscriptions.prefix(5))) { subscription in
+                            SubscriptionCard(subscription: subscription) {
+                                print("📋 Subscription tapped: \(subscription.name)")
+                                selectedSubscriptionForDetail = subscription
+                            }
+                        }
+                    }
+                }
+
+                // Add subscription card - full width, height hugs content
+                AddSubscriptionCard {
+                    // Check if user can add more subscriptions before opening form
+                    if SubscriptionManager.shared.canAddMoreSubscriptions {
+                        showingAddSubscription = true
+                    } else {
+                        // Show paywall for free users who have reached the limit
+                        showingCustomPaywall = true
+                    }
+                }
+            }
+        }
+    }
+
     internal var chartFilterTabs: some View {
         HStack(spacing: 8) {
             // Show Expense, Income, and Balance tabs

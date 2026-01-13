@@ -98,7 +98,12 @@ struct ContentView: View {
             // Check onboarding status using state manager
             print("🔍 ContentView: onAppear - checking onboarding with state manager")
             checkOnboardingWithStateManager()
-            
+
+            // COMMENTED OUT FOR APP STORE SUBMISSION - TODO: Uncomment later
+            // Start recurring transaction timer on initial appear
+            // (onChange won't fire on launch since scenePhase is already .active)
+            // RecurringTransactionManager.shared.startGenerationTimer()
+
             // Set up notification observers only once to prevent duplicate toasts
             if !observersSetUp {
                 observersSetUp = true
@@ -170,6 +175,9 @@ struct ContentView: View {
                     print("⚠️ ContentView: User not authenticated - skipping onboarding check")
                 }
 
+                // Process subscriptions and schedule reminders when app becomes active
+                SubscriptionManager.shared.onAppActive()
+
                 // Only check for lapsed paywall if user is NOT a pro subscriber
                 // This prevents re-showing paywall when returning from App Store purchase
                 print("🎫 SCENE ACTIVE: isProUser=\(revenueCatManager.isProUser), hasShownTrialEndedToast=\(hasShownTrialEndedToast)")
@@ -179,6 +187,14 @@ struct ContentView: View {
                 } else {
                     print("🎫 SCENE ACTIVE: Skipping - user is Pro")
                 }
+
+                // COMMENTED OUT FOR APP STORE SUBMISSION - TODO: Uncomment later
+                // Start recurring transaction timer when app becomes active
+                // RecurringTransactionManager.shared.startGenerationTimer()
+            } else {
+                // COMMENTED OUT FOR APP STORE SUBMISSION - TODO: Uncomment later
+                // Stop timer when app goes to background
+                // RecurringTransactionManager.shared.stopGenerationTimer()
             }
         }
         .onChange(of: revenueCatManager.customerInfo) { oldValue, newValue in
@@ -221,7 +237,22 @@ struct ContentView: View {
                     originalImage: image,
                     analysis: analysis,
                     primaryCurrency: primaryCurrency,
-                    onConfirm: { confirmedAnalysis, note in
+                    onConfirm: { confirmedAnalysis, note, isRecurring, recurringFrequency in
+                        // DEBUG: Log the date being used for the transaction
+                        print("🔴🔴🔴 RECEIPT CONFIRMATION DEBUG 🔴🔴🔴")
+                        print("🔴 RECEIPT DATE: Transaction date from receipt: \(confirmedAnalysis.date)")
+                        print("🔴 RECEIPT DATE: Today's date: \(Date())")
+                        let calendar = Calendar.current
+                        let receiptMonth = calendar.component(.month, from: confirmedAnalysis.date)
+                        let receiptYear = calendar.component(.year, from: confirmedAnalysis.date)
+                        let todayMonth = calendar.component(.month, from: Date())
+                        let todayYear = calendar.component(.year, from: Date())
+                        print("🔴 RECEIPT DATE: Receipt is from \(receiptMonth)/\(receiptYear), Today is \(todayMonth)/\(todayYear)")
+                        if receiptYear != todayYear || receiptMonth != todayMonth {
+                            print("⚠️⚠️⚠️ WARNING: Receipt date is NOT in the current month! ⚠️⚠️⚠️")
+                            print("⚠️ Transaction will appear in \(receiptMonth)/\(receiptYear), NOT current month!")
+                        }
+
                         // Create transaction from confirmed analysis with currency conversion
                         let categoryResult = CategoriesManager.shared.findCategoryOrSubcategory(by: confirmedAnalysis.category)
                         let categoryId = categoryResult.category?.id ?? categoryResult.subcategory?.id
@@ -229,9 +260,16 @@ struct ContentView: View {
                         // Determine if this is income based on category type
                         let isIncome = categoryResult.category?.type == .income || categoryResult.subcategory?.type == .income
 
-                        let confirmedTransaction = CurrencyRateManager.shared.createTransaction(
+                        // Use selected wallet, fallback to default account, then first account
+                        let walletID = AccountManager.shared.selectedSubAccountId
+                            ?? userManager.currentUser.defaultSubAccount?.id
+                            ?? userManager.currentUser.subAccounts.first?.id
+
+                        print("📸 Receipt: Using walletID: \(walletID?.uuidString.prefix(8) ?? "NIL - WILL CAUSE DISPLAY ISSUE")")
+
+                        let baseTransaction = CurrencyRateManager.shared.createTransaction(
                             accountID: userManager.currentUser.id,
-                            walletID: AccountManager.shared.selectedSubAccountId,
+                            walletID: walletID,
                             category: confirmedAnalysis.category,
                             categoryId: categoryId,
                             originalAmount: confirmedAnalysis.totalAmount,
@@ -244,8 +282,49 @@ struct ContentView: View {
                             receiptImage: image
                         )
 
+                        // Create final transaction with recurring fields
+                        let confirmedTransaction = Txn(
+                            txID: baseTransaction.txID,
+                            accountID: baseTransaction.accountID,
+                            walletID: baseTransaction.walletID,
+                            category: baseTransaction.category,
+                            categoryId: baseTransaction.categoryId,
+                            amount: baseTransaction.amount,
+                            date: baseTransaction.date,
+                            createdAt: baseTransaction.createdAt,
+                            receiptImage: baseTransaction.receiptImage,
+                            hasReceiptImage: baseTransaction.hasReceiptImage,
+                            merchantName: baseTransaction.merchantName,
+                            paymentMethod: baseTransaction.paymentMethod,
+                            receiptNumber: baseTransaction.receiptNumber,
+                            invoiceNumber: baseTransaction.invoiceNumber,
+                            items: baseTransaction.items,
+                            note: baseTransaction.note,
+                            originalAmount: baseTransaction.originalAmount,
+                            originalCurrency: baseTransaction.originalCurrency,
+                            primaryCurrency: baseTransaction.primaryCurrency,
+                            secondaryCurrency: baseTransaction.secondaryCurrency,
+                            exchangeRate: baseTransaction.exchangeRate,
+                            secondaryAmount: baseTransaction.secondaryAmount,
+                            secondaryExchangeRate: baseTransaction.secondaryExchangeRate,
+                            userEnteredAmount: baseTransaction.userEnteredAmount,
+                            userEnteredCurrency: baseTransaction.userEnteredCurrency,
+                            // Recurring fields
+                            isRecurring: isRecurring,
+                            recurringFrequency: recurringFrequency,
+                            recurringTemplateId: nil,
+                            lastGeneratedDate: nil,
+                            isRecurringActive: isRecurring
+                        )
+
                         // Add transaction
                         userManager.addTransaction(confirmedTransaction)
+
+                        // Migrate any orphaned transactions immediately (fixes nil walletID issues)
+                        AccountManager.shared.migrateOrphanedTransactionsAtStartup()
+
+                        // Cancel today's reminder since user tracked
+                        NotificationManager.shared.onTransactionAdded()
 
                         // Show success toast
                         toastManager.showSuccess("Transaction added!")
@@ -281,6 +360,13 @@ struct ContentView: View {
                                     )
                                     await MainActor.run {
                                         roastSheetMessage = RoastMessage(message: aiRoast)
+                                        // Track roast message triggered
+                                        AnalyticsManager.shared.track(.roastMessageTriggered, properties: [
+                                            "merchant": roastMerchant,
+                                            "category": roastCategory,
+                                            "currency": CurrencyPreferences.shared.primaryCurrency.rawValue,
+                                            "success": true
+                                        ])
                                     }
                                 } catch let backendError as BackendAPIError {
                                     print("❌ ROAST FAILED - BackendAPIError: \(backendError.localizedDescription)")
@@ -319,6 +405,7 @@ struct ContentView: View {
                     }
                 )
                 .presentationDetents([.fraction(0.98)])
+                .presentationCornerRadius(20)
                 .presentationDragIndicator(.hidden)
                 .environmentObject(toastManager)
             }

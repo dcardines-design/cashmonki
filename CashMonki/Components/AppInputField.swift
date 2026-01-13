@@ -74,7 +74,8 @@ struct AppInputField: View {
     let isDatePicker: Bool
     @Binding var dateValue: Date
     let datePickerComponents: DatePickerComponents
-    
+    let maxDate: Date?
+
     // Category picker properties
     let isCategoryPicker: Bool
     let transactionAmount: Double? // For determining income/expense context
@@ -253,6 +254,7 @@ struct AppInputField: View {
         isDatePicker: Bool = false,
         dateValue: Binding<Date> = .constant(Date()),
         datePickerComponents: DatePickerComponents = .date,
+        maxDate: Date? = nil,
         isCategoryPicker: Bool = false,
         transactionAmount: Double? = nil,
         isParentCategoryPicker: Bool = false,
@@ -284,6 +286,7 @@ struct AppInputField: View {
         self.isDatePicker = isDatePicker
         self._dateValue = dateValue
         self.datePickerComponents = datePickerComponents
+        self.maxDate = maxDate
         self.isCategoryPicker = isCategoryPicker
         self.transactionAmount = transactionAmount
         self.isParentCategoryPicker = isParentCategoryPicker
@@ -593,11 +596,18 @@ struct AppInputField: View {
                 .padding(.top, 8)
                 .padding(.bottom, 16)
 
-            DatePicker("", selection: $dateValue, displayedComponents: datePickerComponents)
-                .datePickerStyle(.graphical)
-                .labelsHidden()
-                .tint(Color(hex: "542EFF") ?? .purple) // Consistent purple brand color for all date picker arrows
-                .padding(.horizontal, 12)
+            Group {
+                if let maxDate = maxDate {
+                    DatePicker("", selection: $dateValue, in: ...maxDate, displayedComponents: datePickerComponents)
+                        .datePickerStyle(.graphical)
+                } else {
+                    DatePicker("", selection: $dateValue, displayedComponents: datePickerComponents)
+                        .datePickerStyle(.graphical)
+                }
+            }
+            .labelsHidden()
+            .tint(Color(hex: "542EFF") ?? .purple) // Consistent purple brand color for all date picker arrows
+            .padding(.horizontal, 12)
 
             Spacer()
         }
@@ -731,7 +741,7 @@ extension AppInputField {
     }
     
     /// Creates a date input field with date picker
-    static func date(title: String, dateValue: Binding<Date>, components: DatePickerComponents = .date, size: Size = .md) -> AppInputField {
+    static func date(title: String, dateValue: Binding<Date>, components: DatePickerComponents = .date, size: Size = .md, maxDate: Date? = nil) -> AppInputField {
         AppInputField(
             title: title,
             text: .constant(""),
@@ -739,7 +749,8 @@ extension AppInputField {
             size: size,
             isDatePicker: true,
             dateValue: dateValue,
-            datePickerComponents: components
+            datePickerComponents: components,
+            maxDate: maxDate
         )
     }
     
@@ -762,7 +773,12 @@ extension AppInputField {
 
     /// Creates a budget category selection field (parent expense categories only)
     static func budgetCategory(selectedCategoryId: Binding<UUID?>, selectedCategoryName: Binding<String>, size: Size = .md) -> some View {
-        BudgetCategoryInputField(selectedCategoryId: selectedCategoryId, selectedCategoryName: selectedCategoryName, size: size)
+        BudgetCategoryInputField(selectedCategoryId: selectedCategoryId, selectedCategoryName: selectedCategoryName, size: size, expenseOnly: true)
+    }
+
+    /// Category picker for recurring transactions (shows both expense AND income categories)
+    static func recurringCategory(selectedCategoryId: Binding<UUID?>, selectedCategoryName: Binding<String>, size: Size = .md) -> some View {
+        BudgetCategoryInputField(selectedCategoryId: selectedCategoryId, selectedCategoryName: selectedCategoryName, size: size, expenseOnly: false)
     }
 
     static func currency(selectedCurrency: Binding<Currency>, size: Size = .md, title: String = "Currency") -> some View {
@@ -891,9 +907,9 @@ struct CategoryByIdInputField: View {
         if let amount = transactionAmount {
             return amount > 0 ? .income : .expense
         }
-        
-        // Default to expense if no context available
-        return .expense
+
+        // Use saved tab preference from last selection
+        return CategoryPickerSheet.savedTabPreference
     }
 
     var body: some View {
@@ -955,6 +971,7 @@ struct BudgetCategoryInputField: View {
     @Binding var selectedCategoryId: UUID?
     @Binding var selectedCategoryName: String
     let size: AppInputField.Size
+    let expenseOnly: Bool // Whether to only show expense categories (true for budgets, false for recurring)
 
     @State private var showingCategoryPicker = false
     @ObservedObject private var categoriesManager = CategoriesManager.shared
@@ -1025,7 +1042,7 @@ struct BudgetCategoryInputField: View {
             CategoryPickerSheet(
                 selectedCategoryId: $selectedCategoryId,
                 isPresented: $showingCategoryPicker,
-                expenseOnly: true  // Only show expense categories for budgets
+                expenseOnly: expenseOnly  // Budgets: expense only, Recurring: all categories
             )
             .presentationDetents([.fraction(0.98)])
             .presentationDragIndicator(.hidden)

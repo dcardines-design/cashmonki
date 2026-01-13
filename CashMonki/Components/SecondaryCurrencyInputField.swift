@@ -69,6 +69,7 @@ struct SecondaryCurrencyInputField: View {
                 isPresented: $showingPicker
             )
             .presentationDetents([.fraction(0.98)])
+            .presentationCornerRadius(20)
             .presentationDragIndicator(.hidden)
         }
     }

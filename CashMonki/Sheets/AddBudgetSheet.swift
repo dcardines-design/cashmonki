@@ -123,6 +123,7 @@ struct AddBudgetSheet: View {
                 isPresented: $showingCurrencyPicker
             )
             .presentationDetents([.fraction(0.98)])
+            .presentationCornerRadius(20)
             .presentationDragIndicator(.hidden)
         }
     }
@@ -173,7 +174,7 @@ struct AddBudgetSheet: View {
                 .font(AppFonts.overusedGroteskMedium(size: 16))
                 .foregroundStyle(AppColors.foregroundSecondary)
 
-            HStack(spacing: 10) {
+            HStack(spacing: 8) {
                 yesNoChip(label: "Yes", isSelected: applyToAllPeriods) {
                     applyToAllPeriods = true
                 }

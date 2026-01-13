@@ -577,12 +577,12 @@ enum SyncInfrastructureStatus: String, CaseIterable {
     
     var color: Color {
         switch self {
-        case .dormant: return .green
+        case .dormant: return AppColors.successForeground
         case .activating, .deactivating: return .orange
         case .active: return .blue
         case .syncing: return .purple
         case .conflictsDetected: return .yellow
-        case .error: return .red
+        case .error: return AppColors.accentRed
         }
     }
 }

@@ -28,6 +28,7 @@ struct OnboardingTransactionSheet: View {
     @State private var isTransactionSaving = false
     @State private var isCompletingOnboarding = false
     @State private var showingUsageLimitModal = false
+    @State private var showingCameraPermissionAlert = false
     
     @ObservedObject private var userManager = UserManager.shared
     @ObservedObject private var dailyUsageManager = DailyUsageManager.shared
@@ -56,7 +57,7 @@ struct OnboardingTransactionSheet: View {
                         .background(AppColors.surfacePrimary)
                         .cornerRadius(200)
                         
-                        Text("Add something you bought today!")
+                        Text("Last, add something you bought today!")
                             .font(
                                 Font.custom("Overused Grotesk", size: 30)
                                     .weight(.semibold)
@@ -103,7 +104,7 @@ struct OnboardingTransactionSheet: View {
                     .padding(.top, 12)
                 }
                 .padding(.horizontal, 20)
-                .padding(.top, 40)
+                .padding(.top, 30)
                 .padding(.bottom, 40)
             }
             
@@ -157,6 +158,16 @@ struct OnboardingTransactionSheet: View {
                 }
             )
         }
+        .alert("Camera Access Disabled", isPresented: $showingCameraPermissionAlert) {
+            Button("Open Settings") {
+                if let settingsURL = URL(string: UIApplication.openSettingsURLString) {
+                    UIApplication.shared.open(settingsURL)
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("To scan receipts, please enable camera access in Settings.")
+        }
         .sheet(isPresented: $isAddPresented) {
             AddTransactionSheet(
                 isPresented: $isAddPresented,
@@ -184,6 +195,7 @@ struct OnboardingTransactionSheet: View {
                     }
             )
             .presentationDetents([.fraction(0.98)])
+            .presentationCornerRadius(20)
             .presentationDragIndicator(.hidden)
             .opacity(isTransactionSaving ? 0.0 : 1.0)
             .animation(.easeInOut(duration: 0.2), value: isTransactionSaving)
@@ -210,8 +222,17 @@ struct OnboardingTransactionSheet: View {
 
     private func handleScanAction() {
         // No daily limit check during onboarding - let users experience the app
-        currentPhotoSource = .camera
-        isCameraPresented = true
+        CameraManager.checkPermissionStatus { status in
+            switch status {
+            case .granted:
+                currentPhotoSource = .camera
+                isCameraPresented = true
+            case .denied:
+                showingCameraPermissionAlert = true
+            case .notDetermined:
+                break
+            }
+        }
     }
     
     private func handleAddAction() {
@@ -340,20 +361,8 @@ struct OnboardingTransactionSheet: View {
                     .frame(width: 24, height: 24)
                     .foregroundColor(AppColors.foregroundSecondary)
             }
-            
+
             Spacer()
-            
-            // Title
-            Text("Get Started")
-                .font(AppFonts.overusedGroteskSemiBold(size: 17))
-                .foregroundColor(AppColors.foregroundPrimary)
-            
-            Spacer()
-            
-            // Invisible element for balance
-            Rectangle()
-                .fill(Color.clear)
-                .frame(width: 24, height: 24)
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 16)

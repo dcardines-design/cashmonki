@@ -43,6 +43,7 @@ struct OnboardingTransactionView: View {
     @State private var pendingReceiptImage: UIImage?
     @State private var pendingReceiptAnalysis: ReceiptAnalysis?
     @State private var showingUsageLimitModal = false
+    @State private var showingCameraPermissionAlert = false
     
     @ObservedObject private var userManager = UserManager.shared
     @ObservedObject private var dailyUsageManager = DailyUsageManager.shared
@@ -106,7 +107,7 @@ struct OnboardingTransactionView: View {
 
                 }
                 .padding(.horizontal, 20)
-                .padding(.top, 40)
+                .padding(.top, 30)
                 .padding(.bottom, 40)
             }
             
@@ -152,6 +153,16 @@ struct OnboardingTransactionView: View {
                 }
             )
         }
+        .alert("Camera Access Disabled", isPresented: $showingCameraPermissionAlert) {
+            Button("Open Settings") {
+                if let settingsURL = URL(string: UIApplication.openSettingsURLString) {
+                    UIApplication.shared.open(settingsURL)
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("To scan receipts, please enable camera access in Settings.")
+        }
         .sheet(isPresented: $isAddPresented) {
             AddTransactionSheet(
                 isPresented: $isAddPresented,
@@ -159,7 +170,10 @@ struct OnboardingTransactionView: View {
                 onSave: { transaction in
                     DispatchQueue.main.async {
                         userManager.addTransaction(transaction)
-                        
+
+                        // Cancel today's reminder since user tracked
+                        NotificationManager.shared.onTransactionAdded()
+
                         // Show success toast (same as HomePage timing - 1.5s)
                         toastManager.showSuccess("Transaction added!")
                         
@@ -178,6 +192,7 @@ struct OnboardingTransactionView: View {
                     }
             )
             .presentationDetents([.fraction(0.98)])
+            .presentationCornerRadius(20)
             .presentationDragIndicator(.hidden)
         }
         .onAppear {
@@ -194,20 +209,27 @@ struct OnboardingTransactionView: View {
                     originalImage: pendingImage,
                     analysis: pendingAnalysis,
                     primaryCurrency: CurrencyPreferences.shared.primaryCurrency,
-                    onConfirm: { confirmedAnalysis, note in
+                    onConfirm: { confirmedAnalysis, note, isRecurring, recurringFrequency in
                         print("✅ OnboardingTransactionView: Receipt confirmed, creating transaction")
-                        
+
                         // Create transaction from confirmed analysis (same logic as HomePage)
                         let categoryResult = CategoriesManager.shared.findCategoryOrSubcategory(by: confirmedAnalysis.category)
                         let categoryId = categoryResult.category?.id ?? categoryResult.subcategory?.id
-                        
+
                         // Determine if this is income based on category type
                         let isIncome = categoryResult.category?.type == .income || categoryResult.subcategory?.type == .income
-                        
+
                         let rateManager = CurrencyRateManager.shared
-                        let confirmedTransaction = rateManager.createTransaction(
+                        // Use selected wallet, fallback to default account, then first account
+                        let walletID = AccountManager.shared.selectedSubAccountId
+                            ?? userManager.currentUser.defaultSubAccount?.id
+                            ?? userManager.currentUser.subAccounts.first?.id
+
+                        print("📸 Receipt: Using walletID: \(walletID?.uuidString.prefix(8) ?? "NIL - WILL CAUSE DISPLAY ISSUE")")
+
+                        let baseTransaction = rateManager.createTransaction(
                             accountID: userManager.currentUser.id,
-                            walletID: AccountManager.shared.selectedSubAccountId,
+                            walletID: walletID,
                             category: confirmedAnalysis.category,
                             categoryId: categoryId,
                             originalAmount: confirmedAnalysis.totalAmount,
@@ -218,14 +240,55 @@ struct OnboardingTransactionView: View {
                             items: confirmedAnalysis.items,
                             isIncome: isIncome
                         )
-                        
+
+                        // Create final transaction with recurring fields
+                        let confirmedTransaction = Txn(
+                            txID: baseTransaction.txID,
+                            accountID: baseTransaction.accountID,
+                            walletID: baseTransaction.walletID,
+                            category: baseTransaction.category,
+                            categoryId: baseTransaction.categoryId,
+                            amount: baseTransaction.amount,
+                            date: baseTransaction.date,
+                            createdAt: baseTransaction.createdAt,
+                            receiptImage: baseTransaction.receiptImage,
+                            hasReceiptImage: baseTransaction.hasReceiptImage,
+                            merchantName: baseTransaction.merchantName,
+                            paymentMethod: baseTransaction.paymentMethod,
+                            receiptNumber: baseTransaction.receiptNumber,
+                            invoiceNumber: baseTransaction.invoiceNumber,
+                            items: baseTransaction.items,
+                            note: baseTransaction.note,
+                            originalAmount: baseTransaction.originalAmount,
+                            originalCurrency: baseTransaction.originalCurrency,
+                            primaryCurrency: baseTransaction.primaryCurrency,
+                            secondaryCurrency: baseTransaction.secondaryCurrency,
+                            exchangeRate: baseTransaction.exchangeRate,
+                            secondaryAmount: baseTransaction.secondaryAmount,
+                            secondaryExchangeRate: baseTransaction.secondaryExchangeRate,
+                            userEnteredAmount: baseTransaction.userEnteredAmount,
+                            userEnteredCurrency: baseTransaction.userEnteredCurrency,
+                            // Recurring fields
+                            isRecurring: isRecurring,
+                            recurringFrequency: recurringFrequency,
+                            recurringTemplateId: nil,
+                            lastGeneratedDate: nil,
+                            isRecurringActive: isRecurring
+                        )
+
                         print("💫 OnboardingTransactionView: Created confirmed transaction with currency conversion:")
                         print("   - Original: \(confirmedAnalysis.currency.symbol)\(confirmedAnalysis.totalAmount)")
                         print("   - Converted: \(confirmedTransaction.primaryCurrency.symbol)\(abs(confirmedTransaction.amount))")
-                        
+
                         // Add transaction to user account
                         userManager.addTransaction(confirmedTransaction)
-                        
+
+                        // Migrate any orphaned transactions immediately (fixes nil walletID issues)
+                        AccountManager.shared.migrateOrphanedTransactionsAtStartup()
+
+                        // Cancel today's reminder since user tracked
+                        NotificationManager.shared.onTransactionAdded()
+
                         // Clean up pending data first
                         pendingReceiptImage = nil
                         pendingReceiptAnalysis = nil
@@ -292,20 +355,8 @@ struct OnboardingTransactionView: View {
                     .frame(width: 24, height: 24)
                     .foregroundColor(AppColors.foregroundSecondary)
             }
-            
+
             Spacer()
-            
-            // Title
-            Text("Get Started")
-                .font(AppFonts.overusedGroteskSemiBold(size: 17))
-                .foregroundColor(AppColors.foregroundPrimary)
-            
-            Spacer()
-            
-            // Invisible element for balance
-            Rectangle()
-                .fill(Color.clear)
-                .frame(width: 24, height: 24)
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 16)
@@ -325,7 +376,7 @@ struct OnboardingTransactionView: View {
             .background(AppColors.surfacePrimary)
             .cornerRadius(200)
             
-            Text("Add something you bought today!")
+            Text("Last, add something you bought today!")
                 .font(
                     Font.custom("Overused Grotesk", size: 30)
                         .weight(.semibold)
@@ -352,10 +403,20 @@ struct OnboardingTransactionView: View {
         print("📸 OnboardingTransactionView: Running in simulator - camera may not work properly")
         #endif
 
-        currentPhotoSource = .camera
-        print("📸 OnboardingTransactionView: About to present camera")
-        isCameraPresented = true
-        print("📸 OnboardingTransactionView: isCameraPresented set to true")
+        // Check camera permission before opening camera
+        CameraManager.checkPermissionStatus { status in
+            switch status {
+            case .granted:
+                currentPhotoSource = .camera
+                print("📸 OnboardingTransactionView: About to present camera")
+                isCameraPresented = true
+                print("📸 OnboardingTransactionView: isCameraPresented set to true")
+            case .denied:
+                showingCameraPermissionAlert = true
+            case .notDetermined:
+                break
+            }
+        }
     }
     
     private func handleAddAction() {

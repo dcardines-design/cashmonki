@@ -15,7 +15,7 @@ struct CategoryData: Codable, Identifiable {
     let type: CategoryType
     let parent: String? // Parent category name (nil for top-level categories)
     let parentId: UUID? // Parent category ID (nil for top-level categories)
-    
+
     init(id: UUID = UUID(), name: String, emoji: String, subcategories: [SubcategoryData] = [], type: CategoryType = .expense, parent: String? = nil, parentId: UUID? = nil) {
         self.id = id
         self.name = name
@@ -34,7 +34,7 @@ struct SubcategoryData: Codable, Identifiable {
     let type: CategoryType // Income or expense classification
     let parent: String? // Parent category name (usually set for subcategories)
     let parentId: UUID? // Parent category ID (usually set for subcategories)
-    
+
     init(id: UUID = UUID(), name: String, emoji: String, type: CategoryType = .expense, parent: String? = nil, parentId: UUID? = nil) {
         self.id = id
         self.name = name
@@ -91,10 +91,55 @@ struct CategoryGroup: Identifiable, Equatable {
     let id = UUID()
     let parent: DisplayCategoryData
     let children: [DisplayCategoryData]
-    
+
     static func == (lhs: CategoryGroup, rhs: CategoryGroup) -> Bool {
         return lhs.parent.categoryData.name == rhs.parent.categoryData.name &&
                lhs.children.count == rhs.children.count
+    }
+}
+
+// MARK: - Category Search Tags
+/// Maps common search terms to category names for better discoverability
+/// Kept minimal (~20 entries) for maintainability
+enum CategorySearchTags {
+    static let tags: [String: [String]] = [
+        // Transport
+        "Fuel": ["gas", "petrol", "gasoline"],
+        "Rideshare": ["uber", "lyft", "grab", "taxi"],
+        "Toll Fee": ["toll", "expressway"],
+
+        // Food & Dining
+        "Coffee": ["starbucks", "latte"],
+        "Restaurants": ["dining", "eat out"],
+        "Groceries": ["supermarket", "market"],
+
+        // Entertainment
+        "Streaming": ["netflix", "spotify", "disney+", "youtube"],
+        "Games": ["gaming", "playstation", "xbox"],
+
+        // Bills
+        "Internet": ["wifi", "broadband"],
+        "Phone": ["mobile", "cell"],
+
+        // Health
+        "Medications": ["pharmacy", "medicine"],
+        "Gym": ["fitness", "workout"],
+
+        // Finance
+        "Credit Cards": ["visa", "mastercard"],
+        "Crypto": ["bitcoin", "ethereum"],
+
+        // Income
+        "Salary": ["paycheck", "wage"],
+        "Bonus": ["incentive"],
+        "Freelance": ["consulting", "gig"]
+    ]
+
+    /// Check if a search query matches any tags for a category
+    static func matchesTags(categoryName: String, query: String) -> Bool {
+        guard let categoryTags = tags[categoryName] else { return false }
+        let lowercaseQuery = query.lowercased()
+        return categoryTags.contains { $0.lowercased().contains(lowercaseQuery) }
     }
 }
 
@@ -130,7 +175,8 @@ class CategoriesManager: ObservableObject {
         loadCategoryHierarchy()
         loadCategories()
         migrateFromOldSystemIfNeeded()
-        
+        runCategoryMigrationV2()
+
         // Ensure "No Category" entries exist with proper UUIDs
         ensureNoCategoryEntriesExist()
         
@@ -223,7 +269,8 @@ class CategoriesManager: ObservableObject {
         CategoryData(name: "Utilities & Bills", emoji: "💡", subcategories: [
             SubcategoryData(name: "Electricity", emoji: "⚡", type: .expense),
             SubcategoryData(name: "Water", emoji: "💧", type: .expense),
-            SubcategoryData(name: "Internet", emoji: "📶", type: .expense)
+            SubcategoryData(name: "Internet", emoji: "📶", type: .expense),
+            SubcategoryData(id: UUID(uuidString: "CA7E0004-0004-0004-0004-000000000041")!, name: "Phone", emoji: "📱", type: .expense)
         ]),
         
         CategoryData(name: "Food", emoji: "🍎", subcategories: [
@@ -240,6 +287,7 @@ class CategoriesManager: ObservableObject {
         
         CategoryData(name: "Transport", emoji: "🚗", subcategories: [
             SubcategoryData(name: "Fuel", emoji: "⛽", type: .expense),
+            SubcategoryData(id: UUID(uuidString: "CA7E0003-0003-0003-0003-000000000031")!, name: "Toll Fee", emoji: "🛣️", type: .expense),
             SubcategoryData(name: "Car Payments", emoji: "💵", type: .expense),
             SubcategoryData(name: "Rideshare", emoji: "🚕", type: .expense)
         ]),
@@ -393,7 +441,21 @@ class CategoriesManager: ObservableObject {
             SubcategoryData(name: "Tickets", emoji: "🎫", type: .expense),
             SubcategoryData(name: "Ceremonies", emoji: "💍", type: .expense)
         ]),
-        
+
+        CategoryData(id: UUID(uuidString: "CA7E0001-0001-0001-0001-000000000001")!, name: "Luxury", emoji: "💎", subcategories: [
+            SubcategoryData(id: UUID(uuidString: "CA7E0001-0001-0001-0001-000000000011")!, name: "Shopping", emoji: "🛍️", type: .expense),
+            SubcategoryData(id: UUID(uuidString: "CA7E0001-0001-0001-0001-000000000012")!, name: "Designer Fashion", emoji: "👗", type: .expense),
+            SubcategoryData(id: UUID(uuidString: "CA7E0001-0001-0001-0001-000000000013")!, name: "Jewelry & Watches", emoji: "⌚", type: .expense),
+            SubcategoryData(id: UUID(uuidString: "CA7E0001-0001-0001-0001-000000000014")!, name: "Spa & Wellness", emoji: "💆", type: .expense)
+        ]),
+
+        CategoryData(id: UUID(uuidString: "CA7E0002-0002-0002-0002-000000000002")!, name: "Family", emoji: "👨‍👩‍👧‍👦", subcategories: [
+            SubcategoryData(id: UUID(uuidString: "CA7E0002-0002-0002-0002-000000000021")!, name: "Allowance", emoji: "💵", type: .expense),
+            SubcategoryData(id: UUID(uuidString: "CA7E0002-0002-0002-0002-000000000022")!, name: "School Supplies", emoji: "📚", type: .expense),
+            SubcategoryData(id: UUID(uuidString: "CA7E0002-0002-0002-0002-000000000023")!, name: "Family Activities", emoji: "🎡", type: .expense),
+            SubcategoryData(id: UUID(uuidString: "CA7E0002-0002-0002-0002-000000000024")!, name: "Childcare", emoji: "👶", type: .expense)
+        ]),
+
         CategoryData(name: "Other", emoji: "🔄", subcategories: [
             SubcategoryData(name: "Fees", emoji: "💲", type: .expense),
             SubcategoryData(name: "Miscellaneous", emoji: "❓", type: .expense),
@@ -420,13 +482,11 @@ class CategoriesManager: ObservableObject {
     /// Fast O(1) lookup of category or subcategory by ID  
     func findCategoryOrSubcategoryById(_ id: UUID) -> (category: UnifiedCategoryData?, subcategory: SubcategoryData?, parent: UnifiedCategoryData?)? {
         #if DEBUG
-        print("🔍 findCategoryOrSubcategoryById: Looking for ID \(id.uuidString.prefix(8))")
         #endif
         
         // First check main categories using optimized lookup
         if let category = findCategory(by: id) {
             #if DEBUG
-            print("🔍 findCategoryOrSubcategoryById: Found category '\(category.name)' with ID \(id.uuidString.prefix(8))")
             #endif
             return (category: category, subcategory: nil, parent: nil)
         }
@@ -435,23 +495,19 @@ class CategoriesManager: ObservableObject {
         for category in categories {
             if let subcategory = category.subcategories.first(where: { $0.id == id }) {
                 #if DEBUG
-                print("🔍 findCategoryOrSubcategoryById: Found subcategory '\(subcategory.name)' under '\(category.name)' with ID \(id.uuidString.prefix(8))")
                 #endif
                 return (category: nil, subcategory: subcategory, parent: category)
             }
         }
         
         #if DEBUG
-        print("🔍 findCategoryOrSubcategoryById: No category or subcategory found for ID \(id.uuidString.prefix(8))")
         #endif
         return nil
     }
     
     /// Get category ID from category name (for migration purposes)
     func getCategoryId(for categoryName: String) -> UUID? {
-        print("🔍 getCategoryId: Looking for '\(categoryName)'")
         let result = findCategoryOrSubcategory(by: categoryName)
-        print("🔍 getCategoryId result: isSubcategory=\(result.isSubcategory), category=\(result.category?.name ?? "nil"), subcategory=\(result.subcategory?.name ?? "nil"), parent=\(result.parent?.name ?? "nil")")
         
         if result.category != nil || result.subcategory != nil {
             let id = result.category?.id ?? result.subcategory?.id
@@ -487,7 +543,6 @@ class CategoriesManager: ObservableObject {
     func getHierarchicalCategories() -> [DisplayCategoryData] {
         var result: [DisplayCategoryData] = []
         
-        print("🔍 getHierarchicalCategories called (NEW UNIFIED SYSTEM)")
         
         // Get all parent categories (no parent assigned)
         let parents = parentCategories
@@ -604,23 +659,30 @@ class CategoriesManager: ObservableObject {
         #endif
     }
     
-    /// Filter cached categories based on search text
+    /// Filter cached categories based on search text (includes tag matching)
     private func filterCachedCategories(searchText: String) -> [CategoryGroup] {
         let searchLower = searchText.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
         guard !searchLower.isEmpty else { return cachedGroupedCategories }
-        
+
         return cachedGroupedCategories.compactMap { group in
-            // Check if parent matches search (category name or subcategory names)
-            let shouldIncludeParent = group.parent.categoryData.name.localizedCaseInsensitiveContains(searchLower) ||
-                                    group.parent.categoryData.subcategories.contains { subcategory in
-                                        subcategory.name.localizedCaseInsensitiveContains(searchLower)
-                                    }
-            
-            // Filter children that match search
-            let filteredChildren = group.children.filter { child in
-                child.categoryData.name.localizedCaseInsensitiveContains(searchLower)
+            let parentName = group.parent.categoryData.name
+
+            // Check if parent matches search (name, subcategory names, or tags)
+            let parentNameMatches = parentName.localizedCaseInsensitiveContains(searchLower)
+            let parentTagsMatch = CategorySearchTags.matchesTags(categoryName: parentName, query: searchLower)
+            let subcategoryMatches = group.parent.categoryData.subcategories.contains { subcategory in
+                subcategory.name.localizedCaseInsensitiveContains(searchLower) ||
+                CategorySearchTags.matchesTags(categoryName: subcategory.name, query: searchLower)
             }
-            
+
+            let shouldIncludeParent = parentNameMatches || parentTagsMatch || subcategoryMatches
+
+            // Filter children that match search (name or tags)
+            let filteredChildren = group.children.filter { child in
+                child.categoryData.name.localizedCaseInsensitiveContains(searchLower) ||
+                CategorySearchTags.matchesTags(categoryName: child.categoryData.name, query: searchLower)
+            }
+
             // Include group if parent matches or has matching children
             if shouldIncludeParent || !filteredChildren.isEmpty {
                 return CategoryGroup(
@@ -670,7 +732,6 @@ class CategoriesManager: ObservableObject {
         
         print("⚠️ emojiFor: Category '\(category)' not found in unified system, falling back...")
         ensureLookupCacheValid()
-        print("🔍 emojiFor: Available categories in cache: \(categoryLookupByName.keys.sorted())")
         
         // Try partial match for renamed categories (e.g., "Parking Cost" should match "Parking")
         let categoryLower = category.lowercased()
@@ -1013,7 +1074,6 @@ class CategoriesManager: ObservableObject {
         ensureLookupCacheValid()
         let result = categoryLookupById[id]
         #if DEBUG
-        print("🔍 findCategory(by id): Looking for \(id.uuidString.prefix(8)), found: \(result?.name ?? "nil")")
         #endif
         return result
     }
@@ -1053,7 +1113,6 @@ class CategoriesManager: ObservableObject {
             // Try income categories first (they're processed first, so they're earlier in the array)
             for parentCategory in parentCategories {
                 if let subcategoryData = parentCategory.subcategories.first(where: { $0.name.lowercased() == name.lowercased() }) {
-                    print("🔍 findSubcategory: Found '\(name)' under '\(parentCategory.name)' (type: \(parentCategory.type))")
                     return (subcategory: subcategoryData, parent: parentCategory)
                 }
             }
@@ -1113,7 +1172,6 @@ class CategoriesManager: ObservableObject {
         var categoryType: CategoryType = .expense // Default fallback
         
         if let parentName = parentCategory, parentName != "None" {
-            print("🔍 addCategory: Looking for parent category '\(parentName)'")
             guard let parent = findCategory(by: parentName) else {
                 print("❌ addCategory: Parent category '\(parentName)' not found")
                 print("❌ Available categories:")
@@ -1124,15 +1182,12 @@ class CategoriesManager: ObservableObject {
             }
             parentId = parent.id
             categoryType = parent.type // Inherit type from parent
-            print("🔍 addCategory: Setting parent to '\(parentName)' (ID: \(parent.id.uuidString.prefix(8))), inheriting type \(categoryType)")
         } else if let targetType = targetType {
             // No parent specified, use targetType from tab selection
             categoryType = targetType
-            print("🔍 addCategory: No parent specified, using targetType \(targetType) from tab selection")
         } else {
             // Fallback to expense if no parent or targetType specified
             categoryType = .expense
-            print("🔍 addCategory: No parent or targetType specified, defaulting to expense")
         }
         
         // Create new category
@@ -1189,7 +1244,6 @@ class CategoriesManager: ObservableObject {
             }
         }
         
-        print("🔍 updateCategory: Starting update of '\(originalName)' to '\(trimmedName)' with parent '\(parentCategory ?? "None")'")
         
         // Get the current category being edited
         let currentResult = findCategoryOrSubcategory(by: originalName)
@@ -1199,8 +1253,6 @@ class CategoriesManager: ObservableObject {
             if let currentCategory = currentResult.category {
                 if existingCategory.id != currentCategory.id {
                     // Different category with same name exists - allow anyway (user's choice to overlap)
-                    print("🔍 updateCategory: Found existing category '\(trimmedName)' with ID \(existingCategory.id)")
-                    print("🔍 updateCategory: Allowing rename to '\(trimmedName)' - user's choice to use existing name")
                 } else {
                     print("✅ updateCategory: Same category being updated (just emoji/name change)")
                 }
@@ -1215,7 +1267,6 @@ class CategoriesManager: ObservableObject {
         }
         
         // Find the category to update using the improved lookup system
-        print("🔍 DEBUG: Looking for category '\(originalName)' in \(categories.count) total categories")
         
         // Use the optimized lookup system to find the category
         ensureLookupCacheValid()
@@ -1270,8 +1321,6 @@ class CategoriesManager: ObservableObject {
             
             parentId = parent.id
             newType = parent.type // Inherit type from parent (enables cross-type moves)
-            print("🔍 updateCategory: Setting parent to '\(parentName)' (ID: \(parent.id))")
-            print("🔍 updateCategory: Category type will change from \(categories[categoryIndex].type) to \(newType)")
         } else if let parentName = parentCategory, parentName.hasPrefix("No Parent") {
             // Handle "No Parent (Income)" and "No Parent (Expense)" container selections
             if parentName.contains("Income") {
@@ -1279,16 +1328,12 @@ class CategoriesManager: ObservableObject {
             } else if parentName.contains("Expense") {
                 newType = .expense
             }
-            print("🔍 updateCategory: Converting to '\(parentName)' - setting type to \(newType)")
             if newType != categories[categoryIndex].type {
-                print("🔍 updateCategory: Category type will change from \(categories[categoryIndex].type) to \(newType)")
             }
         } else if let targetType = targetType {
             // No parent specified, but targetType provided (from tab selection)
             newType = targetType
-            print("🔍 updateCategory: No parent specified, using targetType \(targetType) from tab selection")
             if newType != categories[categoryIndex].type {
-                print("🔍 updateCategory: Category type will change from \(categories[categoryIndex].type) to \(newType)")
             }
         }
         
@@ -1315,7 +1360,7 @@ class CategoriesManager: ObservableObject {
 
         // Update budget categoryName if name changed
         if originalName != trimmedName {
-            updateBudgetCategoryName(categoryId: categoryId, newName: trimmedName)
+            updateBudgetCategoryName(categoryId: categoryId, oldName: originalName, newName: trimmedName)
         }
 
         saveCategories()
@@ -1328,7 +1373,6 @@ class CategoriesManager: ObservableObject {
         // Force rebuild lookup cache immediately since names changed
         rebuildLookupCache()
         
-        print("🔍 updateCategory: Post-update lookup test for '\(trimmedName)':")
         if let testLookup = findCategory(by: trimmedName) {
             print("   ✅ Found: ID=\(testLookup.id), Name='\(testLookup.name)', Emoji='\(testLookup.emoji)', Parent=\(testLookup.parentCategoryId?.uuidString ?? "None")")
         } else {
@@ -1392,8 +1436,6 @@ class CategoriesManager: ObservableObject {
             }
             newParentId = newParent.id
             finalType = newParent.type // Inherit type from new parent (enables cross-type moves)
-            print("🔍 convertSubcategoryToCategory: Setting new parent to '\(parentName)' (ID: \(newParent.id))")
-            print("🔍 convertSubcategoryToCategory: Category type will change from \(currentParent.type) to \(finalType)")
         } else if let parentName = parentCategory, parentName.hasPrefix("No Parent") {
             // Handle "No Parent (Income)" and "No Parent (Expense)" container selections
             if parentName.contains("Income") {
@@ -1401,16 +1443,12 @@ class CategoriesManager: ObservableObject {
             } else if parentName.contains("Expense") {
                 finalType = .expense
             }
-            print("🔍 convertSubcategoryToCategory: Converting to '\(parentName)' - setting type to \(finalType)")
             if finalType != currentParent.type {
-                print("🔍 convertSubcategoryToCategory: Category type will change from \(currentParent.type) to \(finalType)")
             }
         } else if let targetType = targetType {
             // No parent specified, but targetType provided (from tab selection)
             finalType = targetType
-            print("🔍 convertSubcategoryToCategory: No parent specified, using targetType \(targetType) from tab selection")
             if finalType != currentParent.type {
-                print("🔍 convertSubcategoryToCategory: Category type will change from \(currentParent.type) to \(finalType)")
             }
         }
         
@@ -1419,8 +1457,6 @@ class CategoriesManager: ObservableObject {
             // If there's an existing category with this name, we need to make sure it's not OK to have a duplicate
             // But since we're converting from a subcategory to a category, and subcategories can have the same name
             // as categories (they're in different namespaces), we should allow this conversion
-            print("🔍 convertSubcategoryToCategory: Found existing category '\(newName)' with ID \(existingCategory.id)")
-            print("🔍 convertSubcategoryToCategory: Converting subcategory '\(originalName)' to category - this is allowed even if names match")
         }
         
         // Create a new full category from the subcategory
@@ -1438,9 +1474,17 @@ class CategoriesManager: ObservableObject {
         
         // Refresh transactions for subcategory type change (using subcategory name for lookup)
         refreshTransactionsForSubcategoryTypeChange(subcategoryName: originalName, oldType: oldType, newType: finalType)
-        
+
+        // Update budgets: old subcategory ID -> new category ID, old name -> new name
+        updateBudgetForCategoryConversion(
+            oldCategoryId: currentSubcategory.id,
+            oldCategoryName: originalName,
+            newCategoryId: newCategory.id,
+            newCategoryName: newName
+        )
+
         print("✅ convertSubcategoryToCategory: Successfully converted '\(originalName)' to category '\(newName)' with parent '\(parentCategory ?? "None")'")
-        
+
         saveCategories()
         
         // Force immediate UI refresh for subcategory conversion
@@ -1513,7 +1557,7 @@ class CategoriesManager: ObservableObject {
 
         // Update budget categoryName if name changed
         if originalName != trimmedName {
-            updateBudgetCategoryName(categoryId: subcategoryId, newName: trimmedName)
+            updateBudgetCategoryName(categoryId: subcategoryId, oldName: originalName, newName: trimmedName)
         }
 
         saveCategories()
@@ -1582,7 +1626,7 @@ class CategoriesManager: ObservableObject {
         convertOrphanedTransactionsToNoCategory(deletedCategoryName: categoryName, deletedCategoryId: categoryId, originalType: categoryType)
 
         // Convert affected budgets to "No Category"
-        convertOrphanedBudgetsToNoCategory(deletedCategoryId: categoryId, originalType: categoryType)
+        convertOrphanedBudgetsToNoCategory(deletedCategoryId: categoryId, deletedCategoryName: categoryName, originalType: categoryType)
 
         // Invalidate category group cache after deleting category
         clearCategoryGroupCache()
@@ -1624,7 +1668,6 @@ class CategoriesManager: ObservableObject {
             var shouldUpdate = false
             var updatedTransaction = transaction
             
-            print("🔍 Checking transaction \(index + 1): '\(transaction.category)' - \(transaction.merchantName ?? "Unknown")")
             print("   - Transaction category: '\(transaction.category)'")
             print("   - Transaction categoryId: '\(transaction.categoryId?.uuidString.prefix(8) ?? "nil")'")
             
@@ -1695,13 +1738,22 @@ class CategoriesManager: ObservableObject {
     }
 
     /// Convert budgets that reference deleted categories to "No Category"
-    private func convertOrphanedBudgetsToNoCategory(deletedCategoryId: UUID, originalType: CategoryType) {
+    private func convertOrphanedBudgetsToNoCategory(deletedCategoryId: UUID, deletedCategoryName: String, originalType: CategoryType) {
         print("🔄 ===== ORPHANED BUDGET CONVERSION START =====")
-        print("🔄 Deleted category ID: \(deletedCategoryId.uuidString.prefix(8))")
+        print("🔄 Deleted category ID: \(deletedCategoryId.uuidString)")
+        print("🔄 Deleted category name: '\(deletedCategoryName)'")
         print("🔄 Original category type: \(originalType)")
 
         let userManager = UserManager.shared
         let allBudgets = userManager.currentUser.budgets
+
+        print("🔄 Total budgets to check: \(allBudgets.count)")
+        for (index, budget) in allBudgets.enumerated() {
+            print("🔄 Budget[\(index)]: categoryId=\(budget.categoryId.uuidString), categoryName='\(budget.categoryName)'")
+            let matchesById = budget.categoryId == deletedCategoryId
+            let matchesByName = budget.categoryName == deletedCategoryName
+            print("🔄   -> Matches by ID? \(matchesById), by Name? \(matchesByName)")
+        }
 
         // Determine the appropriate "No Category" UUID based on original category type
         let noCategoryId: UUID
@@ -1717,6 +1769,7 @@ class CategoriesManager: ObservableObject {
         var updatedCount = 0
 
         for budget in allBudgets {
+            // Match by UUID ONLY - names can be duplicated
             if budget.categoryId == deletedCategoryId {
                 // Update budget to use "No Category"
                 let updatedBudget = Budget(
@@ -1732,7 +1785,7 @@ class CategoriesManager: ObservableObject {
                 )
                 userManager.updateBudget(updatedBudget)
                 updatedCount += 1
-                print("   ✅ Updated budget to 'No Category'")
+                print("   ✅ Updated budget '\(budget.categoryName)' to 'No Category'")
             }
         }
 
@@ -1741,23 +1794,32 @@ class CategoriesManager: ObservableObject {
     }
 
     /// Update budget categoryName when a category is renamed
-    private func updateBudgetCategoryName(categoryId: UUID, newName: String) {
+    private func updateBudgetCategoryName(categoryId: UUID, oldName: String, newName: String) {
         print("🔄 ===== BUDGET NAME UPDATE START =====")
-        print("🔄 Category ID: \(categoryId.uuidString.prefix(8))")
-        print("🔄 New name: '\(newName)'")
+        print("🔄 Category ID: \(categoryId.uuidString)")
+        print("🔄 Old name: '\(oldName)' -> New name: '\(newName)'")
 
         let userManager = UserManager.shared
         let allBudgets = userManager.currentUser.budgets
 
+        print("🔄 Total budgets to check: \(allBudgets.count)")
+        for (index, budget) in allBudgets.enumerated() {
+            print("🔄 Budget[\(index)]: categoryId=\(budget.categoryId.uuidString), categoryName='\(budget.categoryName)'")
+            let matchesById = budget.categoryId == categoryId
+            let matchesByName = budget.categoryName == oldName
+            print("🔄   -> Matches by ID? \(matchesById), by oldName? \(matchesByName)")
+        }
+
         var updatedCount = 0
 
         for budget in allBudgets {
+            // Match by UUID ONLY - names can be duplicated
             if budget.categoryId == categoryId && budget.categoryName != newName {
                 // Update budget with new category name
                 let updatedBudget = Budget(
                     id: budget.id,
                     walletId: budget.walletId,
-                    categoryId: budget.categoryId,
+                    categoryId: categoryId,
                     categoryName: newName,
                     amount: budget.amount,
                     currency: budget.currency,
@@ -1773,6 +1835,96 @@ class CategoriesManager: ObservableObject {
 
         print("🔄 ===== BUDGET NAME UPDATE COMPLETE =====")
         print("✅ Updated \(updatedCount) budget(s) with new category name")
+    }
+
+    /// Update budgets when a subcategory is converted to a category (ID changes)
+    private func updateBudgetForCategoryConversion(oldCategoryId: UUID, oldCategoryName: String, newCategoryId: UUID, newCategoryName: String) {
+        print("🔄 ===== BUDGET CATEGORY CONVERSION START =====")
+        print("🔄 Old: ID=\(oldCategoryId.uuidString.prefix(8)), Name='\(oldCategoryName)'")
+        print("🔄 New: ID=\(newCategoryId.uuidString.prefix(8)), Name='\(newCategoryName)'")
+
+        let userManager = UserManager.shared
+        let allBudgets = userManager.currentUser.budgets
+
+        var updatedCount = 0
+
+        for budget in allBudgets {
+            // Match by UUID ONLY - names can be duplicated
+            if budget.categoryId == oldCategoryId {
+                print("   🔧 Found budget with matching UUID - updating to new ID and name")
+                let updatedBudget = Budget(
+                    id: budget.id,
+                    walletId: budget.walletId,
+                    categoryId: newCategoryId,
+                    categoryName: newCategoryName,
+                    amount: budget.amount,
+                    currency: budget.currency,
+                    period: budget.period,
+                    applyToAllPeriods: budget.applyToAllPeriods,
+                    isActive: budget.isActive
+                )
+                userManager.updateBudget(updatedBudget)
+                updatedCount += 1
+                print("   ✅ Updated budget: '\(oldCategoryName)' -> '\(newCategoryName)'")
+            }
+        }
+
+        print("🔄 ===== BUDGET CATEGORY CONVERSION COMPLETE =====")
+        print("✅ Updated \(updatedCount) budget(s) for category conversion")
+    }
+
+    // MARK: - Budget Integrity Check
+
+    /// Validates all budgets have correct categoryId links. Call on app launch.
+    /// Orphaned budgets (UUID doesn't match any category) are converted to "No Category".
+    /// UUID is the ONLY lookup mechanism - names are never used for matching.
+    func validateBudgetCategoryLinks() {
+        print("🔗 ===== BUDGET INTEGRITY CHECK START =====")
+
+        let userManager = UserManager.shared
+        let allBudgets = userManager.currentUser.budgets
+
+        var validCount = 0
+        var orphanedCount = 0
+
+        for budget in allBudgets {
+            // Try to find category by ID
+            let resultById = findCategoryOrSubcategoryById(budget.categoryId)
+
+            if resultById != nil {
+                // ID matches - budget is valid
+                validCount += 1
+                continue
+            }
+
+            // UUID didn't match any valid category - convert to No Category
+            // NEVER use name for lookup - UUID is the only source of truth
+            print("🔗 Budget '\(budget.categoryName)' - categoryId \(budget.categoryId.uuidString.prefix(8)) NOT FOUND")
+            print("   ⚠️ Converting to No Category (UUID mismatch)")
+
+            let noCategoryId = UUID(uuidString: "00000000-0000-0000-0000-000000000002")! // Expense
+            let orphanedBudget = Budget(
+                id: budget.id,
+                walletId: budget.walletId,
+                categoryId: noCategoryId,
+                categoryName: "No Category",
+                amount: budget.amount,
+                currency: budget.currency,
+                period: budget.period,
+                applyToAllPeriods: budget.applyToAllPeriods,
+                isActive: budget.isActive
+            )
+            userManager.updateBudget(orphanedBudget)
+            orphanedCount += 1
+        }
+
+        print("🔗 ===== BUDGET INTEGRITY CHECK COMPLETE =====")
+        print("   ✅ Valid: \(validCount)")
+        print("   ⚠️ Orphaned (converted to No Category): \(orphanedCount)")
+
+        if orphanedCount > 0 {
+            userManager.syncToFirebase { _ in }
+        }
     }
 
     /// Delete a specific subcategory and convert affected transactions to "No Category"
@@ -1806,7 +1958,7 @@ class CategoriesManager: ObservableObject {
         convertOrphanedTransactionsToNoCategory(deletedCategoryName: subcategoryName, deletedCategoryId: subcategoryId, originalType: subcategoryType)
 
         // Convert affected budgets to "No Category"
-        convertOrphanedBudgetsToNoCategory(deletedCategoryId: subcategoryId, originalType: subcategoryType)
+        convertOrphanedBudgetsToNoCategory(deletedCategoryId: subcategoryId, deletedCategoryName: subcategoryName, originalType: subcategoryType)
 
         // Invalidate category group cache after deleting subcategory
         clearCategoryGroupCache()
@@ -1914,7 +2066,111 @@ class CategoriesManager: ObservableObject {
             print("✅ Migration completed - old data cleared, using fresh built-in categories")
         }
     }
-    
+
+    // MARK: - Category Migration v2 UUIDs
+    private enum MigrationV2UUIDs {
+        static let luxuryId = UUID(uuidString: "CA7E0001-0001-0001-0001-000000000001")!
+        static let familyId = UUID(uuidString: "CA7E0002-0002-0002-0002-000000000002")!
+        static let shoppingId = UUID(uuidString: "CA7E0001-0001-0001-0001-000000000011")!
+        static let designerFashionId = UUID(uuidString: "CA7E0001-0001-0001-0001-000000000012")!
+        static let jewelryWatchesId = UUID(uuidString: "CA7E0001-0001-0001-0001-000000000013")!
+        static let spaWellnessId = UUID(uuidString: "CA7E0001-0001-0001-0001-000000000014")!
+        static let allowanceId = UUID(uuidString: "CA7E0002-0002-0002-0002-000000000021")!
+        static let schoolSuppliesId = UUID(uuidString: "CA7E0002-0002-0002-0002-000000000022")!
+        static let familyActivitiesId = UUID(uuidString: "CA7E0002-0002-0002-0002-000000000023")!
+        static let childcareId = UUID(uuidString: "CA7E0002-0002-0002-0002-000000000024")!
+        static let tollFeeId = UUID(uuidString: "CA7E0003-0003-0003-0003-000000000031")!
+        static let phoneId = UUID(uuidString: "CA7E0004-0004-0004-0004-000000000041")!
+    }
+
+    /// Migration v2: Add Luxury, Family categories and Toll Fee subcategory for existing users
+    private func runCategoryMigrationV2() {
+        let migrationKey = "CategoryMigrationV2Completed"
+        guard !UserDefaults.standard.bool(forKey: migrationKey) else { return }
+
+        print("🔄 Running Category Migration V2...")
+        var modified = false
+
+        // 1. Add Toll Fee to Transport
+        if let idx = categories.firstIndex(where: { $0.name == "Transport" }) {
+            if !categories[idx].subcategories.contains(where: { $0.name == "Toll Fee" }) {
+                var updated = categories[idx]
+                updated.subcategories.insert(
+                    SubcategoryData(id: MigrationV2UUIDs.tollFeeId, name: "Toll Fee", emoji: "🛣️", type: .expense),
+                    at: 1
+                )
+                categories[idx] = updated
+                modified = true
+                print("   ✅ Added 'Toll Fee' subcategory to Transport")
+            }
+        }
+
+        // 2. Add Phone to Utilities & Bills
+        if let idx = categories.firstIndex(where: { $0.name == "Utilities & Bills" }) {
+            if !categories[idx].subcategories.contains(where: { $0.name == "Phone" }) {
+                var updated = categories[idx]
+                updated.subcategories.append(
+                    SubcategoryData(id: MigrationV2UUIDs.phoneId, name: "Phone", emoji: "📱", type: .expense)
+                )
+                categories[idx] = updated
+                modified = true
+                print("   ✅ Added 'Phone' subcategory to Utilities & Bills")
+            }
+        }
+
+        // 3. Add Luxury category
+        if !categories.contains(where: { $0.name == "Luxury" }) {
+            let luxury = UnifiedCategoryData(
+                id: MigrationV2UUIDs.luxuryId,
+                name: "Luxury",
+                emoji: "💎",
+                subcategories: [
+                    SubcategoryData(id: MigrationV2UUIDs.shoppingId, name: "Shopping", emoji: "🛍️", type: .expense),
+                    SubcategoryData(id: MigrationV2UUIDs.designerFashionId, name: "Designer Fashion", emoji: "👗", type: .expense),
+                    SubcategoryData(id: MigrationV2UUIDs.jewelryWatchesId, name: "Jewelry & Watches", emoji: "⌚", type: .expense),
+                    SubcategoryData(id: MigrationV2UUIDs.spaWellnessId, name: "Spa & Wellness", emoji: "💆", type: .expense)
+                ],
+                type: .expense,
+                parentCategoryId: nil,
+                isBuiltIn: true
+            )
+            categories.append(luxury)
+            modified = true
+            print("   ✅ Added 'Luxury' category")
+        }
+
+        // 4. Add Family category
+        if !categories.contains(where: { $0.name == "Family" }) {
+            let family = UnifiedCategoryData(
+                id: MigrationV2UUIDs.familyId,
+                name: "Family",
+                emoji: "👨‍👩‍👧‍👦",
+                subcategories: [
+                    SubcategoryData(id: MigrationV2UUIDs.allowanceId, name: "Allowance", emoji: "💵", type: .expense),
+                    SubcategoryData(id: MigrationV2UUIDs.schoolSuppliesId, name: "School Supplies", emoji: "📚", type: .expense),
+                    SubcategoryData(id: MigrationV2UUIDs.familyActivitiesId, name: "Family Activities", emoji: "🎡", type: .expense),
+                    SubcategoryData(id: MigrationV2UUIDs.childcareId, name: "Childcare", emoji: "👶", type: .expense)
+                ],
+                type: .expense,
+                parentCategoryId: nil,
+                isBuiltIn: true
+            )
+            categories.append(family)
+            modified = true
+            print("   ✅ Added 'Family' category")
+        }
+
+        if modified {
+            saveCategories()
+            rebuildLookupCache()
+            print("✅ Category Migration V2 completed - saved changes")
+        } else {
+            print("✅ Category Migration V2 - no changes needed")
+        }
+
+        UserDefaults.standard.set(true, forKey: migrationKey)
+    }
+
     /// Check if "No Category" entries exist with proper UUIDs and fix if missing
     func ensureNoCategoryEntriesExist() {
         let noCategoryIncomeUUID = UUID(uuidString: "00000000-0000-0000-0000-000000000001")!

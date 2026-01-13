@@ -27,6 +27,7 @@ struct EditWalletSheet: View {
     @ObservedObject private var accountManager = AccountManager.shared
     @ObservedObject private var userManager = UserManager.shared
     @ObservedObject private var currencyPrefs = CurrencyPreferences.shared
+    @ObservedObject private var rateManager = CurrencyRateManager.shared
 
     init(isPresented: Binding<Bool>, wallet: SubAccount, onWalletUpdated: @escaping (SubAccount) -> Void, onWalletDeleted: @escaping () -> Void) {
         self._isPresented = isPresented
@@ -50,10 +51,15 @@ struct EditWalletSheet: View {
                 startingInPrimary = startingBalance
             }
 
-            // Transaction amounts are already in primary currency
+            // Convert each transaction to primary currency
             let transactionTotal = transactions
                 .filter { $0.walletID == wallet.id }
-                .reduce(0) { $0 + $1.amount }
+                .reduce(0.0) { total, txn in
+                    let converted = txn.primaryCurrency == primaryCurrency
+                        ? txn.amount
+                        : CurrencyRateManager.shared.convertAmount(txn.amount, from: txn.primaryCurrency, to: primaryCurrency)
+                    return total + converted
+                }
 
             return startingInPrimary + transactionTotal
         }()
@@ -93,10 +99,15 @@ struct EditWalletSheet: View {
             startingInPrimary = startingBalance
         }
 
-        // Transaction amounts are already in primary currency
+        // Convert each transaction to primary currency
         let transactionTotal = transactions
             .filter { $0.walletID == wallet.id }
-            .reduce(0) { $0 + $1.amount }
+            .reduce(0.0) { total, txn in
+                let converted = txn.primaryCurrency == primaryCurrency
+                    ? txn.amount
+                    : rateManager.convertAmount(txn.amount, from: txn.primaryCurrency, to: primaryCurrency)
+                return total + converted
+            }
 
         return startingInPrimary + transactionTotal
     }
@@ -242,6 +253,7 @@ struct EditWalletSheet: View {
                 isPresented: $showingCurrencyPicker
             )
             .presentationDetents([.fraction(0.98)])
+            .presentationCornerRadius(20)
             .presentationDragIndicator(.hidden)
         }
         .onAppear {
@@ -266,7 +278,7 @@ struct EditWalletSheet: View {
                 .font(AppFonts.overusedGroteskMedium(size: 16))
                 .foregroundStyle(AppColors.foregroundSecondary)
 
-            HStack(spacing: 10) {
+            HStack(spacing: 8) {
                 yesNoChip(label: "Yes", isSelected: showBalance) {
                     showBalance = true
                 }
@@ -315,10 +327,15 @@ struct EditWalletSheet: View {
         var newStartingBalance: Double? = nil
         if let enteredBalanceInPrimary = parsedBalance {
             let transactions = userManager.currentUser.transactions
-            // Transaction amounts are already in primary currency
+            // Convert each transaction to primary currency before summing
             let transactionTotalInPrimary = transactions
                 .filter { $0.walletID == wallet.id }
-                .reduce(0) { $0 + $1.amount }
+                .reduce(0.0) { total, txn in
+                    let converted = txn.primaryCurrency == primaryCurrency
+                        ? txn.amount
+                        : rateManager.convertAmount(txn.amount, from: txn.primaryCurrency, to: primaryCurrency)
+                    return total + converted
+                }
 
             // Calculate starting balance in PRIMARY currency
             let startingBalanceInPrimary = enteredBalanceInPrimary - transactionTotalInPrimary

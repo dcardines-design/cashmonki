@@ -74,30 +74,42 @@ class BackendAPIService: ObservableObject {
             
             switch httpResponse.statusCode {
             case 200...299:
+                // DEBUG: Log raw response to see what date the AI returned
+                if let responseString = String(data: data, encoding: .utf8) {
+                    print("🔍 BACKEND RAW RESPONSE: \(responseString)")
+                }
+
                 let decoder = JSONDecoder()
                 // Configure decoder to handle string dates from backend
                 decoder.dateDecodingStrategy = .custom { decoder in
                     let container = try decoder.singleValueContainer()
                     let dateString = try container.decode(String.self)
-                    
+
+                    print("📅 BACKEND: Attempting to parse date string: '\(dateString)'")
+
                     // Try different date formats that the backend might return
-                    let formatters: [DateFormatter] = [
-                        createBackendDateFormatter("yyyy-MM-dd HH:mm"),  // "2025-12-08 17:08" (24-hour, no seconds)
-                        createBackendDateFormatter("yyyy-MM-dd HH:mm:ss"),  // "2025-12-08 14:30:00"
-                        createBackendDateFormatter("yyyy-MM-dd"),  // "2025-12-08" (date only)
-                        createBackendDateFormatter("yyyy-MM-dd'T'HH:mm:ss'Z'"),  // ISO format
-                        createBackendDateFormatter("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'")  // ISO with milliseconds
+                    let formatters: [(DateFormatter, String)] = [
+                        (createBackendDateFormatter("yyyy-MM-dd HH:mm"), "yyyy-MM-dd HH:mm"),
+                        (createBackendDateFormatter("yyyy-MM-dd HH:mm:ss"), "yyyy-MM-dd HH:mm:ss"),
+                        (createBackendDateFormatter("yyyy-MM-dd"), "yyyy-MM-dd"),
+                        (createBackendDateFormatter("yyyy-MM-dd'T'HH:mm:ss'Z'"), "ISO with Z"),
+                        (createBackendDateFormatter("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'"), "ISO with ms"),
+                        // Additional formats for edge cases
+                        (createBackendDateFormatter("MM/dd/yyyy"), "US format MM/dd/yyyy"),
+                        (createBackendDateFormatter("dd/MM/yyyy"), "EU format dd/MM/yyyy"),
+                        (createBackendDateFormatter("M/d/yyyy"), "US short M/d/yyyy"),
+                        (createBackendDateFormatter("d/M/yyyy"), "EU short d/M/yyyy")
                     ]
-                    
-                    for formatter in formatters {
+
+                    for (formatter, formatName) in formatters {
                         if let date = formatter.date(from: dateString) {
-                            print("📅 BACKEND: Successfully parsed date '\(dateString)' as \(date)")
+                            print("📅 BACKEND: ✅ Parsed '\(dateString)' using format '\(formatName)' → \(date)")
                             return date
                         }
                     }
-                    
+
                     // If all else fails, return current date
-                    print("⚠️ BACKEND: Could not parse date '\(dateString)', using current date")
+                    print("⚠️ BACKEND: ❌ Could not parse date '\(dateString)' with any format, using current date")
                     return Date()
                 }
                 

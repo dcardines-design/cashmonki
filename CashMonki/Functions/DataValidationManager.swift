@@ -998,9 +998,9 @@ enum ValidationStatus: String, CaseIterable {
     var color: Color {
         switch self {
         case .unknown: return .gray
-        case .passed: return .green
+        case .passed: return AppColors.successForeground
         case .warning: return .orange
-        case .failed: return .red
+        case .failed: return AppColors.accentRed
         }
     }
 }
@@ -1081,7 +1081,7 @@ enum ValidationSeverity: String, CaseIterable {
         switch self {
         case .info: return .blue
         case .warning: return .orange
-        case .critical: return .red
+        case .critical: return AppColors.accentRed
         }
     }
 }

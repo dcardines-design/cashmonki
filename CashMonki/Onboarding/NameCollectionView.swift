@@ -61,7 +61,7 @@ struct NameCollectionView: View {
                     
                 }
                 .padding(.horizontal, 20)
-                .padding(.top, 40)
+                .padding(.top, 30)
                 .padding(.bottom, 40)
             }
             
@@ -71,21 +71,11 @@ struct NameCollectionView: View {
                 isGmailUser: isGmailUser
             )
             
-            // Fixed Bottom Button - "Skip" if empty, "Continue" if name entered
+            // Fixed Bottom Button - Continue (disabled if no name entered)
             FixedBottomGroup.primary(
-                title: trimmedName.isEmpty ? "Skip" : "Continue",
-                action: {
-                    // Mark name collection as complete (whether skipped or filled)
-                    UserDefaults.standard.set(true, forKey: "hasCompletedNameCollection")
-
-                    if trimmedName.isEmpty {
-                        print("👤 NameCollection: User skipped name entry - marking complete")
-                    } else {
-                        print("👤 NameCollection: User entered name '\(trimmedName)' - marking complete")
-                    }
-
-                    onNameCollected(trimmedName)
-                }
+                title: "Continue",
+                action: handleContinue,
+                isEnabled: !trimmedName.isEmpty
             )
         }
         .background(AppColors.backgroundWhite)
@@ -105,37 +95,66 @@ struct NameCollectionView: View {
         }
     }
     
+    // MARK: - Actions
+
+    private func handleSkip() {
+        // Mark name collection as complete
+        UserDefaults.standard.set(true, forKey: "hasCompletedNameCollection")
+        print("👤 NameCollection: User skipped name entry")
+
+        // Track analytics
+        AnalyticsManager.shared.track(.onboardingNameCollected, properties: [
+            "skipped": true,
+            "name_length": 0
+        ])
+
+        onNameCollected("")
+    }
+
+    private func handleContinue() {
+        // Mark name collection as complete
+        UserDefaults.standard.set(true, forKey: "hasCompletedNameCollection")
+        print("👤 NameCollection: User entered name '\(trimmedName)' - marking complete")
+
+        // Track analytics
+        AnalyticsManager.shared.track(.onboardingNameCollected, properties: [
+            "skipped": false,
+            "name_length": trimmedName.count
+        ])
+
+        onNameCollected(trimmedName)
+    }
+
     // MARK: - Header Section
-    
+
     private var headerSection: some View {
         HStack {
-            // Back button (if onBack callback is provided)
-            if let onBack = onBack {
-                Button(action: onBack) {
-                    Image("chevron-left")
-                        .resizable()
-                        .renderingMode(.template)
-                        .frame(width: 24, height: 24)
-                        .foregroundColor(AppColors.foregroundSecondary)
+            // Back Button
+            Button(action: {
+                if let onBack = onBack {
+                    onBack()
+                } else {
+                    isPresented = false
                 }
-            } else {
-                // Spacer to maintain layout when no back button
-                Spacer()
+            }) {
+                Image("chevron-left")
+                    .resizable()
+                    .renderingMode(.template)
                     .frame(width: 24, height: 24)
+                    .foregroundColor(AppColors.foregroundSecondary)
             }
-            
+
             Spacer()
-            
-            // Title
-            Text("Get Started")
-                .font(AppFonts.overusedGroteskSemiBold(size: 17))
-                .foregroundColor(AppColors.foregroundPrimary)
-            
-            Spacer()
-            
-            // Right spacer to balance layout
-            Spacer()
-                .frame(width: 24, height: 24)
+
+            // Skip Button (top-right)
+            Button(action: { handleSkip() }) {
+                Text("Skip")
+                    .font(
+                        Font.custom("Overused Grotesk", size: 16)
+                            .weight(.semibold)
+                    )
+                    .foregroundColor(AppColors.foregroundPrimary)
+            }
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 16)

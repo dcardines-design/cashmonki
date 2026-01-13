@@ -41,7 +41,17 @@ struct OnboardingProgressBar: View {
 
 /// Extension to provide progress calculation from OnboardingFlow
 extension OnboardingProgressBar {
-    
+
+    /// Create progress bar with fixed step values
+    static func fixed(currentStep: Int, totalSteps: Int) -> OnboardingProgressBar {
+        let percentage = Double(currentStep) / Double(totalSteps)
+        return OnboardingProgressBar(
+            currentStep: currentStep,
+            totalSteps: totalSteps,
+            percentage: percentage
+        )
+    }
+
     /// Create progress bar with automatic calculation based on current step and user type
     static func dynamic(
         currentStep: OnboardingStep,
@@ -64,12 +74,23 @@ extension OnboardingProgressBar {
         isGmailUser: Bool
     ) -> (current: Int, total: Int, percentage: Double) {
         
-        // CURRENT: No-auth flow - 4 steps only (email step removed)
-        // Steps: Name → Currency → Goals → Transaction
+        // CURRENT: No-auth flow - 15 steps (email step removed)
+        // Steps: VF1 → VF2 → VF3 → VF4 → Name → Currency → Goals → Stress → Overspent → Tracking → Ideal → Frequency → Method → SocialProof → Transaction
         let userSteps: [OnboardingStep] = [
+            .valueFeature1,
+            .valueFeature2,
+            .valueFeature3,
+            .valueFeature4,
             .nameCollection,
             .currencySelection,
             .goalSelection,
+            .stressSelection,
+            .overspentRealization,
+            .trackingDifficulty,
+            .idealOutcome,
+            .trackingFrequency,
+            .trackingMethod,
+            .socialProof,
             .transactionAddition
         ]
 

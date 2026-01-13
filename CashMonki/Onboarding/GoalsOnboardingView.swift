@@ -75,7 +75,7 @@ struct GoalsOnboardingView: View {
                     
                 }
                 .padding(.horizontal, 20)
-                .padding(.top, 40)
+                .padding(.top, 30)
                 .padding(.bottom, 40)
             }
             
@@ -84,30 +84,12 @@ struct GoalsOnboardingView: View {
                 currentStep: .goalSelection,
                 isGmailUser: isGmailUser
             )
-            
-            // Fixed Bottom Button - "Skip" if no goals selected, "Continue" otherwise
+
+            // Fixed Bottom Button - Continue (disabled if no selection)
             FixedBottomGroup.primary(
-                title: selectedGoals.isEmpty ? "Skip" : "Continue",
-                action: {
-                    let goalsString = Array(selectedGoals).joined(separator: ",")
-
-                    if selectedGoals.isEmpty {
-                        print("🎯 GoalsOnboarding: User skipped goal selection")
-                    } else {
-                        print("🎯 GoalsOnboarding: ======= GOAL SELECTION COMPLETED =======")
-                        print("🎯 GoalsOnboarding: User selected goals: \(Array(selectedGoals))")
-                    }
-
-                    // Save goals (empty string if skipped) and mark completion
-                    UserDefaults.standard.set(goalsString, forKey: "selectedPrimaryGoals")
-                    UserDefaults.standard.set(true, forKey: "hasCompletedGoalSelection")
-
-                    // Save to user profile
-                    UserManager.shared.updateUserGoals(goalsString)
-                    print("🎯 GoalsOnboarding: ✅ Goals saved: '\(goalsString.isEmpty ? "(skipped)" : goalsString)'")
-
-                    onGoalSelected(goalsString)
-                }
+                title: "Continue",
+                action: handleContinue,
+                isEnabled: !selectedGoals.isEmpty
             )
         }
         .background(AppColors.backgroundWhite)
@@ -120,9 +102,44 @@ struct GoalsOnboardingView: View {
             print("🔥 TRANSITION DEBUG: GoalsOnboardingView disappeared")
         }
     }
-    
+
+    // MARK: - Actions
+
+    private func handleContinue() {
+        let goalsString = Array(selectedGoals).joined(separator: ",")
+
+        if selectedGoals.isEmpty {
+            print("🎯 GoalsOnboarding: User skipped goal selection")
+        } else {
+            print("🎯 GoalsOnboarding: ======= GOAL SELECTION COMPLETED =======")
+            print("🎯 GoalsOnboarding: User selected goals: \(Array(selectedGoals))")
+        }
+
+        // Save goals (empty string if skipped) and mark completion
+        UserDefaults.standard.set(goalsString, forKey: "selectedPrimaryGoals")
+        UserDefaults.standard.set(true, forKey: "hasCompletedGoalSelection")
+
+        // Save to user profile
+        UserManager.shared.updateUserGoals(goalsString)
+        print("🎯 GoalsOnboarding: ✅ Goals saved: '\(goalsString.isEmpty ? "(skipped)" : goalsString)'")
+
+        // Track goals selection
+        AnalyticsManager.shared.track(.onboardingGoalsSelected, properties: [
+            "goals": Array(selectedGoals),
+            "goals_count": selectedGoals.count,
+            "skipped": selectedGoals.isEmpty,
+            "track_spending": selectedGoals.contains("track_spending"),
+            "stick_budget": selectedGoals.contains("stick_budget"),
+            "save_money": selectedGoals.contains("save_money"),
+            "manage_wallets": selectedGoals.contains("manage_wallets"),
+            "none_of_above": selectedGoals.contains("none_of_above")
+        ])
+
+        onGoalSelected(goalsString)
+    }
+
     // MARK: - Header Section
-    
+
     private var headerSection: some View {
         HStack {
             // Back Button
@@ -139,20 +156,18 @@ struct GoalsOnboardingView: View {
                     .frame(width: 24, height: 24)
                     .foregroundColor(AppColors.foregroundSecondary)
             }
-            
-            Spacer()
-            
-            // Title
-            Text("Get Started")
-                .font(AppFonts.overusedGroteskSemiBold(size: 17))
-                .foregroundColor(AppColors.foregroundPrimary)
 
             Spacer()
 
-            // Invisible element for balance
-            Rectangle()
-                .fill(Color.clear)
-                .frame(width: 24, height: 24)
+            // Skip Button (top-right)
+            Button(action: { handleContinue() }) {
+                Text("Skip")
+                    .font(
+                        Font.custom("Overused Grotesk", size: 16)
+                            .weight(.semibold)
+                    )
+                    .foregroundColor(AppColors.foregroundPrimary)
+            }
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 16)

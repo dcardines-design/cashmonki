@@ -161,6 +161,7 @@ struct BudgetsPage: View {
                     }
                 )
                 .presentationDetents([.fraction(0.98)])
+                .presentationCornerRadius(20)
                 .presentationDragIndicator(.hidden)
             }
         }
@@ -181,6 +182,7 @@ struct BudgetsPage: View {
                 }
             )
             .presentationDetents([.fraction(0.98)])
+            .presentationCornerRadius(20)
             .presentationDragIndicator(.hidden)
         }
         .confirmationDialog(
@@ -211,6 +213,7 @@ struct BudgetsPage: View {
                 selectedDate: selectedDate
             )
             .presentationDetents([.fraction(0.98)])
+            .presentationCornerRadius(20)
             .presentationDragIndicator(.hidden)
         }
     }
@@ -537,6 +540,7 @@ struct EditBudgetSheet: View {
                 isPresented: $showingCurrencyPicker
             )
             .presentationDetents([.fraction(0.98)])
+            .presentationCornerRadius(20)
             .presentationDragIndicator(.hidden)
         }
     }

@@ -130,7 +130,7 @@ extension LottieView {
         */
         
         Text("Add Lottie animations to Assets.xcassets")
-            .foregroundColor(.secondary)
+            .foregroundColor(AppColors.foregroundSecondary)
     }
     .padding()
 }

@@ -10,29 +10,47 @@ import SwiftUI
 // MARK: - Choice Tile Component
 
 struct ChoiceTile: View {
-    let emoji: String
+    let emoji: String?
     let title: String
     let isSelected: Bool
     let onTap: () -> Void
-    
+
     @State private var isPressed = false
-    
+
+    // Convenience initializer with emoji
+    init(emoji: String, title: String, isSelected: Bool, onTap: @escaping () -> Void) {
+        self.emoji = emoji
+        self.title = title
+        self.isSelected = isSelected
+        self.onTap = onTap
+    }
+
+    // Convenience initializer without emoji
+    init(title: String, isSelected: Bool, onTap: @escaping () -> Void) {
+        self.emoji = nil
+        self.title = title
+        self.isSelected = isSelected
+        self.onTap = onTap
+    }
+
     var body: some View {
         Button(action: onTap) {
             HStack(alignment: .center, spacing: 12) {
-                // Emoji Icon
-                VStack(alignment: .center, spacing: 10) {
-                    Text(emoji)
-                        .font(
-                            Font.custom("Overused Grotesk", size: 14)
-                                .weight(.medium)
-                        )
+                // Emoji Icon (only if emoji is provided)
+                if let emoji = emoji, !emoji.isEmpty {
+                    VStack(alignment: .center, spacing: 10) {
+                        Text(emoji)
+                            .font(
+                                Font.custom("Overused Grotesk", size: 14)
+                                    .weight(.medium)
+                            )
+                    }
+                    .padding(8)
+                    .frame(width: 34, height: 34, alignment: .center)
+                    .background(isSelected ? Color(hex: "DED6FF") ?? AppColors.surfacePrimary : AppColors.surfacePrimary)
+                    .cornerRadius(200)
                 }
-                .padding(8)
-                .frame(width: 34, height: 34, alignment: .center)
-                .background(isSelected ? Color(hex: "DED6FF") ?? AppColors.surfacePrimary : AppColors.surfacePrimary)
-                .cornerRadius(200)
-                
+
                 // Title
                 Text(title)
                     .font(

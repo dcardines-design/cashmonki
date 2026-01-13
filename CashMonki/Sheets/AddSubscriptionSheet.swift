@@ -13,7 +13,6 @@ struct AddSubscriptionSheet: View {
 
     @ObservedObject private var currencyPrefs = CurrencyPreferences.shared
     @ObservedObject private var notificationManager = NotificationManager.shared
-    @ObservedObject private var subscriptionManager = SubscriptionManager.shared
 
     // Form State
     @State private var merchantName: String = ""
@@ -34,7 +33,6 @@ struct AddSubscriptionSheet: View {
     // UI State
     @State private var showingCurrencyPicker = false
     @State private var showingNotificationAlert = false
-    @State private var showingPaywall = false
 
     @FocusState private var isMerchantFocused: Bool
     @FocusState private var isAmountFocused: Bool
@@ -181,9 +179,6 @@ struct AddSubscriptionSheet: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("To receive reminders before charges, please enable notifications in Settings.")
-        }
-        .fullScreenCover(isPresented: $showingPaywall) {
-            CustomPaywallSheet(isPresented: $showingPaywall)
         }
     }
 
@@ -370,12 +365,7 @@ struct AddSubscriptionSheet: View {
     }
 
     private func saveSubscription() {
-        // Check if user can add more subscriptions (Pro users unlimited, free users limited to 2)
-        if !subscriptionManager.canAddMoreSubscriptions {
-            showingPaywall = true
-            return
-        }
-
+        // Note: Paywall check is now handled before opening this sheet (in HomePageComponents)
         // Calculate next due date based on frequency from the start date
         let nextDue = calculateNextDueDate(from: dateAdded)
 

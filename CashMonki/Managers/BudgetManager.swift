@@ -13,8 +13,20 @@ class BudgetManager: ObservableObject {
 
     private let userManager = UserManager.shared
     private let categoriesManager = CategoriesManager.shared
+    private let rateManager = CurrencyRateManager.shared
+    private let currencyPrefs = CurrencyPreferences.shared
 
     private init() {}
+
+    // Helper to convert transaction amount to user's primary currency
+    private func convertedAmount(_ txn: Txn) -> Double {
+        let primaryCurrency = currencyPrefs.primaryCurrency
+        if txn.primaryCurrency == primaryCurrency {
+            return txn.amount
+        } else {
+            return rateManager.convertAmount(txn.amount, from: txn.primaryCurrency, to: primaryCurrency)
+        }
+    }
 
     // MARK: - Budget Queries
 
@@ -44,28 +56,28 @@ class BudgetManager: ObservableObject {
     func spentAmount(for budget: Budget) -> Double {
         let periodRange = currentPeriodRange(for: budget.period)
         let transactions = getTransactionsForBudget(budget, in: periodRange)
-        return transactions.reduce(0) { $0 + abs($1.amount) }
+        return transactions.reduce(0.0) { $0 + abs(convertedAmount($1)) }
     }
 
     /// Get spent amount for a budget in a specific display period (for cross-period viewing)
     func spentAmount(for budget: Budget, displayPeriod: BudgetPeriod) -> Double {
         let periodRange = currentPeriodRange(for: displayPeriod)
         let transactions = getTransactionsForBudget(budget, in: periodRange)
-        return transactions.reduce(0) { $0 + abs($1.amount) }
+        return transactions.reduce(0.0) { $0 + abs(convertedAmount($1)) }
     }
 
     /// Get spent amount for a budget in a specific display period containing a specific date
     func spentAmount(for budget: Budget, displayPeriod: BudgetPeriod, on date: Date) -> Double {
         let periodRange = periodRange(for: displayPeriod, containing: date)
         let transactions = getTransactionsForBudget(budget, in: periodRange)
-        return transactions.reduce(0) { $0 + abs($1.amount) }
+        return transactions.reduce(0.0) { $0 + abs(convertedAmount($1)) }
     }
 
     /// Get spent amount for a budget in a specific date
     func spentAmount(for budget: Budget, on date: Date) -> Double {
         let periodRange = periodRange(for: budget.period, containing: date)
         let transactions = getTransactionsForBudget(budget, in: periodRange)
-        return transactions.reduce(0) { $0 + abs($1.amount) }
+        return transactions.reduce(0.0) { $0 + abs(convertedAmount($1)) }
     }
 
     /// Get the equivalent budget amount for a different display period

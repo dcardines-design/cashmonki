@@ -864,9 +864,9 @@ enum MigrationSafetyStatus: String, CaseIterable {
     
     var color: Color {
         switch self {
-        case .disarmed, .failed, .critical: return .red
+        case .disarmed, .failed, .critical: return AppColors.accentRed
         case .arming, .recovering: return .orange
-        case .armed, .monitoring: return .green
+        case .armed, .monitoring: return AppColors.successForeground
         case .alerting: return .yellow
         case .recovered: return .blue
         }
@@ -951,7 +951,7 @@ enum AlertSeverity: String, CaseIterable {
         switch self {
         case .info: return .blue
         case .warning: return .orange
-        case .error: return .red
+        case .error: return AppColors.accentRed
         case .critical: return .purple
         }
     }
@@ -991,10 +991,10 @@ enum DataLossRisk: String, CaseIterable {
     
     var color: Color {
         switch self {
-        case .none: return .green
+        case .none: return AppColors.successForeground
         case .minimal: return .yellow
         case .partial: return .orange
-        case .significant: return .red
+        case .significant: return AppColors.accentRed
         }
     }
 }

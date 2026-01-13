@@ -122,12 +122,15 @@ struct EditCategoriesSheet: View {
                 }
                 #endif
                 
-                // Search in category name
+                // Search in category name and tags
                 let categoryMatches = category.name.localizedCaseInsensitiveContains(searchText)
-                
-                // Search in subcategory names
+                let categoryTagsMatch = CategorySearchTags.matchesTags(categoryName: category.name, query: searchText)
+
+                // Search in subcategory names and tags
                 let subcategoryMatches = category.subcategories.contains { subcategory in
-                    let matches = subcategory.name.localizedCaseInsensitiveContains(searchText)
+                    let nameMatches = subcategory.name.localizedCaseInsensitiveContains(searchText)
+                    let tagsMatch = CategorySearchTags.matchesTags(categoryName: subcategory.name, query: searchText)
+                    let matches = nameMatches || tagsMatch
                     #if DEBUG
                     if !searchText.isEmpty && (searchText.lowercased().contains("haircuts") || searchText.lowercased().contains("hair")) {
                         print("🔍   - Subcategory '\(subcategory.name)' matches '\(searchText)': \(matches)")
@@ -135,8 +138,8 @@ struct EditCategoriesSheet: View {
                     #endif
                     return matches
                 }
-                
-                let result = categoryMatches || subcategoryMatches
+
+                let result = categoryMatches || categoryTagsMatch || subcategoryMatches
                 #if DEBUG
                 if !searchText.isEmpty && (searchText.lowercased().contains("haircuts") || searchText.lowercased().contains("hair")) {
                     print("🔍   - Category '\(category.name)' result: \(result) (category: \(categoryMatches), subcategory: \(subcategoryMatches))")
@@ -188,10 +191,11 @@ struct EditCategoriesSheet: View {
             // Collect both built-in subcategories and categories with this category as parent
             var allChildren: [DisplayCategoryData] = []
             
-            // Add built-in subcategories (filter during search)
-            let subcategoriesToShow = searchText.isEmpty ? category.subcategories : 
+            // Add built-in subcategories (filter during search - includes tag matching)
+            let subcategoriesToShow = searchText.isEmpty ? category.subcategories :
                 category.subcategories.filter { subcategory in
-                    subcategory.name.localizedCaseInsensitiveContains(searchText)
+                    subcategory.name.localizedCaseInsensitiveContains(searchText) ||
+                    CategorySearchTags.matchesTags(categoryName: subcategory.name, query: searchText)
                 }
             
             #if DEBUG
@@ -217,9 +221,12 @@ struct EditCategoriesSheet: View {
                 // Include if parent is this category, but exclude if this category is a "No Parent" container
                 let hasThisParent = childCategory.parentId == category.id && !category.name.hasPrefix("No Parent")
                 
-                // During search, also filter by search term
+                // During search, also filter by search term (includes tag matching)
                 if !searchText.isEmpty {
-                    return hasThisParent && childCategory.name.localizedCaseInsensitiveContains(searchText)
+                    return hasThisParent && (
+                        childCategory.name.localizedCaseInsensitiveContains(searchText) ||
+                        CategorySearchTags.matchesTags(categoryName: childCategory.name, query: searchText)
+                    )
                 }
                 return hasThisParent
             }
@@ -381,6 +388,7 @@ struct EditCategoriesSheet: View {
                 currentTab: selectedTab == .income ? .income : .expense
             )
             .presentationDetents([.fraction(0.98)])
+            .presentationCornerRadius(20)
             .presentationDragIndicator(.hidden)
         }
         .fullScreenCover(isPresented: $showingCustomPaywall) {
@@ -410,6 +418,7 @@ struct EditCategoriesSheet: View {
                     }
                 )
                 .presentationDetents([.fraction(0.98)])
+                .presentationCornerRadius(20)
                 .presentationDragIndicator(.hidden)
             }
         }

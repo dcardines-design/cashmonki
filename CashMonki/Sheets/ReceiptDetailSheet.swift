@@ -45,9 +45,19 @@ struct ReceiptDetailSheet: View {
     var onDismiss: (() -> Void)?
     @Environment(\.dismiss) private var dismiss
     @State private var showingEditSheet = false
+    @State private var showingSubscriptionDetail = false
     @State private var loadedReceiptImage: UIImage? = nil
     @State private var isLoadingReceiptImage = false
+    @State private var contentOpacity: Double = 1.0
     @ObservedObject private var categoriesManager = CategoriesManager.shared
+    @ObservedObject private var subscriptionManager = SubscriptionManager.shared
+    @ObservedObject private var currencyPrefs = CurrencyPreferences.shared
+
+    /// Get the parent subscription if this transaction was generated from one
+    private var parentSubscription: Subscription? {
+        guard let subscriptionId = transactionState.transaction.subscriptionId else { return nil }
+        return subscriptionManager.subscriptions.first { $0.id == subscriptionId }
+    }
 
     /// Get the current display name for the category (handles renamed categories)
     private var categoryDisplayName: String {
@@ -103,7 +113,7 @@ struct ReceiptDetailSheet: View {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(categoryDisplayName)
                                 .font(AppFonts.overusedGroteskMedium(size: 18))
-                                .foregroundColor(.primary)
+                                .foregroundColor(AppColors.foregroundPrimary)
                             
                             Text(transactionState.transaction.merchantName ?? "-")
                                 .font(AppFonts.overusedGroteskMedium(size: 18))
@@ -115,17 +125,48 @@ struct ReceiptDetailSheet: View {
                     .padding(.horizontal, 20)
                     .padding(.top, 16)
                     
-                    // Large currency amount
+                    // Large currency amount - converted to user's current primary currency
                     HStack {
-                        if transactionState.transaction.amount < 0 {
-                            Text("\(transactionState.transaction.primaryCurrency.symbol)\(formatCurrencyAmount(abs(transactionState.transaction.amount)))")
-                                .font(AppFonts.overusedGroteskMedium(size: 70))
-                                .foregroundColor(Color(red: 0.9, green: 0.3, blue: 0.1)) // Orange/red color for expenses
-                        } else {
-                            Text("\(transactionState.transaction.primaryCurrency.symbol)\(formatCurrencyAmount(transactionState.transaction.amount))")
-                                .font(AppFonts.overusedGroteskMedium(size: 70))
-                                .foregroundColor(AppColors.successForeground)
-                        }
+                        let currentPrimaryCurrency = currencyPrefs.primaryCurrency
+                        let convertedAmount: Double = {
+                            if transactionState.transaction.primaryCurrency != currentPrimaryCurrency {
+                                return CurrencyRateManager.shared.convertAmount(
+                                    transactionState.transaction.amount,
+                                    from: transactionState.transaction.primaryCurrency,
+                                    to: currentPrimaryCurrency
+                                )
+                            } else {
+                                return transactionState.transaction.amount
+                            }
+                        }()
+
+                        // Determine color by category type (more reliable than amount sign)
+                        let isIncomeCategory: Bool = {
+                            let categoriesManager = CategoriesManager.shared
+                            if let catId = transactionState.transaction.categoryId {
+                                if let result = categoriesManager.findCategoryOrSubcategoryById(catId) {
+                                    if let cat = result.category {
+                                        return cat.type == .income
+                                    } else if let subcat = result.subcategory {
+                                        return subcat.type == .income
+                                    }
+                                }
+                            }
+                            // Fallback to name lookup
+                            let result = categoriesManager.findCategoryOrSubcategory(by: transactionState.transaction.category)
+                            if let cat = result.category {
+                                return cat.type == .income
+                            } else if let subcat = result.subcategory {
+                                return subcat.type == .income
+                            }
+                            return convertedAmount > 0
+                        }()
+
+                        let amountColor = isIncomeCategory ? AppColors.successForeground : Color(red: 0.9, green: 0.3, blue: 0.1)
+
+                        Text("\(currentPrimaryCurrency.symbol)\(formatCurrencyAmount(abs(convertedAmount)))")
+                            .font(AppFonts.overusedGroteskMedium(size: 70))
+                            .foregroundColor(amountColor)
                         Spacer()
                     }
                     .padding(.horizontal, 20)
@@ -196,7 +237,7 @@ struct ReceiptDetailSheet: View {
 
                                 Text(categoryDisplayName)
                                     .font(AppFonts.overusedGroteskMedium(size: 16))
-                                    .foregroundColor(.primary)
+                                    .foregroundColor(AppColors.foregroundPrimary)
                             }
                         }
                         
@@ -207,7 +248,33 @@ struct ReceiptDetailSheet: View {
                         if transactionState.shouldShowNote {
                             horizontalDetailRow(title: "Note", value: displayNote(transactionState.transaction.note))
                         }
-                        
+
+                        // Repeats row and subscription card - only show if from a subscription
+                        if let subscription = parentSubscription {
+                            horizontalDetailRow(title: "Repeats", value: subscription.frequency.displayName)
+                                .padding(.bottom, -6) // Reduce spacing to get 12px total with card
+
+                            // Subscription link card
+                            subscriptionLinkCard(subscription: subscription)
+                        }
+
+                        // COMMENTED OUT FOR APP STORE SUBMISSION - TODO: Uncomment later
+                        // Recurring timeline - inside VStack when no receipt image
+                        /*
+                        if !hasReceiptImageToDisplay() {
+                            let recurringSection = RecurringTimelineSection(
+                                transaction: transactionState.transaction,
+                                onTransactionTap: { tappedTransaction in
+                                    handleTimelineTap(tappedTransaction)
+                                }
+                            )
+                            if recurringSection.shouldDisplay {
+                                recurringSection
+                                    .padding(.horizontal, -20) // Offset parent padding
+                            }
+                        }
+                        */
+
                         // Receipt section - Only show if we have an actual image to display
                         if hasReceiptImageToDisplay() {
                             HStack {
@@ -236,7 +303,7 @@ struct ReceiptDetailSheet: View {
                                         .stroke(AppColors.linePrimary, lineWidth: 1)
                                 )
                                 .padding(.horizontal, 20)
-                            
+
                             // COMMENTED OUT: Receipt and Invoice Number container
                             /*
                             VStack(spacing: 16) {
@@ -245,22 +312,22 @@ struct ReceiptDetailSheet: View {
                                     Text("Receipt Number")
                                         .font(AppFonts.overusedGroteskMedium(size: 16))
                                         .foregroundColor(.secondary)
-                                    
+
                                     Spacer()
-                                    
+
                                     Text(transactionState.transaction.receiptNumber ?? "-")
                                         .font(AppFonts.overusedGroteskMedium(size: 16))
                                         .foregroundColor(transactionState.transaction.receiptNumber != nil ? .primary : .secondary)
                                 }
-                                
+
                                 // Invoice Number row
                                 HStack(spacing: 16) {
                                     Text("Invoice Number")
                                         .font(AppFonts.overusedGroteskMedium(size: 16))
                                         .foregroundColor(.secondary)
-                                    
+
                                     Spacer()
-                                    
+
                                     Text(transactionState.transaction.invoiceNumber ?? "-")
                                         .font(AppFonts.overusedGroteskMedium(size: 16))
                                         .foregroundColor(transactionState.transaction.invoiceNumber != nil ? .primary : .secondary)
@@ -279,8 +346,26 @@ struct ReceiptDetailSheet: View {
                         .padding(.top, -8) // Reduces 20px parent spacing to 12px gap from "Receipt" label
                         .padding(.bottom, 32)
                     }
+
+                    // COMMENTED OUT FOR APP STORE SUBMISSION - TODO: Uncomment later
+                    // Recurring transaction timeline - after receipt image (only when has receipt)
+                    /*
+                    if hasReceiptImageToDisplay() {
+                        let recurringSection = RecurringTimelineSection(
+                            transaction: transactionState.transaction,
+                            onTransactionTap: { tappedTransaction in
+                                handleTimelineTap(tappedTransaction)
+                            }
+                        )
+                        if recurringSection.shouldDisplay {
+                            recurringSection
+                                .padding(.bottom, 32)
+                        }
+                    }
+                    */
                 }
                 .padding(.bottom, 20)
+                .opacity(contentOpacity)
             }
         }
         .background(AppColors.backgroundWhite)
@@ -356,7 +441,29 @@ struct ReceiptDetailSheet: View {
             )
             .id("edit-\(transactionState.transaction.id)-\(transactionState.transaction.note ?? "empty")")
             .presentationDetents([.fraction(0.98)])
+            .presentationCornerRadius(20)
             .presentationDragIndicator(.hidden)
+        }
+        .sheet(isPresented: $showingSubscriptionDetail) {
+            if let subscription = parentSubscription {
+                RecurringDetailSheet(
+                    subscription: subscription,
+                    onDismiss: {
+                        showingSubscriptionDetail = false
+                    },
+                    onEdit: { updatedSubscription in
+                        SubscriptionManager.shared.updateSubscription(updatedSubscription)
+                        showingSubscriptionDetail = false
+                    },
+                    onDelete: { deletedSubscription in
+                        SubscriptionManager.shared.deleteSubscription(deletedSubscription)
+                        showingSubscriptionDetail = false
+                    }
+                )
+                .presentationDetents([.fraction(0.98)])
+                .presentationCornerRadius(20)
+                .presentationDragIndicator(.hidden)
+            }
         }
     }
     
@@ -379,6 +486,28 @@ struct ReceiptDetailSheet: View {
     /// Check if we have an actual receipt image to display
     private func hasReceiptImageToDisplay() -> Bool {
         return transactionState.transaction.receiptImage != nil || loadedReceiptImage != nil
+    }
+
+    /// Handle tap on recurring timeline row with fade animation
+    private func handleTimelineTap(_ tappedTransaction: Txn) {
+        // Fast fade out
+        withAnimation(.easeOut(duration: 0.15)) {
+            contentOpacity = 0
+        }
+
+        // Update after fade out
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+            // Update the displayed transaction to the tapped one
+            transactionState.updateTransaction(tappedTransaction)
+            // Also reload receipt image if needed
+            loadedReceiptImage = nil
+            loadReceiptImageIfNeeded()
+
+            // Fast fade in
+            withAnimation(.easeIn(duration: 0.15)) {
+                contentOpacity = 1.0
+            }
+        }
     }
     
     /// Load receipt image from cache if transaction has one but no embedded image
@@ -520,15 +649,15 @@ struct ReceiptDetailSheet: View {
             Text(title)
                 .font(AppFonts.overusedGroteskMedium(size: 16))
                 .foregroundColor(AppColors.foregroundSecondary)
-            
+
             Spacer()
-            
+
             // Value on the right
             HStack(spacing: 8) {
                 Text(value)
                     .font(AppFonts.overusedGroteskMedium(size: 16))
-                    .foregroundColor(.primary)
-                
+                    .foregroundColor(AppColors.foregroundPrimary)
+
                 if let secondaryValue = secondaryValue {
                     Text(secondaryValue)
                         .font(AppFonts.overusedGroteskMedium(size: 16))
@@ -537,6 +666,76 @@ struct ReceiptDetailSheet: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    // Subscription link card - outline style, tappable to open parent subscription
+    private func subscriptionLinkCard(subscription: Subscription) -> some View {
+        Button {
+            showingSubscriptionDetail = true
+        } label: {
+            VStack(spacing: 12) {
+                // Top row: Name, frequency, amount on left; category icon on right
+                HStack(alignment: .top, spacing: 12) {
+                    // Left side: Name, frequency label, amount
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(subscription.name)
+                            .font(AppFonts.overusedGroteskMedium(size: 16))
+                            .foregroundColor(AppColors.foregroundPrimary)
+
+                        Text(subscription.frequency.displayName.uppercased())
+                            .font(AppFonts.overusedGroteskSemiBold(size: 10))
+                            .kerning(0.8)
+                            .foregroundColor(AppColors.foregroundTertiary)
+
+                        Text(CurrencyPreferences.shared.formatPrimaryAmount(
+                            CurrencyRateManager.shared.convertAmount(
+                                abs(subscription.amount),
+                                from: subscription.currency,
+                                to: CurrencyPreferences.shared.primaryCurrency
+                            )
+                        ))
+                        .font(AppFonts.overusedGroteskMedium(size: 18))
+                        .foregroundColor(AppColors.foregroundPrimary)
+                    }
+
+                    Spacer()
+
+                    // Right side: Category icon
+                    TxnCategoryIcon(category: subscription.category, size: 32)
+                }
+
+                // Bottom row: Started on left, Renews on right
+                HStack {
+                    Text("Started \(formatShortDate(subscription.createdAt))")
+                        .font(AppFonts.overusedGroteskMedium(size: 12))
+                        .foregroundColor(AppColors.foregroundTertiary)
+
+                    Spacer()
+
+                    Text("Renews \(formatShortDate(subscription.nextDueDate))")
+                        .font(AppFonts.overusedGroteskMedium(size: 12))
+                        .foregroundColor(AppColors.foregroundTertiary)
+                }
+            }
+            .padding(.leading, 18)
+            .padding(.trailing, 14)
+            .padding(.vertical, 16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(AppColors.backgroundWhite)
+            .cornerRadius(14)
+            .overlay(
+                RoundedRectangle(cornerRadius: 14)
+                    .stroke(AppColors.linePrimary, lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    // Short date formatter for subscription card
+    private func formatShortDate(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MMM d, yy'"
+        return formatter.string(from: date)
     }
     
     // Helper function to format currency with commas and smart decimal places

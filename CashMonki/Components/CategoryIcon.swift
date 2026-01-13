@@ -75,11 +75,35 @@ struct TxnCategoryIcon: View {
 
 // MARK: - Convenience Methods
 extension TxnCategoryIcon {
-    /// Returns just the emoji for a given category
+    /// Returns emoji for category by UUID with optional name fallback
+    /// Use this for budgets and any context where categoryId is available
+    /// If UUID lookup fails (e.g., after category reset), falls back to name-based lookup
+    static func emojiFor(categoryId: UUID, categoryName: String? = nil) -> String {
+        // Try UUID lookup first (preferred)
+        let result = CategoriesManager.shared.findCategoryOrSubcategoryById(categoryId)
+        if let category = result?.category {
+            return category.emoji
+        } else if let subcategory = result?.subcategory {
+            return subcategory.emoji
+        }
+
+        // Fallback to name-based lookup if UUID not found
+        // This handles cases where categories were reinitialized with new UUIDs
+        if let name = categoryName, !name.isEmpty {
+            let nameEmoji = CategoriesManager.shared.emojiFor(category: name, type: nil)
+            if nameEmoji != "📋" {
+                return nameEmoji
+            }
+        }
+
+        return "📋" // Default for deleted/orphaned categories
+    }
+
+    /// Returns just the emoji for a given category (by name - use only when UUID not available)
     static func emojiFor(category: String) -> String {
         return CategoriesManager.shared.emojiFor(category: category, type: nil)
     }
-    
+
     /// Returns emoji for category with context-aware type information
     static func emojiFor(category: String, type: CategoryType?) -> String {
         return CategoriesManager.shared.emojiFor(category: category, type: type)

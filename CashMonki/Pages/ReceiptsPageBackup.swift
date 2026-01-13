@@ -15,7 +15,7 @@ struct ReceiptsPageBackup: View {
                 .padding()
             
             Text("Temporary simplified view")
-                .foregroundColor(.secondary)
+                .foregroundColor(AppColors.foregroundSecondary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(.systemBackground))

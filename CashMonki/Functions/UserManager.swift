@@ -585,7 +585,145 @@ class UserManager: ObservableObject {
         
         print("✅ UserManager: User goals updated to: '\(currentUser.goals ?? "nil")'")
     }
-    
+
+    func updateUserStress(_ stress: String) {
+        print("😫 UserManager: updateUserStress called with: '\(stress)'")
+
+        currentUser.moneyStress = stress
+        currentUser.updatedAt = Date()
+
+        saveCurrentUserLocally()
+
+        #if canImport(FirebaseFirestore)
+        if currentUser.enableFirebaseSync {
+            syncToFirebase { success in
+                if success {
+                    print("✅ UserManager: User stress synced to Firebase")
+                } else {
+                    print("❌ UserManager: Failed to sync user stress to Firebase")
+                }
+            }
+        }
+        #endif
+
+        print("✅ UserManager: User stress updated to: '\(stress)'")
+    }
+
+    func updateUserOverspentRealization(_ overspent: String) {
+        print("🙈 UserManager: updateUserOverspentRealization called with: '\(overspent)'")
+
+        currentUser.overspentRealization = overspent
+        currentUser.updatedAt = Date()
+
+        saveCurrentUserLocally()
+
+        #if canImport(FirebaseFirestore)
+        if currentUser.enableFirebaseSync {
+            syncToFirebase { success in
+                if success {
+                    print("✅ UserManager: User overspent realization synced to Firebase")
+                } else {
+                    print("❌ UserManager: Failed to sync user overspent realization to Firebase")
+                }
+            }
+        }
+        #endif
+
+        print("✅ UserManager: User overspent realization updated to: '\(overspent)'")
+    }
+
+    func updateUserTrackingDifficulty(_ difficulty: String) {
+        print("😣 UserManager: updateUserTrackingDifficulty called with: '\(difficulty)'")
+
+        currentUser.trackingDifficulty = difficulty
+        currentUser.updatedAt = Date()
+
+        saveCurrentUserLocally()
+
+        #if canImport(FirebaseFirestore)
+        if currentUser.enableFirebaseSync {
+            syncToFirebase { success in
+                if success {
+                    print("✅ UserManager: User tracking difficulty synced to Firebase")
+                } else {
+                    print("❌ UserManager: Failed to sync user tracking difficulty to Firebase")
+                }
+            }
+        }
+        #endif
+
+        print("✅ UserManager: User tracking difficulty updated to: '\(difficulty)'")
+    }
+
+    func updateUserIdealOutcome(_ outcome: String) {
+        print("🥳 UserManager: updateUserIdealOutcome called with: '\(outcome)'")
+
+        currentUser.idealOutcome = outcome
+        currentUser.updatedAt = Date()
+
+        saveCurrentUserLocally()
+
+        #if canImport(FirebaseFirestore)
+        if currentUser.enableFirebaseSync {
+            syncToFirebase { success in
+                if success {
+                    print("✅ UserManager: User ideal outcome synced to Firebase")
+                } else {
+                    print("❌ UserManager: Failed to sync user ideal outcome to Firebase")
+                }
+            }
+        }
+        #endif
+
+        print("✅ UserManager: User ideal outcome updated to: '\(outcome)'")
+    }
+
+    func updateUserTrackingFrequency(_ frequency: String) {
+        print("🕐 UserManager: updateUserTrackingFrequency called with: '\(frequency)'")
+
+        currentUser.trackingFrequency = frequency
+        currentUser.updatedAt = Date()
+
+        saveCurrentUserLocally()
+
+        #if canImport(FirebaseFirestore)
+        if currentUser.enableFirebaseSync {
+            syncToFirebase { success in
+                if success {
+                    print("✅ UserManager: User tracking frequency synced to Firebase")
+                } else {
+                    print("❌ UserManager: Failed to sync user tracking frequency to Firebase")
+                }
+            }
+        }
+        #endif
+
+        print("✅ UserManager: User tracking frequency updated to: '\(frequency)'")
+    }
+
+    func updateUserTrackingMethod(_ method: String) {
+        print("📝 UserManager: updateUserTrackingMethod called with: '\(method)'")
+
+        currentUser.trackingMethod = method
+        currentUser.updatedAt = Date()
+
+        saveCurrentUserLocally()
+
+        #if canImport(FirebaseFirestore)
+        if currentUser.enableFirebaseSync {
+            syncToFirebase { success in
+                if success {
+                    print("✅ UserManager: User tracking method synced to Firebase")
+                } else {
+                    print("❌ UserManager: Failed to sync user tracking method to Firebase")
+                }
+            }
+        }
+        #endif
+
+        print("✅ UserManager: User tracking method updated to: '\(method)'")
+    }
+
     /// Update the default wallet name based on user's first name
     private func updateDefaultWalletName(basedOnUserName fullName: String) {
         // Extract first name from full name
@@ -1632,6 +1770,10 @@ class UserManager: ObservableObject {
                             
                             // Trigger UI update
                             self.objectWillChange.send()
+
+                            // Validate budget-category links after data is loaded
+                            CategoriesManager.shared.validateBudgetCategoryLinks()
+
                             completion(true)
                             
                         case .failure(let error):

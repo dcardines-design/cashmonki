@@ -103,6 +103,7 @@ struct AccountSelectorButton: View {
         .sheet(isPresented: $showingAccountPicker) {
             AccountPickerSheet(isPresented: $showingAccountPicker)
                 .presentationDetents([.fraction(0.98)])
+                .presentationCornerRadius(20)
                 .presentationDragIndicator(.hidden)
         }
         .onChange(of: showingAccountPicker) { _, newValue in
@@ -134,11 +135,16 @@ struct AccountSelectorButton: View {
             print("💰 formatWalletBalance: No conversion needed (same currency)")
         }
 
-        // Transaction amounts are ALREADY in primary currency (converted when primary changed)
+        // Convert each transaction to primary currency (subscription transactions may be in different currencies)
         let transactions = userManager.currentUser.transactions
         let transactionTotal = transactions
             .filter { $0.walletID == account.id }
-            .reduce(0) { $0 + $1.amount }
+            .reduce(0.0) { total, txn in
+                let converted = txn.primaryCurrency == primaryCurrency
+                    ? txn.amount
+                    : CurrencyRateManager.shared.convertAmount(txn.amount, from: txn.primaryCurrency, to: primaryCurrency)
+                return total + converted
+            }
 
         // Now both are in primary currency - safe to add
         let displayBalance = startingBalanceInPrimary + transactionTotal
@@ -218,10 +224,15 @@ struct AccountPickerSheet: View {
                                 startingInPrimary = startingBalance
                             }
 
-                            // Transaction amounts are already in primary currency
+                            // Convert each transaction to primary currency
                             let transactionTotal = transactions
                                 .filter { $0.walletID == account.id }
-                                .reduce(0) { $0 + $1.amount }
+                                .reduce(0.0) { total, txn in
+                                    let converted = txn.primaryCurrency == primaryCurrency
+                                        ? txn.amount
+                                        : CurrencyRateManager.shared.convertAmount(txn.amount, from: txn.primaryCurrency, to: primaryCurrency)
+                                    return total + converted
+                                }
 
                             return startingInPrimary + transactionTotal
                         }()
@@ -282,6 +293,7 @@ struct AccountPickerSheet: View {
                 }
             )
             .presentationDetents([.fraction(0.98)])
+            .presentationCornerRadius(20)
             .presentationDragIndicator(.hidden)
         }
         .onChange(of: showingEditWallet) { _, newValue in
@@ -345,8 +357,9 @@ struct AccountPickerSheet: View {
                 }
             }
             .presentationDetents([.fraction(0.98)])
+            .presentationCornerRadius(20)
             .presentationDragIndicator(.hidden)
-            
+
             /* BOTTOM SHEET REFERENCE FOR FUTURE DESIGNS:
             .presentationDetents([.height(400)])  // Fixed height bottom sheet
             .presentationDetents([.height(350)])  // Smaller bottom sheet
@@ -435,7 +448,7 @@ struct AccountOptionRow: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(name)
                         .font(AppFonts.overusedGroteskSemiBold(size: 16))
-                        .foregroundColor(.primary)
+                        .foregroundColor(AppColors.foregroundPrimary)
 
                     if balance != nil {
                         Text(balanceText)
@@ -452,7 +465,7 @@ struct AccountOptionRow: View {
                     }) {
                         Image(systemName: "gearshape.fill")
                             .font(.system(size: 16, weight: .medium))
-                            .foregroundColor(.secondary)
+                            .foregroundColor(AppColors.foregroundSecondary)
                     }
                 }
             }

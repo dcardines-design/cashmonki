@@ -1,0 +1,710 @@
+import SwiftUI
+import Foundation
+
+#if canImport(RevenueCat)
+import RevenueCat
+#endif
+
+struct PromoPaywallSheet: View {
+    @Binding var isPresented: Bool
+    @State private var selectedPlan: PricingPlan = .yearly
+    @State private var showingManageBilling = false
+    @State private var isDismissing = false // Prevents UI re-render during dismissal
+    @State private var isPurchasing = false // Prevents "Manage Billing" flash during purchase
+    @ObservedObject private var revenueCatManager = RevenueCatManager.shared
+    @EnvironmentObject var toastManager: ToastManager
+
+    // Static counter to detect duplicate paywall presentations
+    private static var presentationCount = 0
+    private static var lastPresentationTime: Date?
+
+    // MARK: - RevenueCat Package Helpers
+
+    /// The promo offering identifier from RevenueCat
+    private let promoOfferingId = "Cashmonki One Time Promo"
+
+    private var targetOffering: Offering? {
+        // Use the promo-specific offering instead of the default
+        revenueCatManager.getOffering(identifier: promoOfferingId)
+    }
+
+    private var monthlyPackage: Package? {
+        guard let offering = targetOffering else { return nil }
+        return offering.availablePackages.first { package in
+            package.storeProduct.productIdentifier.contains("monthly") ||
+            package.packageType == .monthly
+        }
+    }
+
+    private var yearlyPackage: Package? {
+        guard let offering = targetOffering else { return nil }
+
+        return offering.availablePackages.first { package in
+            let identifier = package.storeProduct.productIdentifier.lowercased()
+            return identifier.contains("yearly") ||
+                   identifier.contains("annual") ||
+                   identifier.hasSuffix("_yearly") ||
+                   identifier.contains("_pro_yearly")
+        }
+    }
+
+    private var selectedPackage: Package? {
+        switch selectedPlan {
+        case .monthly:
+            return monthlyPackage
+        case .yearly:
+            return yearlyPackage
+        }
+    }
+
+    private var paymentTermsText: String {
+        guard let package = selectedPackage else {
+            return selectedPlan == .yearly ? "$99.99/yr" : "$9.99/mo"
+        }
+
+        let priceString = package.storeProduct.localizedPriceString
+        let periodString = selectedPlan == .yearly ? "/yr" : "/mo"
+        return "\(priceString)\(periodString)"
+    }
+
+    private func getYearlyPriceString() -> String {
+        guard let package = yearlyPackage else { return "$99.99" }
+        let priceString = package.storeProduct.localizedPriceString
+        // If RevenueCat returns incorrect price, use fallback
+        if priceString.contains("9.99") && !priceString.contains("99.99") {
+            return "$99.99"
+        }
+        return priceString
+    }
+
+    var body: some View {
+        ZStack {
+            VStack(spacing: 0) {
+                // Scrollable content area
+                ScrollView(showsIndicators: false) {
+                    VStack(spacing: 0) {
+
+                    // Top padding to account for fixed close button
+                    Spacer()
+                        .frame(height: 32)
+
+                    // Content area with Cashmonki Pro text image
+                    VStack(spacing: 24) {
+                        // Header image - different for lapsed trial users
+                        Image(revenueCatManager.hasUsedTrialBefore ? "cashmonki-pro-text-trial-ended" : "cashmonki-pro-text")
+                            .resizable()
+                            .aspectRatio(contentMode: .fit)
+                            .frame(maxWidth: .infinity)
+
+                        // Value props section
+                        VStack(spacing: 24) {
+                            // Unlimited AI Scans feature
+                            HStack(alignment: .top, spacing: 16) {
+                                // Sparkle icon container
+                                VStack(alignment: .center, spacing: 10) {
+                                    Text("✨")
+                                        .font(
+                                            Font.custom("Overused Grotesk", size: 26)
+                                                .weight(.medium)
+                                        )
+                                        .multilineTextAlignment(.center)
+                                        .foregroundColor(AppColors.foregroundWhite)
+                                }
+                                .padding(8)
+                                .frame(width: 46, height: 46, alignment: .center)
+                                .background(.white.opacity(0.05))
+                                .cornerRadius(200)
+
+                                // Text content
+                                VStack(alignment: .leading, spacing: 6) {
+                                    Text("Unlimited AI Scans")
+                                        .font(
+                                            Font.custom("Overused Grotesk", size: 18)
+                                                .weight(.semibold)
+                                        )
+                                        .foregroundColor(AppColors.foregroundWhite)
+                                        .frame(maxWidth: .infinity, alignment: .topLeading)
+
+                                    Text("Snap and let AI handle everything, no typing, no hassle.")
+                                        .font(
+                                            Font.custom("Overused Grotesk", size: 16)
+                                                .weight(.medium)
+                                        )
+                                        .foregroundColor(AppColors.foregroundWhite)
+                                        .frame(maxWidth: .infinity, alignment: .topLeading)
+                                        .opacity(0.7)
+                                }
+
+                                Spacer()
+                            }
+
+                            // Unlimited Custom Categories feature
+                            HStack(alignment: .top, spacing: 16) {
+                                // Chart icon container
+                                VStack(alignment: .center, spacing: 10) {
+                                    Text("📊")
+                                        .font(
+                                            Font.custom("Overused Grotesk", size: 26)
+                                                .weight(.medium)
+                                        )
+                                        .multilineTextAlignment(.center)
+                                        .foregroundColor(AppColors.foregroundWhite)
+                                }
+                                .padding(8)
+                                .frame(width: 46, height: 46, alignment: .center)
+                                .background(.white.opacity(0.05))
+                                .cornerRadius(200)
+
+                                // Text content
+                                VStack(alignment: .leading, spacing: 6) {
+                                    Text("Unlimited Custom Categories")
+                                        .font(
+                                            Font.custom("Overused Grotesk", size: 18)
+                                                .weight(.semibold)
+                                        )
+                                        .foregroundColor(AppColors.foregroundWhite)
+                                        .frame(maxWidth: .infinity, alignment: .topLeading)
+
+                                    Text("Create categories that actually match your life.")
+                                        .font(
+                                            Font.custom("Overused Grotesk", size: 16)
+                                                .weight(.medium)
+                                        )
+                                        .foregroundColor(AppColors.foregroundWhite)
+                                        .frame(maxWidth: .infinity, alignment: .topLeading)
+                                        .opacity(0.7)
+                                }
+
+                                Spacer()
+                            }
+
+                            // Multiple Accounts feature
+                            HStack(alignment: .top, spacing: 16) {
+                                // Briefcase icon container
+                                VStack(alignment: .center, spacing: 10) {
+                                    Text("💼")
+                                        .font(
+                                            Font.custom("Overused Grotesk", size: 26)
+                                                .weight(.medium)
+                                        )
+                                        .multilineTextAlignment(.center)
+                                        .foregroundColor(AppColors.foregroundWhite)
+                                }
+                                .padding(8)
+                                .frame(width: 46, height: 46, alignment: .center)
+                                .background(.white.opacity(0.05))
+                                .cornerRadius(200)
+
+                                // Text content
+                                VStack(alignment: .leading, spacing: 6) {
+                                    Text("Multiple Accounts")
+                                        .font(
+                                            Font.custom("Overused Grotesk", size: 18)
+                                                .weight(.semibold)
+                                        )
+                                        .foregroundColor(AppColors.foregroundWhite)
+                                        .frame(maxWidth: .infinity, alignment: .topLeading)
+
+                                    Text("Switch easily between personal and business accounts.")
+                                        .font(
+                                            Font.custom("Overused Grotesk", size: 16)
+                                                .weight(.medium)
+                                        )
+                                        .foregroundColor(AppColors.foregroundWhite)
+                                        .frame(maxWidth: .infinity, alignment: .topLeading)
+                                        .opacity(0.7)
+                                }
+
+                                Spacer()
+                            }
+
+                            // Support Indie feature
+                            HStack(alignment: .top, spacing: 16) {
+                                // Smiling face icon container
+                                VStack(alignment: .center, spacing: 10) {
+                                    Text("😌")
+                                        .font(
+                                            Font.custom("Overused Grotesk", size: 26)
+                                                .weight(.medium)
+                                        )
+                                        .multilineTextAlignment(.center)
+                                        .foregroundColor(AppColors.foregroundWhite)
+                                }
+                                .padding(8)
+                                .frame(width: 46, height: 46, alignment: .center)
+                                .background(.white.opacity(0.05))
+                                .cornerRadius(200)
+
+                                // Text content
+                                VStack(alignment: .leading, spacing: 6) {
+                                    Text("Support Indie")
+                                        .font(
+                                            Font.custom("Overused Grotesk", size: 18)
+                                                .weight(.semibold)
+                                        )
+                                        .foregroundColor(AppColors.foregroundWhite)
+                                        .frame(maxWidth: .infinity, alignment: .topLeading)
+
+                                    Text("Support indie app creators for the price of a few cups of coffee a month.")
+                                        .font(
+                                            Font.custom("Overused Grotesk", size: 16)
+                                                .weight(.medium)
+                                        )
+                                        .foregroundColor(AppColors.foregroundWhite)
+                                        .frame(maxWidth: .infinity, alignment: .topLeading)
+                                        .opacity(0.7)
+                                }
+
+                                Spacer()
+                            }
+                        }
+                    }
+                    .padding(.horizontal, 24)
+
+                    // Bottom padding to ensure content doesn't hide behind sticky container
+                    Spacer()
+                        .frame(height: 20)
+                }
+            }
+
+            // Fixed/Sticky price plan container at bottom
+            VStack(alignment: .leading, spacing: 14) {
+                // Yearly pricing plan tile
+                Button(action: {
+                    selectedPlan = .yearly
+                }) {
+                    HStack(alignment: .top) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack(spacing: 8) {
+                            Text("Yearly")
+                                .font(
+                                    Font.custom("Overused Grotesk", size: 14)
+                                        .weight(.semibold)
+                                )
+                                .multilineTextAlignment(.center)
+                                .foregroundColor(AppColors.foregroundPrimary)
+
+                            Text("Get 2 months free!")
+                                .font(
+                                    Font.custom("Overused Grotesk", size: 14)
+                                        .weight(.semibold)
+                                )
+                                .multilineTextAlignment(.center)
+                                .foregroundColor(AppColors.successForeground)
+                        }
+
+                        HStack(alignment: .bottom, spacing: 4) {
+                            Text(getYearlyPriceString())
+                                .font(
+                                    Font.custom("Overused Grotesk", size: 24)
+                                        .weight(.bold)
+                                )
+                                .multilineTextAlignment(.center)
+                                .foregroundColor(AppColors.foregroundPrimary)
+
+                            Text("/ year")
+                                .font(
+                                    Font.custom("Overused Grotesk", size: 12)
+                                        .weight(.medium)
+                                )
+                                .multilineTextAlignment(.center)
+                                .foregroundColor(AppColors.foregroundSecondary)
+                        }
+                    }
+
+                    Spacer()
+
+                        // Selection indicator
+                        Circle()
+                            .fill(selectedPlan == .yearly ? AppColors.accentBackground : AppColors.surfacePrimary)
+                            .frame(width: 20, height: 20)
+                            .overlay(
+                                Group {
+                                    if selectedPlan == .yearly {
+                                        Image(systemName: "checkmark")
+                                            .font(.system(size: 10, weight: .bold))
+                                            .foregroundColor(.white)
+                                    } else {
+                                        Circle()
+                                            .stroke(AppColors.linePrimary, lineWidth: 1)
+                                    }
+                                }
+                            )
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 12)
+                .frame(maxWidth: .infinity, alignment: .top)
+                .background(
+                    LinearGradient(
+                        stops: [
+                            Gradient.Stop(color: .white, location: 0.00),
+                            Gradient.Stop(color: Color(red: 0.98, green: 0.98, blue: 1), location: 1.00),
+                        ],
+                        startPoint: UnitPoint(x: 0.5, y: 0),
+                        endPoint: UnitPoint(x: 0.5, y: 1)
+                    )
+                )
+                .cornerRadius(12)
+                .shadow(color: Color(red: 0.06, green: 0.09, blue: 0.16).opacity(0.05), radius: 1, x: 0, y: 1)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12)
+                        .inset(by: 0.5)
+                        .stroke(selectedPlan == .yearly ? AppColors.accentBackground : AppColors.line1stLine, lineWidth: 1)
+                )
+                }
+                .buttonStyle(PlainButtonStyle())
+
+                // Monthly pricing plan tile
+                Button(action: {
+                    selectedPlan = .monthly
+                }) {
+                    HStack(alignment: .top) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Monthly")
+                            .font(
+                                Font.custom("Overused Grotesk", size: 14)
+                                    .weight(.semibold)
+                            )
+                            .multilineTextAlignment(.center)
+                            .foregroundColor(AppColors.foregroundPrimary)
+
+                        HStack(alignment: .bottom, spacing: 4) {
+                            Text(monthlyPackage?.storeProduct.localizedPriceString ?? "$9.99")
+                                .font(
+                                    Font.custom("Overused Grotesk", size: 24)
+                                        .weight(.bold)
+                                )
+                                .multilineTextAlignment(.center)
+                                .foregroundColor(AppColors.foregroundPrimary)
+
+                            Text("/ month")
+                                .font(
+                                    Font.custom("Overused Grotesk", size: 12)
+                                        .weight(.medium)
+                                )
+                                .multilineTextAlignment(.center)
+                                .foregroundColor(AppColors.foregroundSecondary)
+                        }
+                    }
+
+                    Spacer()
+
+                        // Selection indicator
+                        Circle()
+                            .fill(selectedPlan == .monthly ? AppColors.accentBackground : AppColors.surfacePrimary)
+                            .frame(width: 20, height: 20)
+                            .overlay(
+                                Group {
+                                    if selectedPlan == .monthly {
+                                        Image(systemName: "checkmark")
+                                            .font(.system(size: 10, weight: .bold))
+                                            .foregroundColor(.white)
+                                    } else {
+                                        Circle()
+                                            .stroke(AppColors.linePrimary, lineWidth: 1)
+                                    }
+                                }
+                            )
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 12)
+                .frame(maxWidth: .infinity, alignment: .top)
+                .background(
+                    LinearGradient(
+                        stops: [
+                            Gradient.Stop(color: .white, location: 0.00),
+                            Gradient.Stop(color: Color(red: 0.98, green: 0.98, blue: 1), location: 1.00),
+                        ],
+                        startPoint: UnitPoint(x: 0.5, y: 0),
+                        endPoint: UnitPoint(x: 0.5, y: 1)
+                    )
+                )
+                .cornerRadius(12)
+                .shadow(color: Color(red: 0.06, green: 0.09, blue: 0.16).opacity(0.05), radius: 1, x: 0, y: 1)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12)
+                        .inset(by: 0.5)
+                        .stroke(selectedPlan == .monthly ? AppColors.accentBackground : AppColors.line1stLine, lineWidth: 1)
+                )
+                }
+                .buttonStyle(PlainButtonStyle())
+
+                // Primary button - changes based on subscription status
+                // Keep button visible during purchase (just disabled), but hide during dismissal
+                let _ = print("🎫 PROMO PAYWALL BUTTON DEBUG: isProUser=\(revenueCatManager.isProUser), isDismissing=\(isDismissing), isPurchasing=\(isPurchasing), hasUsedTrialBefore=\(revenueCatManager.hasUsedTrialBefore)")
+                if revenueCatManager.isProUser && !isDismissing && !isPurchasing {
+                    let _ = print("🎫 PROMO PAYWALL: Showing 'Manage Billing' button")
+                    AppButton.secondary("Manage Billing", size: .extraSmall) {
+                        showingManageBilling = true
+                    }
+                } else if !isDismissing {
+                    // Different button text for lapsed trial users
+                    // Show loading text during purchase, otherwise show normal text
+                    let buttonText = isPurchasing ? "Processing..." : (revenueCatManager.hasUsedTrialBefore ? "Continue with Pro" : "Start my free week")
+                    let _ = print("🎫 PROMO PAYWALL: Showing '\(buttonText)' button (isPurchasing=\(isPurchasing))")
+
+                    // Use pressed state styling when processing
+                    AppButton(
+                        title: buttonText,
+                        action: { if !isPurchasing { handleStartFreeTrial() } },
+                        hierarchy: .primary,
+                        size: .extraSmall,
+                        state: isPurchasing ? .pressed : .active
+                    )
+                } else {
+                    let _ = print("🎫 PROMO PAYWALL: ⚠️ Button hidden - isDismissing=\(isDismissing)")
+                }
+
+                // Payment terms text - different for lapsed trial users
+                HStack(spacing: 4) {
+                    Text(revenueCatManager.hasUsedTrialBefore ? "Secure checkout  •  Cancel anytime" : "7 days free, then \(paymentTermsText)  •  Cancel anytime")
+                        .font(
+                            Font.custom("Overused Grotesk", size: 14)
+                                .weight(.medium)
+                        )
+                        .multilineTextAlignment(.center)
+                        .foregroundColor(AppColors.foregroundSecondary)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .frame(maxWidth: .infinity)
+
+                // Restore Purchase link
+                Button(action: {
+                    restorePurchases()
+                }) {
+                    Text("Restore Purchase")
+                        .font(
+                            Font.custom("Overused Grotesk", size: 14)
+                                .weight(.medium)
+                        )
+                        .multilineTextAlignment(.center)
+                        .foregroundColor(AppColors.foregroundSecondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .center)
+                .padding(.top, -8)
+            }
+            .padding(20)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+            .background(.white)
+            .cornerRadius(30)
+            .overlay(
+                RoundedRectangle(cornerRadius: 30)
+                    .inset(by: 0.5)
+                    .stroke(AppColors.line1stLine, lineWidth: 1)
+            )
+            .padding(.horizontal, 10)
+            .padding(.bottom, 0)
+            .shadow(color: .black.opacity(0.1), radius: 10, x: 0, y: -5)
+            }
+
+            // Fixed close button overlay
+            VStack {
+                HStack {
+                    Spacer()
+                    Button(action: {
+                        isPresented = false
+                    }) {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 16, weight: .medium))
+                            .foregroundColor(AppColors.foregroundSecondary)
+                            .frame(width: 32, height: 32)
+                            .background(AppColors.surfacePrimary)
+                            .clipShape(Circle())
+                    }
+                }
+                .padding(.horizontal, 20)
+                .padding(.top, 20)
+
+                Spacer()
+            }
+        }
+        .background(
+            ZStack {
+                // Fallback background color
+                Color(red: 0.95, green: 0.95, blue: 0.98)
+                    .ignoresSafeArea()
+
+                // Background image - aligned to top
+                Image("paywall-bg")
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                    .ignoresSafeArea()
+            }
+        )
+        .animation(.easeInOut(duration: 0.2), value: selectedPlan)
+        .fullScreenCover(isPresented: $showingManageBilling) {
+            ManageBillingSheet(isPresented: $showingManageBilling)
+                .environmentObject(toastManager)
+        }
+        .onAppear {
+            // Track duplicate paywall presentations
+            Self.presentationCount += 1
+            let timeSinceLast = Self.lastPresentationTime.map { Date().timeIntervalSince($0) }
+            Self.lastPresentationTime = Date()
+
+            print("🎫 ======= PROMO PAYWALL APPEARED =======")
+            print("🎫 PROMO PAYWALL: Presentation #\(Self.presentationCount)")
+            if let timeSince = timeSinceLast {
+                print("🎫 PROMO PAYWALL: ⚠️ Time since last presentation: \(String(format: "%.2f", timeSince))s")
+                if timeSince < 2.0 {
+                    print("🎫 PROMO PAYWALL: 🚨🚨🚨 DUPLICATE DETECTED! Paywall shown twice within 2 seconds! 🚨🚨🚨")
+                }
+            }
+            print("🎫 PROMO PAYWALL onAppear: isProUser=\(revenueCatManager.isProUser)")
+            print("🎫 PROMO PAYWALL onAppear: isDismissing=\(isDismissing)")
+            print("🎫 PROMO PAYWALL onAppear: isPurchasing=\(isPurchasing)")
+            print("🎫 PROMO PAYWALL onAppear: isPurchaseInProgress=\(revenueCatManager.isPurchaseInProgress)")
+            print("🎫 PROMO PAYWALL onAppear: hasUsedTrialBefore=\(revenueCatManager.hasUsedTrialBefore)")
+            print("🎫 PROMO PAYWALL onAppear: customerInfo=\(revenueCatManager.customerInfo != nil ? "loaded" : "nil")")
+
+            // Track paywall view
+            AnalyticsManager.shared.trackPaywallViewed(
+                source: "promo",
+                hasUsedTrial: revenueCatManager.hasUsedTrialBefore
+            )
+
+            Task {
+                await ensureOfferingsLoaded()
+
+                // Debug: Confirm promo offering loaded
+                if let promo = revenueCatManager.getOffering(identifier: promoOfferingId) {
+                    print("🎫 PROMO PAYWALL: ✅ Found promo offering '\(promoOfferingId)'")
+                    print("🎫 PROMO PAYWALL: Packages available: \(promo.availablePackages.count)")
+                    for pkg in promo.availablePackages {
+                        print("🎫 PROMO PAYWALL:   📦 \(pkg.identifier): \(pkg.storeProduct.localizedPriceString)")
+                    }
+                } else {
+                    print("🎫 PROMO PAYWALL: ❌ Could not find offering '\(promoOfferingId)'")
+                    print("🎫 PROMO PAYWALL: Available offerings: \(revenueCatManager.debugAvailableOfferingIds)")
+                }
+            }
+        }
+    }
+
+    // MARK: - Offerings Management
+    private func ensureOfferingsLoaded() async {
+        if revenueCatManager.offerings == nil {
+            await revenueCatManager.loadOfferings()
+        }
+    }
+
+    // MARK: - Purchase Handling
+    private func restorePurchases() {
+        Task {
+            do {
+                let customerInfo = try await Purchases.shared.restorePurchases()
+                let hasActiveEntitlements = customerInfo.entitlements.active.count > 0
+                await revenueCatManager.forceRefreshCustomerInfo()
+
+                await MainActor.run {
+                    if hasActiveEntitlements {
+                        isDismissing = true // Prevent UI from showing "Manage Billing"
+                        isPresented = false
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                            NotificationCenter.default.post(name: .subscriptionSucceeded, object: nil)
+                        }
+                    } else {
+                        toastManager.showSubscriptionError(message: "No previous purchases found")
+                    }
+                }
+            } catch {
+                await MainActor.run {
+                    toastManager.showSubscriptionError(message: "Restore failed. Please try again.")
+                }
+            }
+        }
+    }
+
+    private func handleStartFreeTrial() {
+        print("🎫 ======= PROMO handleStartFreeTrial CALLED =======")
+        isPurchasing = true // Prevent "Manage Billing" flash during purchase
+        Task {
+            await ensureOfferingsLoaded()
+
+            guard let package = selectedPackage else {
+                print("🎫 PROMO PURCHASE: ❌ No package selected")
+                await MainActor.run {
+                    isDismissing = true
+                    isPresented = false
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                        NotificationCenter.default.post(
+                            name: .subscriptionFailed,
+                            object: nil,
+                            userInfo: ["errorMessage": "Subscription plans are not available. Please try again later."]
+                        )
+                    }
+                }
+                return
+            }
+
+            print("🎫 PROMO PURCHASE: Starting purchase for package: \(package.identifier)")
+            let result = await revenueCatManager.purchase(package: package)
+            print("🎫 PROMO PURCHASE: Result - success=\(result.success), error=\(result.error?.localizedDescription ?? "none")")
+
+            await MainActor.run {
+                if result.success {
+                    print("🎫 PROMO PURCHASE: ✅ SUCCESS - Setting isDismissing=true, isPresented=false")
+
+                    // Track subscription started
+                    AnalyticsManager.shared.track(.subscriptionStarted, properties: [
+                        "plan": selectedPlan == .yearly ? "yearly" : "monthly",
+                        "price": package.storeProduct.localizedPriceString,
+                        "source": "promo"
+                    ])
+
+                    // Dismiss paywall immediately and show success toast
+                    isDismissing = true // Prevent UI from showing "Manage Billing"
+                    isPresented = false
+                    print("🎫 PROMO PURCHASE: Posting subscriptionSucceeded notification in 0.3s...")
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                        print("🎫 PROMO PURCHASE: Posting subscriptionSucceeded notification NOW")
+                        NotificationCenter.default.post(name: .subscriptionSucceeded, object: nil)
+                    }
+                } else {
+                    if let error = result.error {
+                        let nsError = error as NSError
+
+                        // Check for user cancellation - don't show error dialog
+                        let isUserCancellation = (nsError.domain == "SKErrorDomain" && nsError.code == 2) ||
+                                                (nsError.domain == "RevenueCat.ErrorDomain" && nsError.code == 1) ||
+                                                (nsError.domain == "SKErrorDomain" && nsError.code == 19) ||
+                                                error.localizedDescription.lowercased().contains("cancel")
+
+                        if isUserCancellation {
+                            isPurchasing = false // Reset so user can try again
+                            return
+                        }
+
+                        // Show user-friendly error message
+                        let errorMessage: String
+                        if nsError.domain == "RevenueCat.ErrorDomain" && nsError.code == 10 {
+                            errorMessage = "Network error. Please check your connection and try again."
+                        } else {
+                            errorMessage = "Something went wrong with your subscription. Please try again later."
+                        }
+
+                        isDismissing = true // Prevent any UI state changes during dismissal
+                        isPresented = false
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                            NotificationCenter.default.post(
+                                name: .subscriptionFailed,
+                                object: nil,
+                                userInfo: ["errorMessage": errorMessage]
+                            )
+                        }
+                    } else {
+                        isPurchasing = false // Reset so user can try again
+                        return // No error object, likely user cancellation
+                    }
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Preview
+#Preview {
+    PromoPaywallSheet(isPresented: .constant(true))
+}

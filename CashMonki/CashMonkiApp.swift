@@ -35,23 +35,13 @@ struct CashMonkiApp: App {
     @StateObject private var authManager = AuthenticationManager.shared
     @StateObject private var toastManager = ToastManager()
     
-    @State private var sharedModelContainer: ModelContainer = {
-        // Create a minimal in-memory container for immediate startup
-        let schema = Schema([Item.self])
-        let memoryConfig = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
-        do {
-            return try ModelContainer(for: schema, configurations: [memoryConfig])
-        } catch {
-            fatalError("Could not create temporary ModelContainer: \(error)")
-        }
-    }()
-    
-    private func createPersistentModelContainer() -> ModelContainer {
-        let schema = Schema([
-            Item.self,
-        ])
-        let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
+    private var sharedModelContainer: ModelContainer = CashMonkiApp.createModelContainer()
 
+    /// Create ModelContainer as a static function to ensure consistent initialization
+    /// across all build configurations (Debug, Release, Archive)
+    private static func createModelContainer() -> ModelContainer {
+        let schema = Schema([Item.self])
+        let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
         do {
             return try ModelContainer(for: schema, configurations: [modelConfiguration])
         } catch {
@@ -192,15 +182,6 @@ struct CashMonkiApp: App {
                         print("✅ TestFlight build detected - skipping API key refresh")
                     }
                     
-                    // Switch to persistent storage asynchronously after startup
-                    DispatchQueue.global(qos: .background).async {
-                        let persistentContainer = createPersistentModelContainer()
-
-                        DispatchQueue.main.async {
-                            sharedModelContainer = persistentContainer
-                        }
-                    }
-
                     // Pre-initialize RevenueCat early so offerings are ready by the time paywall is needed
                     // This runs during welcome screen, giving plenty of time to load
                     print("💰 CashMonkiApp: Pre-initializing RevenueCat during welcome screen...")
@@ -219,6 +200,16 @@ struct CashMonkiApp: App {
                     #if DEBUG
                     AppFonts.debugAvailableFonts()
                     #endif
+
+                    // Clear notification badge on app launch
+                    NotificationManager.shared.clearBadge()
+
+                    // Schedule notifications if toggle is enabled (defaults to true if not set)
+                    // Using object(forKey:) to check if explicitly set, otherwise default to true
+                    let isRemindEnabled = UserDefaults.standard.object(forKey: "isRemindToTrackEnabled") as? Bool ?? true
+                    if isRemindEnabled {
+                        NotificationManager.shared.scheduleDailyReminder()
+                    }
                 }
                 .onChange(of: showingWelcome) { oldValue, newValue in
                     print("🎬 CashMonkiApp: Welcome screen state changed from \(oldValue) to \(newValue)")
@@ -228,6 +219,9 @@ struct CashMonkiApp: App {
                     if !newValue && oldValue {
                         print("🔥 CashMonkiApp: Welcome screen dismissed - initializing Firebase...")
                         initializeFirebase()
+
+                        // Check for app updates (shows native iOS alert if update required)
+                        AppUpdateManager.shared.checkForUpdate()
                     }
                 }
                 .onChange(of: authManager.isAuthenticated) { oldValue, isAuthenticated in

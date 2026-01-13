@@ -116,6 +116,7 @@ struct AddWalletSheet: View {
                 isPresented: $showingCurrencyPicker
             )
             .presentationDetents([.fraction(0.98)])
+            .presentationCornerRadius(20)
             .presentationDragIndicator(.hidden)
         }
         .onAppear {
@@ -134,7 +135,7 @@ struct AddWalletSheet: View {
                 .font(AppFonts.overusedGroteskMedium(size: 16))
                 .foregroundStyle(AppColors.foregroundSecondary)
 
-            HStack(spacing: 10) {
+            HStack(spacing: 8) {
                 yesNoChip(label: "Yes", isSelected: showBalance) {
                     showBalance = true
                 }

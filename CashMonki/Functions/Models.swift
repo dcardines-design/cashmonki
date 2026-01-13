@@ -1416,7 +1416,13 @@ struct UserData: Identifiable, Codable {
     
     // User preferences and settings
     var goals: String? // User's selected goals from onboarding (comma-separated)
-    var onboardingCompleted: Int // Numerical progression: 0=not started, 1=email done, 2=name done, 3=currency done, 4=goals done, 5=complete
+    var moneyStress: String? // User's selected money stress from onboarding
+    var overspentRealization: String? // When user realizes they've overspent
+    var trackingDifficulty: String? // What makes expense tracking hard for user
+    var idealOutcome: String? // What would change if app worked perfectly for user
+    var trackingFrequency: String? // How often user currently tracks spending
+    var trackingMethod: String? // How user currently tracks expenses
+    var onboardingCompleted: Int // Numerical progression: 0=not started, 1-4=value features, 5=name done, 6=currency done, 7=goals done, 8=stress done, 9=overspent done, 10=tracking done, 11=ideal done, 12=frequency done, 13=method done, 14=transaction done, 15=complete
     
     // Firebase sync preference - true by default for existing users
     var enableFirebaseSync: Bool
@@ -1431,6 +1437,12 @@ struct UserData: Identifiable, Codable {
         createdAt: Date = Date(),
         updatedAt: Date = Date(),
         goals: String? = nil,
+        moneyStress: String? = nil,
+        overspentRealization: String? = nil,
+        trackingDifficulty: String? = nil,
+        idealOutcome: String? = nil,
+        trackingFrequency: String? = nil,
+        trackingMethod: String? = nil,
         onboardingCompleted: Int = 0, // Default to not started - LOCAL ONLY, not synced to Firebase
         enableFirebaseSync: Bool = true // Default to enabled for new users
     ) {
@@ -1443,6 +1455,12 @@ struct UserData: Identifiable, Codable {
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.goals = goals
+        self.moneyStress = moneyStress
+        self.overspentRealization = overspentRealization
+        self.trackingDifficulty = trackingDifficulty
+        self.idealOutcome = idealOutcome
+        self.trackingFrequency = trackingFrequency
+        self.trackingMethod = trackingMethod
         self.onboardingCompleted = onboardingCompleted
         self.enableFirebaseSync = enableFirebaseSync
     }
@@ -1717,6 +1735,48 @@ enum BudgetPeriod: String, Codable, CaseIterable {
     }
 }
 
+// MARK: - Recurring Transaction Frequency
+
+/// Frequency options for recurring transactions
+enum RecurringFrequency: String, Codable, CaseIterable {
+    case fiveMinutes // For testing only (was 'minute', now 5 minutes)
+    case daily
+    case weekly
+    case monthly
+    case quarterly
+    case yearly
+
+    var displayName: String {
+        switch self {
+        case .fiveMinutes: return "Every 5 Minutes"
+        case .daily: return "Daily"
+        case .weekly: return "Weekly"
+        case .monthly: return "Monthly"
+        case .quarterly: return "Quarterly"
+        case .yearly: return "Yearly"
+        }
+    }
+
+    /// Calculate the next occurrence date from a given date
+    func nextOccurrence(from date: Date) -> Date {
+        let calendar = Calendar.current
+        switch self {
+        case .fiveMinutes:
+            return calendar.date(byAdding: .minute, value: 5, to: date) ?? date
+        case .daily:
+            return calendar.date(byAdding: .day, value: 1, to: date) ?? date
+        case .weekly:
+            return calendar.date(byAdding: .weekOfYear, value: 1, to: date) ?? date
+        case .monthly:
+            return calendar.date(byAdding: .month, value: 1, to: date) ?? date
+        case .quarterly:
+            return calendar.date(byAdding: .month, value: 3, to: date) ?? date
+        case .yearly:
+            return calendar.date(byAdding: .year, value: 1, to: date) ?? date
+        }
+    }
+}
+
 // MARK: - Receipt Item Model
 
 struct ReceiptItem: Equatable, Hashable, Codable {
@@ -1773,7 +1833,17 @@ struct Txn: Identifiable, Equatable, Hashable, Codable {
     var syncStatus: RecordSyncStatus // Current sync status (defaults to localOnly)
     var isLocalOnly: Bool // Privacy flag - true = never sync, false = may sync if user enables
     var syncPriority: SyncPriority // Priority for when sync is enabled
-    
+
+    // MARK: - Recurring Transaction Fields
+    let isRecurring: Bool // Whether this is a recurring transaction template
+    let recurringFrequency: RecurringFrequency? // Frequency of recurrence
+    let recurringTemplateId: UUID? // For generated txns: links back to parent template
+    let lastGeneratedDate: Date? // For templates: when last auto-generation occurred
+    let isRecurringActive: Bool // Whether recurring is currently active (can be paused)
+
+    // MARK: - Subscription Link
+    let subscriptionId: UUID? // Links to parent Subscription if auto-generated
+
     init(
         txID: UUID = UUID(),
         accountID: UUID,
@@ -1805,7 +1875,15 @@ struct Txn: Identifiable, Equatable, Hashable, Codable {
         syncMetadata: SyncMetadata? = nil,
         syncStatus: RecordSyncStatus = .localOnly,
         isLocalOnly: Bool = true, // Privacy-first: local only by default
-        syncPriority: SyncPriority = .high // Important financial data gets high priority when sync is enabled
+        syncPriority: SyncPriority = .high, // Important financial data gets high priority when sync is enabled
+        // Recurring transaction parameters
+        isRecurring: Bool = false,
+        recurringFrequency: RecurringFrequency? = nil,
+        recurringTemplateId: UUID? = nil,
+        lastGeneratedDate: Date? = nil,
+        isRecurringActive: Bool = false,
+        // Subscription link
+        subscriptionId: UUID? = nil
     ) {
         self.txID = txID
         self.accountID = accountID
@@ -1839,7 +1917,17 @@ struct Txn: Identifiable, Equatable, Hashable, Codable {
         self.syncStatus = syncStatus
         self.isLocalOnly = isLocalOnly
         self.syncPriority = syncPriority
-        
+
+        // Initialize recurring transaction fields
+        self.isRecurring = isRecurring
+        self.recurringFrequency = recurringFrequency
+        self.recurringTemplateId = recurringTemplateId
+        self.lastGeneratedDate = lastGeneratedDate
+        self.isRecurringActive = isRecurringActive
+
+        // Initialize subscription link
+        self.subscriptionId = subscriptionId
+
         // Store receipt image in cache if provided
         if let image = receiptImage {
             ImageCacheManager.shared.storeReceiptImage(image, for: txID)
@@ -1877,7 +1965,13 @@ struct Txn: Identifiable, Equatable, Hashable, Codable {
         syncMetadata: SyncMetadata? = nil,
         syncStatus: RecordSyncStatus = .localOnly,
         isLocalOnly: Bool = true,
-        syncPriority: SyncPriority = .high
+        syncPriority: SyncPriority = .high,
+        // Recurring transaction parameters
+        isRecurring: Bool = false,
+        recurringFrequency: RecurringFrequency? = nil,
+        recurringTemplateId: UUID? = nil,
+        lastGeneratedDate: Date? = nil,
+        isRecurringActive: Bool = false
     ) {
         self.init(
             txID: id,
@@ -1907,7 +2001,13 @@ struct Txn: Identifiable, Equatable, Hashable, Codable {
             syncMetadata: syncMetadata,
             syncStatus: syncStatus,
             isLocalOnly: isLocalOnly,
-            syncPriority: syncPriority
+            syncPriority: syncPriority,
+            // Pass through recurring parameters
+            isRecurring: isRecurring,
+            recurringFrequency: recurringFrequency,
+            recurringTemplateId: recurringTemplateId,
+            lastGeneratedDate: lastGeneratedDate,
+            isRecurringActive: isRecurringActive
         )
     }
     
@@ -1926,6 +2026,10 @@ struct Txn: Identifiable, Equatable, Hashable, Codable {
         case userEnteredAmount, userEnteredCurrency
         // Privacy-first sync infrastructure fields
         case syncMetadata, syncStatus, isLocalOnly, syncPriority
+        // Recurring transaction fields
+        case isRecurring, recurringFrequency, recurringTemplateId, lastGeneratedDate, isRecurringActive
+        // Subscription link
+        case subscriptionId
         // Note: receiptImage is excluded as UIImage is not Codable
     }
     
@@ -1967,8 +2071,18 @@ struct Txn: Identifiable, Equatable, Hashable, Codable {
         syncStatus = try container.decodeIfPresent(RecordSyncStatus.self, forKey: .syncStatus) ?? .localOnly
         isLocalOnly = try container.decodeIfPresent(Bool.self, forKey: .isLocalOnly) ?? true // Privacy-first default
         syncPriority = try container.decodeIfPresent(SyncPriority.self, forKey: .syncPriority) ?? .high
+
+        // Recurring transaction fields (with backward compatibility)
+        isRecurring = try container.decodeIfPresent(Bool.self, forKey: .isRecurring) ?? false
+        recurringFrequency = try container.decodeIfPresent(RecurringFrequency.self, forKey: .recurringFrequency)
+        recurringTemplateId = try container.decodeIfPresent(UUID.self, forKey: .recurringTemplateId)
+        lastGeneratedDate = try container.decodeIfPresent(Date.self, forKey: .lastGeneratedDate)
+        isRecurringActive = try container.decodeIfPresent(Bool.self, forKey: .isRecurringActive) ?? false
+
+        // Subscription link
+        subscriptionId = try container.decodeIfPresent(UUID.self, forKey: .subscriptionId)
     }
-    
+
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         
@@ -2006,8 +2120,16 @@ struct Txn: Identifiable, Equatable, Hashable, Codable {
         try container.encode(syncStatus, forKey: .syncStatus)
         try container.encode(isLocalOnly, forKey: .isLocalOnly)
         try container.encode(syncPriority, forKey: .syncPriority)
+
+        // Recurring transaction fields
+        try container.encode(isRecurring, forKey: .isRecurring)
+        try container.encodeIfPresent(recurringFrequency, forKey: .recurringFrequency)
+        try container.encodeIfPresent(recurringTemplateId, forKey: .recurringTemplateId)
+        try container.encodeIfPresent(lastGeneratedDate, forKey: .lastGeneratedDate)
+        try container.encode(isRecurringActive, forKey: .isRecurringActive)
+        try container.encodeIfPresent(subscriptionId, forKey: .subscriptionId)
     }
-    
+
     // MARK: - Image Cache Integration
     
     /// Load receipt image from cache (async)
@@ -2103,8 +2225,13 @@ struct Txn: Identifiable, Equatable, Hashable, Codable {
                // Privacy-first sync infrastructure
                lhs.syncStatus == rhs.syncStatus &&
                lhs.isLocalOnly == rhs.isLocalOnly &&
-               lhs.syncPriority == rhs.syncPriority
-        // Note: receiptImage excluded (UIImage not Equatable), syncMetadata excluded (contains Dates that change frequently)
+               lhs.syncPriority == rhs.syncPriority &&
+               // Recurring transaction fields
+               lhs.isRecurring == rhs.isRecurring &&
+               lhs.recurringFrequency == rhs.recurringFrequency &&
+               lhs.recurringTemplateId == rhs.recurringTemplateId &&
+               lhs.isRecurringActive == rhs.isRecurringActive
+        // Note: receiptImage excluded (UIImage not Equatable), syncMetadata and lastGeneratedDate excluded (change frequently)
     }
     
     // Custom Hashable implementation (UIImage doesn't conform to Hashable)
@@ -2134,7 +2261,12 @@ struct Txn: Identifiable, Equatable, Hashable, Codable {
         hasher.combine(syncStatus)
         hasher.combine(isLocalOnly)
         hasher.combine(syncPriority)
-        // Note: receiptImage and syncMetadata excluded (not hashable or change frequently)
+        // Recurring transaction fields
+        hasher.combine(isRecurring)
+        hasher.combine(recurringFrequency)
+        hasher.combine(recurringTemplateId)
+        hasher.combine(isRecurringActive)
+        // Note: receiptImage, syncMetadata, and lastGeneratedDate excluded (not hashable or change frequently)
     }
     
     // MARK: - Privacy-First Sync Methods
