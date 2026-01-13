@@ -87,6 +87,12 @@ class SubscriptionManager: ObservableObject {
     func addSubscription(_ subscription: Subscription) {
         var newSubscription = subscription
 
+        // Ensure walletId is set (use current wallet if not provided)
+        if newSubscription.walletId == nil {
+            newSubscription.walletId = AccountManager.shared.selectedSubAccountId ?? AccountManager.shared.currentSubAccount?.id
+            print("📋 SubscriptionManager: Set walletId to \(newSubscription.walletId?.uuidString.prefix(8) ?? "nil")")
+        }
+
         // If auto-add is enabled, create the first transaction immediately at creation time
         if subscription.autoAddTransaction && subscription.isActive {
             // Create first transaction at the subscription's start date (createdAt)
@@ -162,6 +168,61 @@ class SubscriptionManager: ObservableObject {
     /// Call this on app launch and when app becomes active
     func processSubscriptions() {
         print("🔄 SubscriptionManager: Processing subscriptions...")
+
+        // Migrate subscriptions with nil walletId
+        var needsSave = false
+        let defaultWalletId = AccountManager.shared.selectedSubAccountId ?? AccountManager.shared.currentSubAccount?.id
+
+        for index in subscriptions.indices {
+            if subscriptions[index].walletId == nil {
+                subscriptions[index].walletId = defaultWalletId
+                print("📋 SubscriptionManager: Migrated '\(subscriptions[index].name)' walletId to \(subscriptions[index].walletId?.uuidString.prefix(8) ?? "nil")")
+                needsSave = true
+            }
+        }
+        if needsSave {
+            saveSubscriptions()
+        }
+
+        // Also migrate existing transactions with subscriptionId but nil walletID
+        if let walletId = defaultWalletId {
+            let transactionsToFix = UserManager.shared.currentUser.transactions.filter {
+                $0.subscriptionId != nil && $0.walletID == nil
+            }
+            for txn in transactionsToFix {
+                // Create new Txn with fixed walletID (walletID is immutable)
+                let fixedTxn = Txn(
+                    txID: txn.txID,
+                    accountID: txn.accountID,
+                    walletID: walletId,
+                    category: txn.category,
+                    categoryId: txn.categoryId,
+                    amount: txn.amount,
+                    date: txn.date,
+                    createdAt: txn.createdAt,
+                    receiptImage: nil,
+                    hasReceiptImage: txn.hasReceiptImage,
+                    merchantName: txn.merchantName,
+                    paymentMethod: txn.paymentMethod,
+                    receiptNumber: txn.receiptNumber,
+                    invoiceNumber: txn.invoiceNumber,
+                    items: txn.items,
+                    note: txn.note,
+                    originalAmount: txn.originalAmount,
+                    originalCurrency: txn.originalCurrency,
+                    primaryCurrency: txn.primaryCurrency,
+                    secondaryCurrency: txn.secondaryCurrency,
+                    exchangeRate: txn.exchangeRate,
+                    secondaryAmount: txn.secondaryAmount,
+                    secondaryExchangeRate: txn.secondaryExchangeRate,
+                    userEnteredAmount: txn.userEnteredAmount,
+                    userEnteredCurrency: txn.userEnteredCurrency,
+                    subscriptionId: txn.subscriptionId
+                )
+                UserManager.shared.updateTransaction(fixedTxn)
+                print("📋 SubscriptionManager: Fixed transaction walletID for '\(txn.merchantName ?? txn.category)'")
+            }
+        }
 
         var generatedCount = 0
 

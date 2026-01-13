@@ -186,10 +186,13 @@ extension Subscription {
         // Amount sign based on category type (income = positive, expense = negative)
         let finalAmount = isIncomeCategory ? abs(amount) : -abs(amount)
 
+        // Use subscription's walletId, or fall back to currently selected wallet
+        let effectiveWalletId = walletId ?? AccountManager.shared.selectedSubAccountId ?? AccountManager.shared.currentSubAccount?.id
+
         return Txn(
             txID: UUID(),
             accountID: accountId,
-            walletID: walletId,
+            walletID: effectiveWalletId,
             category: category,
             categoryId: categoryId,
             amount: finalAmount,
