@@ -95,13 +95,17 @@ class SubscriptionManager: ObservableObject {
 
         // If auto-add is enabled, create the first transaction immediately at creation time
         if subscription.autoAddTransaction && subscription.isActive {
+            // Determine if this subscription's category is income type
+            let isIncomeCategory = determineIsIncomeCategory(for: newSubscription)
+
             // Create first transaction at the subscription's start date (createdAt)
             let firstTransaction = newSubscription.createTransaction(
                 accountId: UserManager.shared.currentUser.id,
-                forDate: subscription.createdAt  // Use creation date for first transaction
+                forDate: subscription.createdAt,  // Use creation date for first transaction
+                isIncomeCategory: isIncomeCategory
             )
             UserManager.shared.addTransaction(firstTransaction)
-            print("💰 SubscriptionManager: Created first transaction for '\(subscription.name)' at \(subscription.createdAt)")
+            print("💰 SubscriptionManager: Created first transaction for '\(subscription.name)' at \(subscription.createdAt), isIncome=\(isIncomeCategory)")
 
             // Update subscription state
             newSubscription.lastGeneratedDate = subscription.createdAt
