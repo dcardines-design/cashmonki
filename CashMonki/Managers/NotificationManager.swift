@@ -304,8 +304,8 @@ class NotificationManager: NSObject, ObservableObject, UNUserNotificationCenterD
 
     // MARK: - Subscription Reminders
 
-    /// Friendly subscription reminder messages (title uses {name} placeholder)
-    private let subscriptionReminderMessages: [(title: String, body: String)] = [
+    /// Expense reminder messages (title uses {name} placeholder)
+    private let expenseReminderMessages: [(title: String, body: String)] = [
         ("💸 {name} is coming up", "Your payment is due soon. Ready for it?"),
         ("📅 Heads up: {name}", "Subscription charge incoming soon."),
         ("🔔 {name} reminder", "Payment coming up. Make sure you're covered."),
@@ -318,17 +318,33 @@ class NotificationManager: NSObject, ObservableObject, UNUserNotificationCenterD
         ("✨ {name} is almost due", "Just a friendly nudge about your payment.")
     ]
 
+    /// Income reminder messages (title uses {name} placeholder)
+    private let incomeReminderMessages: [(title: String, body: String)] = [
+        ("💰 {name} incoming!", "Money coming your way soon. Nice!"),
+        ("🎉 {name} is coming up", "Get ready for your incoming payment!"),
+        ("✨ Payday alert: {name}", "Your recurring income is almost here."),
+        ("📥 {name} on the way", "Incoming funds approaching. Sweet!"),
+        ("🤑 {name} reminder", "Money is headed your way soon."),
+        ("💵 {name} incoming", "Your regular income is coming up!"),
+        ("🏦 Heads up: {name}", "Expecting payment soon. Cha-ching!"),
+        ("📈 {name} due soon", "Income alert! Payment incoming."),
+        ("💸 {name} approaching", "Good news: money coming your way!"),
+        ("🎊 {name} almost here", "Your recurring income is on its way.")
+    ]
+
     /// Schedule a reminder notification for a subscription
     /// - Parameters:
     ///   - subscriptionId: Unique ID for this subscription
     ///   - subscriptionName: Name to show in notification (e.g., "Netflix")
     ///   - dueDate: When the subscription payment is due
     ///   - reminderInterval: How far before the due date to remind (in seconds)
+    ///   - isIncome: Whether this is an income category (affects message tone)
     func scheduleSubscriptionReminder(
         subscriptionId: UUID,
         subscriptionName: String,
         dueDate: Date,
-        reminderInterval: TimeInterval
+        reminderInterval: TimeInterval,
+        isIncome: Bool = false
     ) {
         // Check permission directly (not cached value) and schedule
         notificationCenter.getNotificationSettings { [weak self] settings in
@@ -348,8 +364,9 @@ class NotificationManager: NSObject, ObservableObject, UNUserNotificationCenterD
                 return
             }
 
-            // Pick a random message and replace placeholder
-            var message = self.subscriptionReminderMessages.randomElement() ?? self.subscriptionReminderMessages[0]
+            // Pick a random message based on income/expense type and replace placeholder
+            let messages = isIncome ? self.incomeReminderMessages : self.expenseReminderMessages
+            var message = messages.randomElement() ?? messages[0]
             message.title = message.title.replacingOccurrences(of: "{name}", with: subscriptionName)
 
             // Create notification content

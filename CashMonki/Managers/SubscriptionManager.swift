@@ -320,13 +320,17 @@ class SubscriptionManager: ObservableObject {
             let reminderDays = ReminderDays(rawValue: subscription.reminderDaysBefore) ?? .one
             let reminderInterval = reminderDays.timeIntervalBeforeDue
 
-            print("🔔 SubscriptionManager: Scheduling '\(subscription.name)' - interval=\(reminderInterval)s, nextDue=\(subscription.nextDueDate)")
+            // Determine if this subscription's category is income type
+            let isIncome = determineIsIncomeCategory(for: subscription)
+
+            print("🔔 SubscriptionManager: Scheduling '\(subscription.name)' - interval=\(reminderInterval)s, nextDue=\(subscription.nextDueDate), isIncome=\(isIncome)")
 
             NotificationManager.shared.scheduleSubscriptionReminder(
                 subscriptionId: subscription.id,
                 subscriptionName: subscription.name,
                 dueDate: subscription.nextDueDate,
-                reminderInterval: reminderInterval
+                reminderInterval: reminderInterval,
+                isIncome: isIncome
             )
         }
 
