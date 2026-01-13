@@ -171,6 +171,10 @@ struct EditTransactionSheet: View {
                         transactionAmount: Double(amount.replacingOccurrences(of: ",", with: "")) ?? 0
                     )
 
+                    // Category Suggestions (recent/frequent)
+                    CategorySuggestionChips(selectedCategoryId: $selectedCategoryId)
+                        .padding(.top, -12)
+
                     // Date field with Time using AppInputField
                     AppInputField.date(title: "Date", dateValue: $selectedDate, components: [.date, .hourAndMinute], size: .md, maxDate: Date())
 

@@ -453,7 +453,7 @@ struct RecurringDetailSheet: View {
                         } label: {
                             timelineRow(
                                 name: txn.merchantName ?? subscription.name,
-                                subtitle: "Charged \(formatShortDateWithTime(txn.date))",
+                                subtitle: "Added \(formatShortDateWithTime(txn.date))",
                                 isPast: true,
                                 transaction: txn
                             )
@@ -547,7 +547,7 @@ struct RecurringDetailSheet: View {
             // Amount
             VStack(alignment: .trailing, spacing: 2) {
                 Text("\(currencyPrefs.primarySymbol)\(formatCurrencyAmount(displayAmount))")
-                    .font(AppFonts.overusedGroteskMedium(size: 20))
+                    .font(AppFonts.overusedGroteskMedium(size: 16))
                     .foregroundColor(isPast ? (displayIsIncome ? AppColors.successForeground : AppColors.destructiveForeground) : AppColors.foregroundSecondary)
 
                 // Secondary amount if different currency

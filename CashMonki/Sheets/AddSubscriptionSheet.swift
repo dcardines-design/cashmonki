@@ -212,8 +212,7 @@ struct AddSubscriptionSheet: View {
                 .font(AppFonts.overusedGroteskMedium(size: 16))
                 .foregroundColor(AppColors.foregroundSecondary)
 
-            // First row: Daily, Weekly, Monthly, Quarterly
-            HStack(spacing: 8) {
+            FlowLayout(spacing: 8) {
                 selectionChip(label: "Daily", isSelected: frequency == .daily) {
                     frequency = .daily
                 }
@@ -226,10 +225,6 @@ struct AddSubscriptionSheet: View {
                 selectionChip(label: "Quarterly", isSelected: frequency == .quarterly) {
                     frequency = .quarterly
                 }
-            }
-
-            // Second row: Yearly, 5 Minutes (for testing)
-            HStack(spacing: 8) {
                 selectionChip(label: "Yearly", isSelected: frequency == .yearly) {
                     frequency = .yearly
                 }
@@ -267,9 +262,17 @@ struct AddSubscriptionSheet: View {
 
     private var reminderSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Remind before charge?")
-                .font(AppFonts.overusedGroteskMedium(size: 16))
-                .foregroundColor(AppColors.foregroundSecondary)
+            HStack {
+                Text("Remind before charge?")
+                    .font(AppFonts.overusedGroteskMedium(size: 16))
+                    .foregroundColor(AppColors.foregroundSecondary)
+
+                if !notificationManager.isAuthorized {
+                    Text("(Your notifications are off)")
+                        .font(AppFonts.overusedGroteskMedium(size: 12))
+                        .foregroundColor(AppColors.foregroundTertiary)
+                }
+            }
 
             HStack(spacing: 8) {
                 selectionChip(label: "Yes", isSelected: reminderEnabled) {
@@ -285,12 +288,17 @@ struct AddSubscriptionSheet: View {
                         }
                     }
                 }
+                .opacity(notificationManager.isAuthorized ? 1.0 : 0.5)
+
                 selectionChip(label: "No", isSelected: !reminderEnabled) {
                     reminderEnabled = false
                 }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .onAppear {
+            notificationManager.refreshPermissionStatus()
+        }
     }
 
     // MARK: - Reminder Days Section
@@ -301,7 +309,7 @@ struct AddSubscriptionSheet: View {
                 .font(AppFonts.overusedGroteskMedium(size: 16))
                 .foregroundColor(AppColors.foregroundSecondary)
 
-            HStack(spacing: 8) {
+            FlowLayout(spacing: 8) {
                 selectionChip(label: "5 sec", isSelected: reminderDays == .testSeconds) {
                     reminderDays = .testSeconds
                 }

@@ -103,8 +103,7 @@ struct RecurringSubscriptionCard: View {
                             .font(AppFonts.overusedGroteskMedium(size: 14))
                             .foregroundColor(AppColors.foregroundSecondary)
 
-                        // First row: Daily, Weekly, Monthly
-                        HStack(spacing: 8) {
+                        FlowLayout(spacing: 8) {
                             TabChip(title: "Daily", isSelected: frequency == .daily) {
                                 frequency = .daily
                             }
@@ -114,10 +113,6 @@ struct RecurringSubscriptionCard: View {
                             TabChip(title: "Monthly", isSelected: frequency == .monthly) {
                                 frequency = .monthly
                             }
-                        }
-
-                        // Second row: Quarterly, Yearly
-                        HStack(spacing: 8) {
                             TabChip(title: "Quarterly", isSelected: frequency == .quarterly) {
                                 frequency = .quarterly
                             }
@@ -135,7 +130,7 @@ struct RecurringSubscriptionCard: View {
                                 .foregroundColor(AppColors.foregroundSecondary)
 
                             if !notificationManager.isAuthorized {
-                                Text("(Notifications off)")
+                                Text("(Your notifications are off)")
                                     .font(AppFonts.overusedGroteskMedium(size: 12))
                                     .foregroundColor(AppColors.foregroundTertiary)
                             }
@@ -175,7 +170,7 @@ struct RecurringSubscriptionCard: View {
                                 .font(AppFonts.overusedGroteskMedium(size: 14))
                                 .foregroundColor(AppColors.foregroundSecondary)
 
-                            HStack(spacing: 8) {
+                            FlowLayout(spacing: 8) {
                                 ForEach(ReminderDays.allCases, id: \.rawValue) { option in
                                     TabChip(title: option.displayName, isSelected: reminderDays == option) {
                                         reminderDays = option

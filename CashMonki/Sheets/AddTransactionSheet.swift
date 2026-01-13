@@ -64,6 +64,10 @@ struct AddTransactionSheet: View {
                     // Category Field
                     AppInputField.categoryById(selectedCategoryId: $selectedCategoryId, size: .md)
 
+                    // Category Suggestions (recent/frequent)
+                    CategorySuggestionChips(selectedCategoryId: $selectedCategoryId)
+                        .padding(.top, -12)
+
                     // Date Field with Time
                     AppInputField.date(title: "Date", dateValue: $date, components: [.date, .hourAndMinute], size: .md, maxDate: Date())
 

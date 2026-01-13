@@ -246,7 +246,22 @@ struct ReceiptDetailSheet: View {
                         
                         // Note row - only show if note exists and is not empty
                         if transactionState.shouldShowNote {
-                            horizontalDetailRow(title: "Note", value: displayNote(transactionState.transaction.note))
+                            GeometryReader { geometry in
+                                HStack(alignment: .top) {
+                                    Text("Note")
+                                        .font(AppFonts.overusedGroteskMedium(size: 16))
+                                        .foregroundColor(AppColors.foregroundSecondary)
+
+                                    Spacer()
+
+                                    Text(displayNote(transactionState.transaction.note))
+                                        .font(AppFonts.overusedGroteskMedium(size: 16))
+                                        .foregroundColor(AppColors.foregroundPrimary)
+                                        .multilineTextAlignment(.trailing)
+                                        .frame(maxWidth: geometry.size.width * 0.6, alignment: .trailing)
+                                }
+                            }
+                            .frame(height: 44)
                         }
 
                         // Repeats row and subscription card - only show if from a subscription

@@ -1254,7 +1254,38 @@ struct SettingsPage: View {
                 }
                 .clipShape(RoundedRectangle(cornerRadius: 5))
             }
-            
+
+            // Subscriptions section
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text("🔄 Subscriptions")
+                        .font(Font.custom("Overused Grotesk", size: 16).weight(.medium))
+                        .foregroundColor(AppColors.foregroundPrimary)
+
+                    Spacer()
+
+                    Text(revenueCatManager.isProUser ? "Track away" : "\(SubscriptionManager.shared.subscriptions.count)/2 subscriptions")
+                        .font(Font.custom("Overused Grotesk", size: 16).weight(.medium))
+                        .foregroundColor(AppColors.foregroundSecondary)
+                }
+
+                ZStack(alignment: .leading) {
+                    // Background bar
+                    Rectangle()
+                        .fill(AppColors.surfacePrimary)
+                        .frame(height: 10)
+
+                    // Fill bar
+                    Rectangle()
+                        .fill(revenueCatManager.isProUser ? AppColors.successForeground : Color(red: 0x4C/255.0, green: 0x3B/255.0, blue: 0xF5/255.0))
+                        .frame(width: .infinity, height: 10)
+                        .scaleEffect(x: revenueCatManager.isProUser ? 1.0 : Double(SubscriptionManager.shared.subscriptions.count)/2.0, anchor: .leading)
+                        .opacity(revenueCatManager.isProUser ? 0.9 : 1.0)
+                        .animation(.easeInOut(duration: 0.5), value: revenueCatManager.isProUser)
+                }
+                .clipShape(RoundedRectangle(cornerRadius: 5))
+            }
+
                 // Get Cashmonki Pro button / Manage Billing for pro users
                 AppButton.secondary(revenueCatManager.isProUser ? "Manage Billing" : "Get Cashmonki Pro ⭐", size: .extraSmall) {
                     if revenueCatManager.isProUser {
