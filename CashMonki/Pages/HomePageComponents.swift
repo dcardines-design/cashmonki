@@ -119,6 +119,37 @@ extension HomePage {
         .frame(maxWidth: .infinity)
     }
     
+    /// Dark promo card below the action tiles that opens the feedback board.
+    internal var feedbackPromoCard: some View {
+        Button {
+            showingFeedbackBoard = true
+        } label: {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Got feedback?")
+                    .font(AppFonts.overusedGroteskSemiBold(size: 16))
+                    .foregroundColor(.white)
+                Text("Let us know and we’ll try our best to fix it!")
+                    .font(AppFonts.overusedGroteskMedium(size: 12))
+                    .foregroundColor(Color(red: 0.66, green: 0.66, blue: 0.66))
+            }
+            .padding(.leading, 18)
+            .padding(.trailing, 20)
+            .padding(.top, 12)
+            .padding(.bottom, 16)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+            .background(
+                ZStack(alignment: .trailing) {
+                    Color(red: 0.15, green: 0.15, blue: 0.15)
+                    Image("feedback-card-art")
+                        .resizable()
+                        .scaledToFit()
+                }
+            )
+            .cornerRadius(10)
+        }
+        .buttonStyle(PlainButtonStyle())
+    }
+
     internal var actionTiles: some View {
         HStack(alignment: .top, spacing: 10) {
             BigTile.icon(
@@ -268,15 +299,45 @@ extension HomePage {
                         .foregroundColor(AppColors.foregroundSecondary)
                 }
 
-                // 2-column grid for subscription cards
+                // Horizontally paged carousel — each page is a 2×2 grid of up to 4 cards
                 if !subscriptions.isEmpty {
-                    LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
-                        ForEach(Array(subscriptions.prefix(5))) { subscription in
-                            SubscriptionCard(subscription: subscription) {
-                                print("📋 Subscription tapped: \(subscription.name)")
-                                selectedSubscriptionForDetail = subscription
+                    let pages = subscriptions.chunked(into: 4)
+
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        // Top-aligned so partial pages (1-3 tiles) hug the top-left
+                        LazyHStack(alignment: .top, spacing: 12) {
+                            ForEach(Array(pages.enumerated()), id: \.offset) { index, page in
+                                subscriptionPageGrid(page)
+                                    .containerRelativeFrame(.horizontal, count: 1, span: 1, spacing: 12)
+                                    .id(index)
                             }
                         }
+                        .scrollTargetLayout()
+                    }
+                    .contentMargins(.horizontal, 20, for: .scrollContent)
+                    .scrollTargetBehavior(.paging)
+                    .scrollPosition(id: $currentSubscriptionPage, anchor: .leading)
+                    .scrollDisabled(pages.count <= 1)
+                    .padding(.horizontal, -20) // bleed out of parent's 20pt padding so pages peek to the screen edge
+                    .onChange(of: pages.count) { _, newCount in
+                        // Keep the current page (and dots) valid if the list shrinks.
+                        if let page = currentSubscriptionPage, page >= newCount {
+                            currentSubscriptionPage = max(0, newCount - 1)
+                        }
+                    }
+
+                    // Page-indicator dots (only when there's more than one page)
+                    if pages.count > 1 {
+                        HStack(spacing: 6) {
+                            ForEach(0..<pages.count, id: \.self) { index in
+                                Circle()
+                                    .fill((currentSubscriptionPage ?? 0) == index ? AppColors.foregroundPrimary : AppColors.foregroundTertiary.opacity(0.4))
+                                    .frame(width: 6, height: 6)
+                            }
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.top, 2)
+                        .animation(.easeInOut(duration: 0.2), value: currentSubscriptionPage)
                     }
                 }
 
@@ -289,6 +350,19 @@ extension HomePage {
                         // Show paywall for free users who have reached the limit
                         showingCustomPaywall = true
                     }
+                }
+            }
+        }
+    }
+
+    /// A single carousel page: a 2×2 grid of up to 4 subscription cards.
+    @ViewBuilder
+    internal func subscriptionPageGrid(_ subscriptions: [Subscription]) -> some View {
+        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
+            ForEach(subscriptions) { subscription in
+                SubscriptionCard(subscription: subscription) {
+                    print("📋 Subscription tapped: \(subscription.name)")
+                    selectedSubscriptionForDetail = subscription
                 }
             }
         }

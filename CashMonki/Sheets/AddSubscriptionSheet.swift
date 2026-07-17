@@ -228,9 +228,6 @@ struct AddSubscriptionSheet: View {
                 selectionChip(label: "Yearly", isSelected: frequency == .yearly) {
                     frequency = .yearly
                 }
-                selectionChip(label: "5 Min", isSelected: frequency == .fiveMinutes) {
-                    frequency = .fiveMinutes
-                }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -310,9 +307,6 @@ struct AddSubscriptionSheet: View {
                 .foregroundColor(AppColors.foregroundSecondary)
 
             FlowLayout(spacing: 8) {
-                selectionChip(label: "5 sec", isSelected: reminderDays == .testSeconds) {
-                    reminderDays = .testSeconds
-                }
                 selectionChip(label: "12 hrs", isSelected: reminderDays == .twelveHours) {
                     reminderDays = .twelveHours
                 }
@@ -357,8 +351,6 @@ struct AddSubscriptionSheet: View {
     private func calculateNextDueDate(from startDate: Date) -> Date {
         let calendar = Calendar.current
         switch frequency {
-        case .fiveMinutes:
-            return calendar.date(byAdding: .minute, value: 5, to: startDate) ?? startDate
         case .daily:
             return calendar.date(byAdding: .day, value: 1, to: startDate) ?? startDate
         case .weekly:

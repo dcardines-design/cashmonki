@@ -127,7 +127,6 @@ struct RecurringTimelineSection: View {
         }
 
         switch frequency {
-        case .fiveMinutes: return "Every 5 Minutes"
         case .daily: return "Daily"
         case .weekly: return "Weekly"
         case .monthly: return "Every Month"
@@ -228,11 +227,8 @@ private struct TimelineEntryRow: View {
         return formatter.string(from: NSNumber(value: abs(amount))) ?? String(format: "%.0f", abs(amount))
     }
 
-    /// Get formatted date string - includes time for 5-minute frequency
+    /// Get formatted date string
     private func formattedDate(_ date: Date) -> String {
-        if frequency == .fiveMinutes {
-            return dateTimeFormatter.string(from: date)
-        }
         return dateFormatter.string(from: date)
     }
 

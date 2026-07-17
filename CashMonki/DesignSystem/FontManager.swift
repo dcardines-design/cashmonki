@@ -55,6 +55,19 @@ struct AppFonts {
     }
     // MARK: - Overused Grotesk Font Family with Fallbacks
     
+    static func overusedGroteskRegular(size: CGFloat) -> Font {
+        let fontNames = ["OverusedGrotesk-Regular", "Overused Grotesk Regular", "Overused Grotesk"]
+
+        for fontName in fontNames {
+            if UIFont(name: fontName, size: size) != nil {
+                return Font.custom(fontName, size: size)
+            }
+        }
+
+        print("❌ Overused Grotesk Regular not found, using system fallback")
+        return Font.system(size: size, weight: .regular, design: .default)
+    }
+
     static func overusedGroteskMedium(size: CGFloat) -> Font {
         let fontNames = ["OverusedGrotesk-Medium", "Overused Grotesk Medium"]
         

@@ -62,7 +62,9 @@ struct HomePage: View {
     @State internal var showingCustomPaywall: Bool = false
     @State internal var showingCameraPermissionAlert: Bool = false
     @State internal var showingAddSubscription: Bool = false
+    @State internal var showingFeedbackBoard: Bool = false
     @State internal var selectedSubscriptionForDetail: Subscription?
+    @State internal var currentSubscriptionPage: Int? = 0
 
     // Note: Roast feature state moved to ContentView for global availability
 
@@ -358,6 +360,9 @@ struct HomePage: View {
             .fullScreenCover(isPresented: $showingCustomPaywall) {
                 CustomPaywallSheet(isPresented: $showingCustomPaywall)
             }
+            .slideInSheet(isPresented: $showingFeedbackBoard) {
+                FeedbackInboxSheet(isPresented: $showingFeedbackBoard)
+            }
             .sheet(isPresented: $showingAddSubscription) {
                 AddSubscriptionSheet(isPresented: $showingAddSubscription) { subscription in
                     print("📋 HomePage: New subscription added: \(subscription.name)")
@@ -409,6 +414,7 @@ struct HomePage: View {
             styledLineChart
             combinedTabSelectors
             actionTiles
+            feedbackPromoCard
             recentTransactionsSection
             recurringTransactionsSection
         }

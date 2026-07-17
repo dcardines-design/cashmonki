@@ -728,7 +728,15 @@ class OnboardingStateManager: ObservableObject {
     func markAsComplete() {
         print("🎉 OnboardingStateManager: Marking onboarding as COMPLETE")
         updateState(to: .completed(completedAt: Date()))
-        
+
+        // CRITICAL: the onboarding gate (isOnboardingComplete) reads the NUMERIC progress
+        // (currentUser.onboardingCompleted >= 16), NOT the state/flags below. Without bumping the
+        // number here, finishing onboarding set state=.completed but left the number at 15, so the
+        // gate stayed false and the last onboarding step + paywall reappeared on every launch.
+        if UserManager.shared.currentUser.onboardingCompleted < 16 {
+            UserManager.shared.updateOnboardingProgress(16)
+        }
+
         // Also set legacy flags for backward compatibility
         UserDefaults.standard.set(true, forKey: "hasCompletedOnboarding")
         UserDefaults.standard.set(true, forKey: "hasCompletedCurrencySelection")

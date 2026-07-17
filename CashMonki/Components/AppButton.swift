@@ -39,6 +39,7 @@ struct AppButton: View {
     var rightIcon: String? = nil
     var isEnabled: Bool = true
     var iconColorOverride: Color? = nil  // Optional override for icon color
+    var textColorOverride: Color? = nil  // Optional override for title color
 
     // MARK: - Custom SVG Icon Names (UIImage doesn't detect SVGs in asset catalogs)
     private static let customIconNames: Set<String> = [
@@ -49,6 +50,12 @@ struct AppButton: View {
         "horizontal-bar-chart-03",
         "chevron-left",
         "chevron-right"
+    ]
+
+    // Brand logos that must keep their own colors (rendered .original, never tinted).
+    private static let fullColorIconNames: Set<String> = [
+        "google",
+        "apple"
     ]
 
     // MARK: - Internal State
@@ -163,6 +170,10 @@ struct AppButton: View {
     }
     
     private var textColor: Color {
+        if let override = textColorOverride {
+            return buttonState == .disabled ? AppColors.foregroundTertiary : override
+        }
+
         switch (hierarchy, buttonState) {
         case (.primary, _):
             return AppColors.backgroundWhite
@@ -286,7 +297,14 @@ struct AppButton: View {
                 // Left Icon
                 if let leftIcon = leftIcon {
                     // Try custom asset first, fallback to system icon
-                    if Self.customIconNames.contains(leftIcon) || UIImage(named: leftIcon) != nil {
+                    if Self.fullColorIconNames.contains(leftIcon) {
+                        // Brand logo - keep original colors, never tint.
+                        Image(leftIcon)
+                            .renderingMode(.original)
+                            .resizable()
+                            .aspectRatio(contentMode: .fit)
+                            .frame(width: iconSize * 0.6, height: iconSize * 0.6)
+                    } else if Self.customIconNames.contains(leftIcon) || UIImage(named: leftIcon) != nil {
                         Image(leftIcon)
                             .renderingMode(.template)
                             .resizable()

@@ -1426,7 +1426,13 @@ struct UserData: Identifiable, Codable {
     
     // Firebase sync preference - true by default for existing users
     var enableFirebaseSync: Bool
-    
+
+    // Access role: "user" (default) or "admin". Optional so data saved before
+    // this field existed still decodes; UserManager.ensureRoleAssigned() fills it.
+    var role: String?
+
+    var isAdmin: Bool { role == "admin" }
+
     init(
         id: UUID = UUID(),
         name: String,
@@ -1444,7 +1450,8 @@ struct UserData: Identifiable, Codable {
         trackingFrequency: String? = nil,
         trackingMethod: String? = nil,
         onboardingCompleted: Int = 0, // Default to not started - LOCAL ONLY, not synced to Firebase
-        enableFirebaseSync: Bool = true // Default to enabled for new users
+        enableFirebaseSync: Bool = true, // Default to enabled for new users
+        role: String? = "user"
     ) {
         self.id = id
         self.name = name
@@ -1463,6 +1470,7 @@ struct UserData: Identifiable, Codable {
         self.trackingMethod = trackingMethod
         self.onboardingCompleted = onboardingCompleted
         self.enableFirebaseSync = enableFirebaseSync
+        self.role = role
     }
     
     // Auto-calculated balance from all transactions (income - expenses)
@@ -1560,6 +1568,9 @@ struct UserData: Identifiable, Codable {
     
     enum CodingKeys: String, CodingKey {
         case id, name, email, accounts, budgets, createdAt, updatedAt, goals, onboardingCompleted, enableFirebaseSync, transactions
+        // Previously-dropped fields: these were declared but absent from CodingKeys, so they
+        // silently reset to nil on every save/load. Now persisted.
+        case moneyStress, overspentRealization, trackingDifficulty, idealOutcome, trackingFrequency, trackingMethod, role
         // Note: Txn has custom Codable that excludes UIImage, so transactions can now be encoded
     }
     
@@ -1580,6 +1591,14 @@ struct UserData: Identifiable, Codable {
         budgets = try container.decodeIfPresent([Budget].self, forKey: .budgets) ?? []
         // Load transactions locally (Txn has custom Codable that excludes UIImage)
         transactions = try container.decodeIfPresent([Txn].self, forKey: .transactions) ?? []
+        // Previously-dropped onboarding answers + role — decode if present (older data lacks them).
+        moneyStress = try container.decodeIfPresent(String.self, forKey: .moneyStress)
+        overspentRealization = try container.decodeIfPresent(String.self, forKey: .overspentRealization)
+        trackingDifficulty = try container.decodeIfPresent(String.self, forKey: .trackingDifficulty)
+        idealOutcome = try container.decodeIfPresent(String.self, forKey: .idealOutcome)
+        trackingFrequency = try container.decodeIfPresent(String.self, forKey: .trackingFrequency)
+        trackingMethod = try container.decodeIfPresent(String.self, forKey: .trackingMethod)
+        role = try container.decodeIfPresent(String.self, forKey: .role)
     }
     
     func encode(to encoder: Encoder) throws {
@@ -1596,6 +1615,14 @@ struct UserData: Identifiable, Codable {
         try container.encode(budgets, forKey: .budgets)
         // Save transactions locally (Txn has custom Codable that excludes UIImage)
         try container.encode(transactions, forKey: .transactions)
+        // Persist the previously-dropped onboarding answers + role.
+        try container.encodeIfPresent(moneyStress, forKey: .moneyStress)
+        try container.encodeIfPresent(overspentRealization, forKey: .overspentRealization)
+        try container.encodeIfPresent(trackingDifficulty, forKey: .trackingDifficulty)
+        try container.encodeIfPresent(idealOutcome, forKey: .idealOutcome)
+        try container.encodeIfPresent(trackingFrequency, forKey: .trackingFrequency)
+        try container.encodeIfPresent(trackingMethod, forKey: .trackingMethod)
+        try container.encodeIfPresent(role, forKey: .role)
     }
 }
 
@@ -1739,7 +1766,6 @@ enum BudgetPeriod: String, Codable, CaseIterable {
 
 /// Frequency options for recurring transactions
 enum RecurringFrequency: String, Codable, CaseIterable {
-    case fiveMinutes // For testing only (was 'minute', now 5 minutes)
     case daily
     case weekly
     case monthly
@@ -1748,7 +1774,6 @@ enum RecurringFrequency: String, Codable, CaseIterable {
 
     var displayName: String {
         switch self {
-        case .fiveMinutes: return "Every 5 Minutes"
         case .daily: return "Daily"
         case .weekly: return "Weekly"
         case .monthly: return "Monthly"
@@ -1761,8 +1786,6 @@ enum RecurringFrequency: String, Codable, CaseIterable {
     func nextOccurrence(from date: Date) -> Date {
         let calendar = Calendar.current
         switch self {
-        case .fiveMinutes:
-            return calendar.date(byAdding: .minute, value: 5, to: date) ?? date
         case .daily:
             return calendar.date(byAdding: .day, value: 1, to: date) ?? date
         case .weekly:
@@ -1800,7 +1823,7 @@ struct Txn: Identifiable, Equatable, Hashable, Codable {
     var userId: UUID { accountID }
     var accountId: UUID? { walletID }
     let category: String // Keep for backward compatibility and UI display
-    let categoryId: UUID? // New ID-based lookup for performance
+    var categoryId: UUID? // New ID-based lookup for performance (mutable: category re-link repoints a dead id)
     let amount: Double // negative for expense (in primary currency)
     let date: Date
     let createdAt: Date // when the transaction was added to the app

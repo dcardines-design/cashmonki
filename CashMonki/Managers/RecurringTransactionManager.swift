@@ -332,14 +332,7 @@ class RecurringTransactionManager: ObservableObject {
         return userManager.currentUser.transactions.contains { txn in
             guard txn.recurringTemplateId == templateId else { return false }
 
-            // For 5-minute frequency, check within same 5-minute window (for testing)
-            if frequency == .fiveMinutes {
-                let txnComponents = calendar.dateComponents([.year, .month, .day, .hour, .minute], from: txn.date)
-                let dateComponents = calendar.dateComponents([.year, .month, .day, .hour, .minute], from: date)
-                return txnComponents == dateComponents
-            }
-
-            // For all other frequencies, check same day
+            // Check same day for all frequencies
             return calendar.isDate(txn.date, inSameDayAs: date)
         }
     }

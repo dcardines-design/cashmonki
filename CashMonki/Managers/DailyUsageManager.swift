@@ -33,6 +33,39 @@ class DailyUsageManager: ObservableObject {
         }
     }
     
+    // MARK: - Ask chat limits (same daily-reset pattern; 10/day free, Pro unlimited)
+
+    private let chatUsageCountKey = "dailyChatMessageCount"
+    private let maxDailyChatMessagesForFreeUsers = 10
+
+    func canSendChatMessage() -> Bool {
+        resetUsageIfNewDay()
+        if RevenueCatManager.shared.isProUser { return true }
+        return UserDefaults.standard.integer(forKey: chatUsageCountKey) < maxDailyChatMessagesForFreeUsers
+    }
+
+    func recordChatMessage() {
+        resetUsageIfNewDay()
+        if RevenueCatManager.shared.isProUser { return }
+        let count = UserDefaults.standard.integer(forKey: chatUsageCountKey) + 1
+        UserDefaults.standard.set(count, forKey: chatUsageCountKey)
+        print("📊 DailyUsageManager: Chat message \(count)/\(maxDailyChatMessagesForFreeUsers)")
+    }
+
+    func getRemainingChatMessages() -> Int {
+        resetUsageIfNewDay()
+        if RevenueCatManager.shared.isProUser { return .max }
+        return max(0, maxDailyChatMessagesForFreeUsers - UserDefaults.standard.integer(forKey: chatUsageCountKey))
+    }
+
+    /// "3 messages left today" footer line; empty for Pro users.
+    func getChatUsageDisplayText() -> String {
+        if RevenueCatManager.shared.isProUser { return "" }
+        let remaining = getRemainingChatMessages()
+        if remaining <= 0 { return "No messages left today" }
+        return remaining == 1 ? "1 message left today" : "\(remaining) messages left today"
+    }
+
     // MARK: - Public Methods
     
     /// Check if user can perform receipt analysis
@@ -125,6 +158,7 @@ class DailyUsageManager: ObservableObject {
         if today > lastResetDay {
             // Reset usage for new day
             UserDefaults.standard.set(0, forKey: usageCountKey)
+            UserDefaults.standard.set(0, forKey: chatUsageCountKey)
             UserDefaults.standard.set(today, forKey: lastResetDateKey)
             
             print("📊 DailyUsageManager: Reset daily usage for new day: \(today)")

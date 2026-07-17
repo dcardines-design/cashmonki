@@ -72,6 +72,8 @@ enum AnalyticsEvent: String {
     case subscriptionEdited = "recurring_subscription_edited"
     case subscriptionDeleted = "recurring_subscription_deleted"
     case subscriptionPaused = "recurring_subscription_paused"
+    case subscriptionResumed = "recurring_subscription_resumed"
+    case subscriptionTransactionGenerated = "recurring_transaction_generated"
 
     // Currency
     case currencyChanged = "currency_changed"

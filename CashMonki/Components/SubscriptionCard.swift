@@ -153,23 +153,9 @@ struct SubscriptionCard: View {
         return currencyPrefs.formatAmount(abs(subscription.amount), currency: subscription.currency)
     }
 
-    // Human-readable renewal text (with minute precision for 5-minute frequency)
-    // Takes currentDate parameter for real-time countdown support
+    // Human-readable renewal text
+    // Takes currentDate parameter for consistency
     private func renewsText(from currentDate: Date) -> String {
-        // For 5-minute frequency, show precise time with live countdown
-        if subscription.frequency == .fiveMinutes {
-            let seconds = Int(subscription.nextDueDate.timeIntervalSince(currentDate))
-            if seconds <= 0 {
-                return "Renews now"
-            } else if seconds < 60 {
-                return "Renews in \(seconds)s"
-            } else {
-                let minutes = Int(ceil(Double(seconds) / 60.0))
-                return "Renews in \(minutes)m"
-            }
-        }
-
-        // For other frequencies, show days
         let calendar = Calendar.current
         let components = calendar.dateComponents([.day], from: currentDate, to: subscription.nextDueDate)
         let days = max(0, components.day ?? 0)
@@ -242,18 +228,9 @@ struct SubscriptionCard: View {
             }
 
             // "Renews in X days" / "Renews today" / "Renews tomorrow"
-            // Use TimelineView for real-time countdown on 5-minute frequency
-            if subscription.frequency == .fiveMinutes {
-                TimelineView(.periodic(from: .now, by: 1)) { context in
-                    Text(renewsText(from: context.date))
-                        .font(AppFonts.overusedGroteskMedium(size: 14))
-                        .foregroundColor(AppColors.foregroundSecondary)
-                }
-            } else {
-                Text(renewsText(from: Date()))
-                    .font(AppFonts.overusedGroteskMedium(size: 14))
-                    .foregroundColor(AppColors.foregroundSecondary)
-            }
+            Text(renewsText(from: Date()))
+                .font(AppFonts.overusedGroteskMedium(size: 14))
+                .foregroundColor(AppColors.foregroundSecondary)
         }
         .padding(.leading, 18)
         .padding(.trailing, 14)

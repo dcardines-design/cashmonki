@@ -68,24 +68,14 @@ class TransactionSyncManager: ObservableObject {
     
     /// Start comprehensive bidirectional sync
     func startSync() {
-        print("🚀 TransactionSyncManager: Starting bidirectional sync")
-        
-        guard isFirebaseAvailable() else {
-            print("⚠️ TransactionSyncManager: Firebase not available, sync disabled")
-            return
-        }
-        
-        // Start real-time listeners
-        startRealTimeSync()
-        
-        // Only perform initial sync if we have data to sync
-        // Otherwise, let UserManager handle the initial data load
-        if let userManager = userManager, !userManager.currentUser.transactions.isEmpty {
-            print("📊 TransactionSyncManager: Found existing data, performing initial sync")
-            performFullSync()
-        } else {
-            print("📭 TransactionSyncManager: No existing data, skipping initial sync - UserManager will handle first load")
-        }
+        // DISABLED (sync cleanup Phase 1): this was a SECOND, competing sync engine. It keyed
+        // Firestore by currentUser.id.uuidString (the app UUID) instead of firebaseUID, ignored
+        // the deletion tombstones (resurrecting deleted transactions), replaced local wholesale
+        // (clobbering on an empty/stale cloud pull), and its timers ignored enableFirebaseSync.
+        // UserManager (delta pushTransactionToCloud + merge-on-load) is now the sole sync engine.
+        // Kept as a no-op so the shared instance + @Published status still exist for any UI.
+        print("⏸️ TransactionSyncManager: disabled — UserManager is the single sync engine")
+        return
     }
     
     /// Stop all sync operations

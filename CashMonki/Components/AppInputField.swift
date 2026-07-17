@@ -98,6 +98,11 @@ struct AppInputField: View {
     // Secure field properties
     let isSecureField: Bool
     @State private var isPasswordVisible: Bool = false
+
+    // Multiline properties — grows with content, reserving space for minLines
+    let isMultiline: Bool
+    let minLines: Int
+    let maxLines: Int
     
     // Picker states
     @State private var showingDatePicker = false
@@ -267,6 +272,9 @@ struct AppInputField: View {
         isAmountField: Bool = false,
         textColor: Color? = nil,
         isSecureField: Bool = false,
+        isMultiline: Bool = false,
+        minLines: Int = 3,
+        maxLines: Int = 8,
         externalFocusBinding: FocusState<Bool>.Binding? = nil
     ) {
         self.title = title
@@ -299,6 +307,9 @@ struct AppInputField: View {
         self.isAmountField = isAmountField
         self.textColor = textColor
         self.isSecureField = isSecureField
+        self.isMultiline = isMultiline
+        self.minLines = minLines
+        self.maxLines = maxLines
         self.externalFocusBinding = externalFocusBinding
     }
     
@@ -482,7 +493,14 @@ struct AppInputField: View {
     
     @ViewBuilder
     private var textFieldView: some View {
-        TextField("", text: $text)
+        Group {
+            if isMultiline {
+                TextField("", text: $text, axis: .vertical)
+                    .lineLimit(minLines...maxLines)
+            } else {
+                TextField("", text: $text)
+            }
+        }
             .font(AppFonts.overusedGroteskMedium(size: size.fontSize))
             .foregroundStyle(textColor ?? Color.black)
             .accentColor(AppColors.accentBackground)
@@ -533,13 +551,18 @@ struct AppInputField: View {
                 }
             }
             .overlay(
-                // Custom placeholder
-                HStack {
-                    if text.isEmpty {
-                        Text(placeholder)
-                            .font(AppFonts.overusedGroteskMedium(size: size.fontSize))
-                            .foregroundColor(AppColors.foregroundSecondary)
-                        Spacer()
+                // Custom placeholder (top-aligned for multiline fields)
+                VStack(spacing: 0) {
+                    HStack {
+                        if text.isEmpty {
+                            Text(placeholder)
+                                .font(AppFonts.overusedGroteskMedium(size: size.fontSize))
+                                .foregroundColor(AppColors.foregroundSecondary)
+                            Spacer()
+                        }
+                    }
+                    if isMultiline {
+                        Spacer(minLength: 0)
                     }
                 }
                 .allowsHitTesting(false)
@@ -698,6 +721,21 @@ extension AppInputField {
     }
     
     /// Creates a search input field with magnifying glass icon
+    /// Multiline text area — reserves space for `minLines` and grows to `maxLines` before scrolling.
+    static func multiline(title: String, text: Binding<String>, placeholder: String = "", isRequired: Bool = false, minLines: Int = 3, maxLines: Int = 8, size: Size = .md, focusBinding: FocusState<Bool>.Binding? = nil) -> AppInputField {
+        AppInputField(
+            title: title,
+            text: text,
+            placeholder: placeholder,
+            isRequired: isRequired,
+            size: size,
+            isMultiline: true,
+            minLines: minLines,
+            maxLines: maxLines,
+            externalFocusBinding: focusBinding
+        )
+    }
+
     static func search(text: Binding<String>, placeholder: String = "Search...", size: Size = .md) -> AppInputField {
         AppInputField(
             title: "",

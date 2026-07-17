@@ -56,21 +56,30 @@ final class FirestoreService {
 
     // MARK: - User Data Management
     
-    func saveUserData(_ userData: UserData, completion: @escaping (Result<Void, Error>) -> Void) {
+    /// Save the user doc. `userId` MUST be the Firebase UID so the doc lives at
+    /// users/<firebaseUID> — the same place fetchUserData reads and the transactions
+    /// subcollection lives. (Previously keyed by userData.id, a per-login app UUID, so the
+    /// user doc — wallets/budgets/name — never round-tripped and was lost on reinstall.)
+    func saveUserData(_ userData: UserData, userId: String, completion: @escaping (Result<Void, Error>) -> Void) {
         #if canImport(FirebaseFirestore)
         guard let db = db else {
             completion(.failure(NSError(domain: "FirestoreUnavailable", code: -1, userInfo: [NSLocalizedDescriptionKey: "Firebase not configured"])))
             return
         }
-        
+
         do {
-            let userRef = db.collection("users").document(userData.id.uuidString)
+            let userRef = db.collection("users").document(userId)
             let encoder = JSONEncoder()
             encoder.dateEncodingStrategy = .secondsSince1970
             let data = try encoder.encode(userData)
-            let dict = try JSONSerialization.jsonObject(with: data) as? [String: Any] ?? [:]
-            
-            userRef.setData(dict) { error in
+            var dict = try JSONSerialization.jsonObject(with: data) as? [String: Any] ?? [:]
+            // Transactions live in the users/<uid>/transactions SUBCOLLECTION and are read only from
+            // there. Don't mirror the whole array into the user doc — it was write-only dead weight
+            // that could go stale and inflated every write.
+            dict.removeValue(forKey: "transactions")
+            // merge:true so a user-doc write never clobbers fields/subcollections it didn't send
+            // (concurrent writers, partial updates).
+            userRef.setData(dict, merge: true) { error in
                 if let error = error {
                     completion(.failure(error))
                 } else {
@@ -82,6 +91,132 @@ final class FirestoreService {
         }
         #else
         completion(.failure(NSError(domain: "FirestoreUnavailable", code: -1, userInfo: [NSLocalizedDescriptionKey: "Firebase not available"])))
+        #endif
+    }
+
+    // MARK: - Ask Chat (AI chat history)
+
+    /// Mirror the Ask chat history to the cloud as ONE document under the user's tree:
+    /// users/<uid>/ask_chat/history. Single doc = one write per sync (cheap). Same local-first
+    /// + cloud-backup model as transactions/wallets.
+    func saveAskChat(_ jsonData: Data, userId: String, completion: @escaping (Result<Void, Error>) -> Void) {
+        #if canImport(FirebaseFirestore)
+        guard let db = db else {
+            completion(.failure(NSError(domain: "FirestoreUnavailable", code: -1)))
+            return
+        }
+        let ref = db.collection("users").document(userId).collection("ask_chat").document("history")
+        let payload: [String: Any] = [
+            "json": String(data: jsonData, encoding: .utf8) ?? "",
+            "updatedAt": FieldValue.serverTimestamp()
+        ]
+        ref.setData(payload) { error in
+            if let error = error { completion(.failure(error)) } else { completion(.success(())) }
+        }
+        #else
+        completion(.failure(NSError(domain: "FirestoreUnavailable", code: -1)))
+        #endif
+    }
+
+    // MARK: - Categories
+
+    /// Mirror the user's category setup (unified list + hierarchy) to ONE cloud doc:
+    /// users/<uid>/categories/all. Without this, transactions restored on a fresh install point at
+    /// categoryIds the device doesn't have → every row shows "No Category".
+    func saveCategoriesBlob(unified: Data, hierarchy: Data, userId: String, completion: @escaping (Result<Void, Error>) -> Void) {
+        #if canImport(FirebaseFirestore)
+        guard let db = db else { completion(.failure(NSError(domain: "FirestoreUnavailable", code: -1))); return }
+        let ref = db.collection("users").document(userId).collection("categories").document("all")
+        let payload: [String: Any] = [
+            "unified": String(data: unified, encoding: .utf8) ?? "",
+            "hierarchy": String(data: hierarchy, encoding: .utf8) ?? "",
+            "updatedAt": FieldValue.serverTimestamp()
+        ]
+        ref.setData(payload) { error in
+            if let error = error { completion(.failure(error)) } else { completion(.success(())) }
+        }
+        #else
+        completion(.failure(NSError(domain: "FirestoreUnavailable", code: -1)))
+        #endif
+    }
+
+    /// Fetch the cloud category setup. Returns (unifiedJSON?, hierarchyJSON?) — nil if none yet.
+    func fetchCategoriesBlob(userId: String, completion: @escaping (Result<(Data?, Data?), Error>) -> Void) {
+        #if canImport(FirebaseFirestore)
+        guard let db = db else { completion(.failure(NSError(domain: "FirestoreUnavailable", code: -1))); return }
+        let ref = db.collection("users").document(userId).collection("categories").document("all")
+        ref.getDocument { snapshot, error in
+            if let error = error { completion(.failure(error)); return }
+            let u = (snapshot?.data()?["unified"] as? String)?.data(using: .utf8)
+            let h = (snapshot?.data()?["hierarchy"] as? String)?.data(using: .utf8)
+            completion(.success((u, h)))
+        }
+        #else
+        completion(.success((nil, nil)))
+        #endif
+    }
+
+    // MARK: - Subscriptions (recurring transactions)
+
+    /// Mirror the user's subscriptions to the cloud as ONE document: users/<uid>/subscriptions/all.
+    /// Single doc = one write per change. Lets recurring transactions survive reinstall/device
+    /// change, matching transactions/wallets.
+    func saveSubscriptions(_ jsonData: Data, userId: String, completion: @escaping (Result<Void, Error>) -> Void) {
+        #if canImport(FirebaseFirestore)
+        guard let db = db else {
+            completion(.failure(NSError(domain: "FirestoreUnavailable", code: -1)))
+            return
+        }
+        let ref = db.collection("users").document(userId).collection("subscriptions").document("all")
+        let payload: [String: Any] = [
+            "json": String(data: jsonData, encoding: .utf8) ?? "",
+            "updatedAt": FieldValue.serverTimestamp()
+        ]
+        ref.setData(payload) { error in
+            if let error = error { completion(.failure(error)) } else { completion(.success(())) }
+        }
+        #else
+        completion(.failure(NSError(domain: "FirestoreUnavailable", code: -1)))
+        #endif
+    }
+
+    /// Fetch the cloud subscriptions JSON (nil if none yet).
+    func fetchSubscriptions(userId: String, completion: @escaping (Result<Data?, Error>) -> Void) {
+        #if canImport(FirebaseFirestore)
+        guard let db = db else {
+            completion(.failure(NSError(domain: "FirestoreUnavailable", code: -1)))
+            return
+        }
+        let ref = db.collection("users").document(userId).collection("subscriptions").document("all")
+        ref.getDocument { snapshot, error in
+            if let error = error { completion(.failure(error)); return }
+            guard let json = snapshot?.data()?["json"] as? String, let data = json.data(using: .utf8) else {
+                completion(.success(nil)); return
+            }
+            completion(.success(data))
+        }
+        #else
+        completion(.success(nil))
+        #endif
+    }
+
+    /// Fetch the cloud Ask chat history JSON (nil if the user has none yet).
+    func fetchAskChat(userId: String, completion: @escaping (Result<Data?, Error>) -> Void) {
+        #if canImport(FirebaseFirestore)
+        guard let db = db else {
+            completion(.failure(NSError(domain: "FirestoreUnavailable", code: -1)))
+            return
+        }
+        let ref = db.collection("users").document(userId).collection("ask_chat").document("history")
+        ref.getDocument { snapshot, error in
+            if let error = error { completion(.failure(error)); return }
+            guard let json = snapshot?.data()?["json"] as? String, let data = json.data(using: .utf8) else {
+                completion(.success(nil)); return
+            }
+            completion(.success(data))
+        }
+        #else
+        completion(.success(nil))
         #endif
     }
     
@@ -162,29 +297,20 @@ final class FirestoreService {
                     completion(.failure(error))
                 } else {
                     print("✅ Firebase: Successfully saved transaction \(transaction.id.uuidString.prefix(8)) for \(userName) to nested collection")
-                    
-                    // ALSO save to top-level transactions collection for global queries
-                    // This ensures userId field is available in the top-level collection
-                    let globalTransactionRef = db.collection("transactions").document(transaction.id.uuidString)
-                    
-                    print("🌐 Firebase: ALSO saving to global transactions collection with userId field...")
-                    globalTransactionRef.setData(transactionData) { globalError in
-                        if let globalError = globalError {
-                            print("⚠️ Firebase: Failed to save to global transactions collection: \(globalError)")
-                            // Don't fail the whole operation - nested save already succeeded
-                        } else {
-                            print("✅ Firebase: Successfully saved transaction to GLOBAL transactions collection with userId")
-                        }
-                        
-                        // Save receipt image separately if it exists
-                        if let receiptImage = transaction.receiptImage {
-                            self.saveReceiptImage(receiptImage, transactionId: transaction.id.uuidString, userId: userId) { _ in
-                                // Continue regardless of image save result
-                                completion(.success(()))
-                            }
-                        } else {
+
+                    // NOTE: previously ALSO mirrored every transaction to a top-level `transactions`
+                    // collection, which doubled the write count for no display benefit (the app reads
+                    // from users/<uid>/transactions). Dropped to halve Firestore writes. Any legacy
+                    // global docs are still cleaned up on account deletion.
+
+                    // Save receipt image separately if it exists
+                    if let receiptImage = transaction.receiptImage {
+                        self.saveReceiptImage(receiptImage, transactionId: transaction.id.uuidString, userId: userId) { _ in
+                            // Continue regardless of image save result
                             completion(.success(()))
                         }
+                    } else {
+                        completion(.success(()))
                     }
                 }
             }
@@ -1390,15 +1516,8 @@ final class FirestoreService {
                         dispatchGroup.leave()
                     } else {
                         print("✅ FirestoreService: Saved transaction \(transaction.category) ₱\(transaction.amount)")
-                        
-                        // Also save to global collection
-                        let globalRef = db.collection("transactions").document(transaction.id.uuidString)
-                        globalRef.setData(transactionData) { globalError in
-                            if let globalError = globalError {
-                                print("⚠️ FirestoreService: Failed to save to global collection: \(globalError)")
-                            }
-                            dispatchGroup.leave()
-                        }
+                        // Global-collection mirror dropped — halves writes, app reads nested only.
+                        dispatchGroup.leave()
                     }
                 }
             } catch {

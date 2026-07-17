@@ -1,0 +1,56 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ── Feedback board ─────────────────────────────────────────────
+    // The app is local-first: most users have NO Firebase Auth session,
+    // so identity cannot be enforced server-side yet. These rules keep
+    // the board functional for guests while enforcing document SHAPE so
+    // arbitrary/oversized data can't be written.
+    //
+    // TODO (real enforcement, in order):
+    //  1. Enable App Check → block non-app clients.
+    //  2. Require sign-in for feedback → request.auth.token.email checks
+    //     on authorEmail (create/update/delete own; admin custom claim).
+    match /feedback_items/{itemId} {
+      allow read: if true;
+
+      // Writes require a Firebase Auth session (the app signs in
+      // anonymously at launch, so real users always have one — scripted
+      // non-app writes don't). Shape checks bound the damage.
+      allow create, update: if request.auth != null
+        && request.resource.data.title is string
+        && request.resource.data.title.size() > 0
+        && request.resource.data.title.size() <= 200
+        && request.resource.data.detail is string
+        && request.resource.data.detail.size() <= 2000
+        && request.resource.data.authorEmail is string
+        && request.resource.data.authorEmail.size() <= 100
+        && request.resource.data.approved is bool
+        && request.resource.data.upvoters is list
+        && request.resource.data.upvoters.size() <= 10000
+        && request.resource.data.comments is list;
+
+      allow delete: if request.auth != null; // author/admin check needs real accounts (TODO above)
+    }
+
+    // ── User data sync (existing local-first behavior) ─────────────
+    // Guests sync without auth today; keep that working. Tighten to
+    // request.auth checks when sign-in becomes mandatory.
+    match /users/{userId} {
+      allow read, write: if true;
+      match /{document=**} {
+        allow read, write: if true;
+      }
+    }
+
+    match /transactions/{txId} {
+      allow read, write: if true;
+    }
+
+    // Everything else: closed.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

@@ -134,3 +134,7 @@ Thumbs.db
 # IDE
 .vscode/
 .idea/
+# Xcode build output / SPM checkouts
+build_dd/
+build/
+DerivedData/

@@ -1,10 +1,22 @@
 import Foundation
+import CryptoKit
 
 // MARK: - Category Data Structure
 
 enum CategoryType: String, Codable, CaseIterable {
     case income = "income"
     case expense = "expense"
+}
+
+/// Deterministic UUID for a built-in category, derived from its (type, name). Same name → same id
+/// on EVERY install, forever. Built-in category ids used to be random `UUID()` per install, so a
+/// returning user's transactions all pointed at ids this device didn't have → "No Category".
+func stableCategoryID(name: String, type: CategoryType) -> UUID {
+    let key = "cashmonki.category.v1.\(type.rawValue).\(name.lowercased())"
+    let digest = Insecure.MD5.hash(data: Data(key.utf8))
+    let b = Array(digest) // exactly 16 bytes
+    return UUID(uuid: (b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7],
+                       b[8], b[9], b[10], b[11], b[12], b[13], b[14], b[15]))
 }
 
 struct CategoryData: Codable, Identifiable {
@@ -16,8 +28,11 @@ struct CategoryData: Codable, Identifiable {
     let parent: String? // Parent category name (nil for top-level categories)
     let parentId: UUID? // Parent category ID (nil for top-level categories)
 
-    init(id: UUID = UUID(), name: String, emoji: String, subcategories: [SubcategoryData] = [], type: CategoryType = .expense, parent: String? = nil, parentId: UUID? = nil) {
-        self.id = id
+    init(id: UUID? = nil, name: String, emoji: String, subcategories: [SubcategoryData] = [], type: CategoryType = .expense, parent: String? = nil, parentId: UUID? = nil) {
+        // Built-ins omit `id` → get a STABLE name-derived id (consistent across installs/devices).
+        // Explicit ids (e.g. "No Category" 00…01/02, custom categories) are preserved.
+        let resolvedId = id ?? stableCategoryID(name: name, type: type)
+        self.id = resolvedId
         self.name = name
         self.emoji = emoji
         self.subcategories = subcategories
@@ -162,6 +177,7 @@ class CategoriesManager: ObservableObject {
         if let encoded = try? JSONEncoder().encode(categoryHierarchy) {
             UserDefaults.standard.set(encoded, forKey: hierarchyKey)
         }
+        pushCategoriesToCloud()
     }
     
     private func loadCategoryHierarchy() {
@@ -184,7 +200,15 @@ class CategoriesManager: ObservableObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
             self.fixOrphanedTransactions()
         }
-        
+
+        // On login / user switch, pull the account's categories from cloud so restored
+        // transactions resolve their categoryIds instead of showing "No Category".
+        NotificationCenter.default.addObserver(
+            forName: NSNotification.Name("UserManagerFirebaseLoadComplete"), object: nil, queue: .main
+        ) { [weak self] _ in
+            self?.restoreCategoriesFromCloud()
+        }
+
         // Cache is already built in loadCategories()
     }
     
@@ -894,6 +918,49 @@ class CategoriesManager: ObservableObject {
             UserDefaults.standard.set(encoded, forKey: categoriesKey)
             lookupCacheValid = false // Invalidate cache when data changes
             print("✅ Saved \(categories.count) categories to storage")
+        }
+        pushCategoriesToCloud()
+    }
+
+    /// Mirror categories (unified list + hierarchy) to the cloud so transactions restored on a
+    /// fresh install can resolve their categoryIds (otherwise every row shows "No Category").
+    private func pushCategoriesToCloud() {
+        guard UserManager.shared.currentUser.enableFirebaseSync else { return }
+        guard let uni = try? JSONEncoder().encode(categories),
+              let hier = try? JSONEncoder().encode(categoryHierarchy) else { return }
+        FirestoreService.shared.saveCategoriesBlob(unified: uni, hierarchy: hier, userId: UserManager.shared.syncUID()) { _ in }
+    }
+
+    /// Pull the cloud category setup and union it in (by id for the list, by key for the
+    /// hierarchy). Call on login / user switch so a returning user's categories come back.
+    func restoreCategoriesFromCloud() {
+        guard UserManager.shared.currentUser.enableFirebaseSync else { return }
+        FirestoreService.shared.fetchCategoriesBlob(userId: UserManager.shared.syncUID()) { [weak self] result in
+            guard let self = self, case .success(let (uniData, hierData)) = result else { return }
+            DispatchQueue.main.async {
+                var changed = false
+                if let uniData = uniData,
+                   let cloudCats = try? JSONDecoder().decode([UnifiedCategoryData].self, from: uniData),
+                   !cloudCats.isEmpty {
+                    var byId: [UUID: UnifiedCategoryData] = [:]
+                    for c in self.categories { byId[c.id] = c }
+                    for c in cloudCats where byId[c.id] == nil { byId[c.id] = c; changed = true }
+                    if changed { self.categories = Array(byId.values) }
+                }
+                if let hierData = hierData,
+                   let cloudHier = try? JSONDecoder().decode([String: [String]].self, from: hierData) {
+                    for (k, v) in cloudHier where self.categoryHierarchy[k] == nil {
+                        self.categoryHierarchy[k] = v; changed = true
+                    }
+                }
+                if changed {
+                    self.saveCategories()
+                    self.saveCategoryHierarchy()
+                    self.rebuildLookupCache()
+                    self.objectWillChange.send()
+                    print("✅ Categories: restored/merged from cloud")
+                }
+            }
         }
     }
     
@@ -1969,78 +2036,44 @@ class CategoriesManager: ObservableObject {
     }
     
     /// Fix existing orphaned transactions that reference deleted categories
+    /// Re-link transactions whose `categoryId` no longer resolves — WITHOUT destroying data.
+    ///
+    /// The old version overwrote every orphaned transaction to "No Category", permanently wiping
+    /// its real category name + id. That was the root cause of everything showing "No Category"
+    /// on a fresh install: built-in category ids were random per install (see stableCategoryID),
+    /// so a returning user's transactions all looked orphaned and got nuked before their custom
+    /// categories had even loaded from cloud.
+    ///
+    /// Now: for a dead categoryId, try to RE-LINK by the transaction's stored category NAME (which
+    /// survives the round-trip). If a matching category exists (default or custom), repoint the id
+    /// to it. If no match, LEAVE IT ALONE — the stored name still drives the display fallback, and
+    /// the category may still arrive from cloud. Never overwrites the name; never sets No Category.
     func fixOrphanedTransactions() {
-        print("🔧 ===== FIXING EXISTING ORPHANED TRANSACTIONS =====")
-        
         let userManager = UserManager.shared
-        let allTransactions = userManager.getTransactions()
-        
-        var fixedCount = 0
-        
-        for transaction in allTransactions {
-            // Check if transaction has a categoryId that no longer exists
-            if let categoryId = transaction.categoryId {
-                let categoryResult = findCategoryOrSubcategoryById(categoryId)
-                
-                if categoryResult == nil {
-                    // This transaction is orphaned - fix it
-                    print("🔧 Found orphaned transaction: \(transaction.merchantName ?? "Unknown") - categoryId: \(categoryId.uuidString.prefix(8))")
-                    
-                    // Determine if it should be income or expense based on amount sign
-                    let isIncome = transaction.amount > 0
-                    let noCategoryId: UUID
-                    
-                    if isIncome {
-                        noCategoryId = UUID(uuidString: "00000000-0000-0000-0000-000000000001")! // No Category (Income)
-                    } else {
-                        noCategoryId = UUID(uuidString: "00000000-0000-0000-0000-000000000002")! // No Category (Expense)
-                    }
-                    
-                    // Update transaction to use "No Category"
-                    let updatedTransaction = Txn(
-                        id: transaction.id,
-                        userId: transaction.userId,
-                        category: "No Category",
-                        categoryId: noCategoryId,
-                        amount: transaction.amount,
-                        date: transaction.date,
-                        createdAt: transaction.createdAt,
-                        receiptImage: transaction.receiptImage,
-                        hasReceiptImage: transaction.hasReceiptImage,
-                        merchantName: transaction.merchantName,
-                        paymentMethod: transaction.paymentMethod,
-                        receiptNumber: transaction.receiptNumber,
-                        invoiceNumber: transaction.invoiceNumber,
-                        items: transaction.items,
-                        note: transaction.note,
-                        accountId: transaction.accountId,
-                        originalAmount: transaction.originalAmount,
-                        originalCurrency: transaction.originalCurrency,
-                        primaryCurrency: transaction.primaryCurrency,
-                        secondaryCurrency: transaction.secondaryCurrency,
-                        exchangeRate: transaction.exchangeRate,
-                        secondaryAmount: transaction.secondaryAmount,
-                        secondaryExchangeRate: transaction.secondaryExchangeRate
-                    )
-                    
-                    userManager.updateTransaction(updatedTransaction)
-                    fixedCount += 1
-                    
-                    print("   ✅ Fixed: \(transaction.merchantName ?? "Unknown") - now uses 'No Category' (\(isIncome ? "income" : "expense"))")
-                }
+        var relinked = 0
+        for transaction in userManager.getTransactions() {
+            guard let categoryId = transaction.categoryId,
+                  findCategoryOrSubcategoryById(categoryId) == nil else { continue }
+            // Dead id. Try to resolve by the stored name.
+            let name = transaction.category
+            guard !name.isEmpty, name.lowercased() != "no category" else { continue }
+            let byName = findCategoryOrSubcategory(by: name)
+            let resolvedId = byName.category?.id ?? byName.subcategory?.id
+            guard let newId = resolvedId else { continue } // no match yet — keep name, wait for cloud
+            var t = transaction
+            t.categoryId = newId
+            userManager.updateTransaction(t)
+            relinked += 1
+        }
+        if relinked > 0 {
+            print("🔧 Categories: re-linked \(relinked) transaction(s) to existing categories by name")
+            DispatchQueue.main.async {
+                userManager.objectWillChange.send()
+                self.objectWillChange.send()
             }
         }
-        
-        print("🔧 ===== ORPHANED TRANSACTION FIX COMPLETE =====")
-        print("✅ Fixed \(fixedCount) orphaned transactions")
-        
-        // Trigger UI refresh
-        DispatchQueue.main.async {
-            userManager.objectWillChange.send()
-            self.objectWillChange.send()
-        }
     }
-    
+
     // MARK: - Migration & Reset
     
     /// Migrate from old system to new unified system (called on init)

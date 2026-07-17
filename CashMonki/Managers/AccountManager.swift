@@ -526,7 +526,11 @@ class AccountManager: ObservableObject {
     private func setupDefaultAccount() {
         print("🏗️ AccountManager.setupDefaultAccount called")
         print("   - current accounts: \(userManager.currentUser.accounts.count)")
-        
+
+        // Clean up any duplicate empty "Personal" wallets that piled up from earlier logins
+        // (fresh-UUID default creation). Safe: only removes empty auto-named wallets.
+        userManager.dedupeAutoDefaultWallets()
+
         // If user has no sub-accounts, create default ones
         if userManager.currentUser.accounts.isEmpty {
             print("   - no accounts found, creating default accounts")
@@ -557,8 +561,19 @@ class AccountManager: ObservableObject {
         print("🏗️ AccountManager: Creating default accounts for user")
         print("   - User: \(userManager.currentUser.name)")
         
-        // Create Personal account (default)
-        let personalAccount = SubAccount.createPersonalAccount(for: userManager.currentUser.id)
+        // Create Personal account (default) with a STABLE id per identity. Using a fresh UUID
+        // here caused a new "Personal" wallet to pile up on every launch/login: this setup runs
+        // on each UserManagerFirebaseLoadComplete when accounts are momentarily empty (anonymous/
+        // pre-login base), and the login merge unioned every uniquely-id'd Personal. A stable id
+        // makes them all collapse into one on merge.
+        let personalAccount = SubAccount(
+            id: userManager.stableDefaultWalletID(),
+            parentUserId: userManager.currentUser.id,
+            name: "Personal",
+            type: .personal,
+            currency: .php,
+            isDefault: true
+        )
         userManager.addSubAccount(personalAccount)
         print("   - Created personal account: \(personalAccount.name)")
         

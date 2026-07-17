@@ -97,14 +97,16 @@ extension CashMonkiDS {
             text: Binding<String>,
             placeholder: String = "",
             isRequired: Bool = false,
-            isSecure: Bool = false
+            isSecure: Bool = false,
+            size: AppInputField.Size = .md
         ) -> AnyView {
             if isSecure {
                 return AnyView(
                     SecureInputWithToggle(
                         title: title,
                         text: text,
-                        placeholder: placeholder
+                        placeholder: placeholder,
+                        size: size
                     )
                 )
             } else {
@@ -114,7 +116,7 @@ extension CashMonkiDS {
                         text: text,
                         placeholder: placeholder,
                         isRequired: isRequired,
-                        size: .md
+                        size: size
                     )
                 )
             }
@@ -474,14 +476,16 @@ struct SecureInputWithToggle: View {
     let title: String
     @Binding var text: String
     let placeholder: String
-    
+    let size: AppInputField.Size
+
     @State private var isPasswordVisible = false
     @FocusState private var isFocused: Bool
-    
-    init(title: String, text: Binding<String>, placeholder: String) {
+
+    init(title: String, text: Binding<String>, placeholder: String, size: AppInputField.Size = .md) {
         self.title = title
         self._text = text
         self.placeholder = placeholder
+        self.size = size
     }
     
     // Display text for the overlay (only used when hidden)
@@ -502,7 +506,7 @@ struct SecureInputWithToggle: View {
                     if isPasswordVisible {
                         // Show plain text when visible
                         TextField("", text: $text)
-                            .font(AppFonts.overusedGroteskMedium(size: 20))
+                            .font(AppFonts.overusedGroteskMedium(size: size.fontSize))
                             .foregroundColor(CashMonkiDS.Colors.foreground)
                             .accentColor(AppColors.accentBackground)
                             .frame(height: 24)
@@ -515,7 +519,7 @@ struct SecureInputWithToggle: View {
                     } else {
                         // Use SecureField when hidden for proper bullet spacing
                         SecureField("", text: $text)
-                            .font(AppFonts.overusedGroteskMedium(size: 20))
+                            .font(AppFonts.overusedGroteskMedium(size: size.fontSize))
                             .foregroundColor(CashMonkiDS.Colors.foreground)
                             .accentColor(AppColors.accentBackground)
                             .frame(height: 24)
@@ -530,7 +534,7 @@ struct SecureInputWithToggle: View {
                     // Custom placeholder to match AppInputField styling
                     if text.isEmpty {
                         Text(placeholder)
-                            .font(AppFonts.overusedGroteskMedium(size: 20))
+                            .font(AppFonts.overusedGroteskMedium(size: size.fontSize))
                             .foregroundColor(AppColors.foregroundSecondary)
                             .allowsHitTesting(false)
                     }
@@ -549,7 +553,7 @@ struct SecureInputWithToggle: View {
                 }
             }
             .padding(.horizontal, 16)
-            .padding(.vertical, 14)
+            .padding(.vertical, size.verticalPadding)
             .background(CashMonkiDS.Colors.surface)
             .cornerRadius(CashMonkiDS.Layout.cornerRadius)
         }

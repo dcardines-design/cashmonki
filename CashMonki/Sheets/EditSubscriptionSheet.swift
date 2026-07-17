@@ -79,8 +79,6 @@ struct EditSubscriptionSheet: View {
         let calendar = Calendar.current
         let now = Date()
         switch frequency {
-        case .fiveMinutes:
-            return calendar.date(byAdding: .minute, value: 5, to: now) ?? now
         case .daily:
             return calendar.date(byAdding: .day, value: 1, to: now) ?? now
         case .weekly:
@@ -295,9 +293,6 @@ struct EditSubscriptionSheet: View {
                 selectionChip(label: "Yearly", isSelected: frequency == .yearly) {
                     frequency = .yearly
                 }
-                selectionChip(label: "5 Min", isSelected: frequency == .fiveMinutes) {
-                    frequency = .fiveMinutes
-                }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -377,9 +372,6 @@ struct EditSubscriptionSheet: View {
                 .foregroundColor(AppColors.foregroundSecondary)
 
             FlowLayout(spacing: 8) {
-                selectionChip(label: "5 sec", isSelected: reminderDays == .testSeconds) {
-                    reminderDays = .testSeconds
-                }
                 selectionChip(label: "12 hrs", isSelected: reminderDays == .twelveHours) {
                     reminderDays = .twelveHours
                 }

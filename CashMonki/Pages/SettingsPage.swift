@@ -81,6 +81,12 @@ struct SettingsPage: View {
 
     // Delete account state
     @State private var showingDeleteAccountSheet = false
+
+    // Guest "Connect Account" flow (link local data to a real login for cloud backup)
+    @State private var showingConnectAccount = false
+
+    // Signed-in "Connect device data" picker (attach a local box to this account)
+    @State private var showingConnectDeviceData = false
     @State private var deleteConfirmationText = ""
     @State private var isDeletingAccount = false
     @State private var accountDeletionError: String?
@@ -94,6 +100,9 @@ struct SettingsPage: View {
     
     // Billing management state
     @State private var showingManageBilling = false
+
+    // Feedback board state
+    @State private var showingFeedback = false
     
     // Currency change confirmation state
     @State private var showingCurrencyChangeConfirmation = false
@@ -232,6 +241,18 @@ struct SettingsPage: View {
             //     .presentationDetents([.fraction(0.98)])
             //     .presentationDragIndicator(.hidden)
             // }
+            .sheet(isPresented: $showingConnectAccount) {
+                LoginView(
+                    onLogin: { showingConnectAccount = false },
+                    onShowRegister: { },
+                    allowGuest: false // already a guest — connecting, not skipping
+                )
+                .environmentObject(toastManager)
+            }
+            .sheet(isPresented: $showingConnectDeviceData) {
+                DataBoxPickerSheet(isPresented: $showingConnectDeviceData)
+                    .environmentObject(toastManager)
+            }
             .sheet(isPresented: $showingEditNameSheet) {
                 EditNameSheet(isPresented: $showingEditNameSheet)
                     .environmentObject(toastManager)
@@ -549,6 +570,9 @@ struct SettingsPage: View {
                     }
                 }
             }
+            .slideInSheet(isPresented: $showingFeedback) {
+                FeedbackInboxSheet(isPresented: $showingFeedback)
+            }
             .fullScreenCover(isPresented: $showingDebugOnboarding) {
                 OnboardingFlow(
                     isPresented: $showingDebugOnboarding,
@@ -756,11 +780,14 @@ struct SettingsPage: View {
                     .foregroundColor(.white)
             }
 
-            // User Name (or "CashMonki User" if empty)
+            // User Name (or "CashMonki User" if empty). Tapping the name 3×
+            // grants the admin role — "name (1)", "(2)", then "name (admin)";
+            // one tap while admin returns to user mode. Sim/debug builds only.
             let userName = userManager.currentUser.name.trimmingCharacters(in: .whitespacesAndNewlines)
-            Text(userName.isEmpty ? "Cashmonki User" : userName)
+            Text((userName.isEmpty ? "Cashmonki User" : userName) + roleSuffix)
                 .font(AppFonts.overusedGroteskSemiBold(size: 24))
                 .foregroundColor(AppColors.foregroundPrimary)
+                .onTapGesture { handleRoleTap() }
 
             // Email hidden - no auth in current flow
         }
@@ -768,6 +795,35 @@ struct SettingsPage: View {
         .padding(.bottom, 20)
     }
     
+    // MARK: - Role tap trick (profile name)
+
+    @State private var roleTapCount = 0
+
+    private var roleSuffix: String {
+        #if DEBUG || targetEnvironment(simulator)
+        if userManager.currentUser.isAdmin { return " (admin)" }
+        if roleTapCount > 0 { return " (\(roleTapCount))" }
+        #endif
+        return ""
+    }
+
+    private func handleRoleTap() {
+        #if DEBUG || targetEnvironment(simulator)
+        if userManager.currentUser.isAdmin {
+            userManager.setRole("user")
+            roleTapCount = 0
+            UINotificationFeedbackGenerator().notificationOccurred(.success)
+        } else {
+            roleTapCount += 1
+            if roleTapCount >= 3 {
+                userManager.setRole("admin")
+                roleTapCount = 0
+                UINotificationFeedbackGenerator().notificationOccurred(.success)
+            }
+        }
+        #endif
+    }
+
     // MARK: - Settings Sections Container
     
     private var settingsMainSections: some View {
@@ -785,9 +841,6 @@ struct SettingsPage: View {
             // dataSection
             supportSection
             legalSection
-
-            // Debug section (temporarily always visible for testing)
-            debugSection
 
             // Footer
             VStack(spacing: 8) {
@@ -838,8 +891,23 @@ struct SettingsPage: View {
     private var accountSection: some View {
         VStack(spacing: 0) {
             sectionHeader("Account")
-            
+
             VStack(spacing: 0) {
+                // Guests: offer to connect a real account so data is backed up to the cloud
+                // and follows the login (like the subscription already does).
+                if authManager.isGuestMode || !authManager.isAuthenticated {
+                    settingsRow(
+                        title: "Connect Account",
+                        subtitle: "Back up your data & keep it if you reinstall",
+                        icon: "☁️"
+                    ) {
+                        showingConnectAccount = true
+                    }
+
+                    Divider()
+                        .padding(.leading, 52)
+                }
+
                 // Subscription testing toggle
                 #if DEBUG
                 HStack {
@@ -906,8 +974,37 @@ struct SettingsPage: View {
     private var preferencesSection: some View {
         VStack(spacing: 0) {
             sectionHeader("Preferences")
-            
+
             VStack(spacing: 0) {
+                // Sync to Cloud. Guests have no account to sync to, so the row becomes a
+                // "connect an account" call-to-action; signed-in users get the real toggle.
+                if authManager.isGuestMode || !authManager.isAuthenticated {
+                    settingsRow(
+                        title: "Sync to Cloud",
+                        subtitle: "Connect an account to back up your data",
+                        icon: "☁️"
+                    ) {
+                        showingConnectAccount = true
+                    }
+                } else {
+                    firebaseSyncToggleRow()
+
+                    Divider()
+                        .padding(.leading, 52)
+
+                    // Attach other local data boxes on this phone to this account.
+                    settingsRow(
+                        title: "Connect device data",
+                        subtitle: "Attach other data on this phone to your account",
+                        icon: "📲"
+                    ) {
+                        showingConnectDeviceData = true
+                    }
+                }
+
+                Divider()
+                    .padding(.leading, 52)
+
                 // COMMENTED OUT: Reset Daily Analysis
                 // settingsRow(
                 //     title: "Reset Daily Analysis",
@@ -1007,36 +1104,8 @@ struct SettingsPage: View {
                 Divider()
                     .padding(.leading, 52)
 
-                // Sync to Cloud Toggle (Coming Soon)
-                HStack {
-                    HStack(spacing: 12) {
-                        Text("☁️")
-                            .font(.system(size: 20))
-
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Sync to Cloud")
-                                .font(AppFonts.overusedGroteskMedium(size: 16))
-                                .foregroundColor(AppColors.foregroundPrimary)
-                            Text("Coming soon")
-                                .font(AppFonts.overusedGroteskMedium(size: 14))
-                                .foregroundColor(AppColors.foregroundSecondary)
-                                .lineLimit(1)
-                        }
-                    }
-
-                    Spacer()
-
-                    Toggle("", isOn: .constant(false))
-                        .labelsHidden()
-                        .tint(Color(red: 0.33, green: 0.18, blue: 1))
-                        .disabled(true)
-                }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 12)
-                .opacity(0.5) // Dim to indicate coming soon
-
-                Divider()
-                    .padding(.leading, 52)
+                // (Removed the disabled "Sync to Cloud — Coming soon" row: cloud sync is live now
+                // via the "Sync Data Online" toggle above, so this placeholder was redundant.)
 
                 settingsRow(
                     title: "Rate Cashmonki",
@@ -1406,6 +1475,17 @@ struct SettingsPage: View {
             
             VStack(spacing: 0) {
                 settingsRow(
+                    title: "Feedback",
+                    subtitle: "Request features and vote on ideas",
+                    icon: "💡"
+                ) {
+                    showingFeedback = true
+                }
+
+                Divider()
+                    .padding(.leading, 52)
+
+                settingsRow(
                     title: "Delete Account",
                     subtitle: "Permanently delete your account and all data",
                     icon: "🗑️"
@@ -1415,16 +1495,30 @@ struct SettingsPage: View {
                     showingDeleteAccountSheet = true
                     print("🔴 DELETE: Current value after: \(showingDeleteAccountSheet)")
                 }
-                
+
                 Divider()
                     .padding(.leading, 52)
-                
+
                 settingsRow(
                     title: "Need Customer Support?",
                     subtitle: "Get help with your account",
                     icon: "😁"
                 ) {
                     showingSupportOptions = true
+                }
+
+                // Sign Out only for real logged-in accounts — guests have nothing to sign out of.
+                if authManager.isAuthenticated && !authManager.isGuestMode {
+                    Divider()
+                        .padding(.leading, 52)
+
+                    settingsRow(
+                        title: "Sign Out",
+                        subtitle: "Return to login screen",
+                        icon: "🚪"
+                    ) {
+                        showingLogoutConfirmation = true
+                    }
                 }
             }
             .background(AppColors.backgroundWhite)
@@ -2725,11 +2819,17 @@ struct SettingsPage: View {
 
                 Text(firebaseSyncSubtitle)
                     .font(AppFonts.overusedGroteskMedium(size: 14))
-                    .foregroundStyle(AppColors.foregroundSecondary)
+                    .foregroundStyle(firebaseSyncSubtitleColor)
+                    .onTapGesture {
+                        // Tap the "Sync failed" subtitle to retry immediately.
+                        if userManager.isFirebaseSyncEnabled && userManager.lastCloudSyncFailed {
+                            userManager.syncToFirebase { _ in }
+                        }
+                    }
             }
-            
+
             Spacer()
-            
+
             Toggle("", isOn: firebaseSyncBinding)
                 .labelsHidden()
                 .tint(AppColors.primary)
@@ -2738,9 +2838,26 @@ struct SettingsPage: View {
         .padding(.vertical, 12)
         .background(Color.clear)
     }
-    
+
     private var firebaseSyncSubtitle: String {
-        userManager.isFirebaseSyncEnabled ? "Last synced 24h ago" : "Data is only stored locally on this device"
+        guard userManager.isFirebaseSyncEnabled else {
+            return "Data is only stored locally on this device"
+        }
+        if userManager.isSyncingToCloud { return "Backing up…" }
+        if userManager.lastCloudSyncFailed { return "Sync failed — tap to retry" }
+        if let date = userManager.lastCloudSyncAt {
+            let rel = RelativeDateTimeFormatter()
+            rel.unitsStyle = .short
+            return "Backed up · \(rel.localizedString(for: date, relativeTo: Date()))"
+        }
+        return "Backed up automatically"
+    }
+
+    private var firebaseSyncSubtitleColor: Color {
+        if userManager.isFirebaseSyncEnabled && userManager.lastCloudSyncFailed {
+            return Color.red
+        }
+        return AppColors.foregroundSecondary
     }
     
     private var firebaseSyncBinding: Binding<Bool> {

@@ -25,11 +25,26 @@ struct AddTransactionSheet: View {
     @ObservedObject private var categoriesManager = CategoriesManager.shared
     @ObservedObject private var rateManager = CurrencyRateManager.shared
     
-    init(isPresented: Binding<Bool>, primaryCurrency: Currency, onSave: @escaping (Txn) -> Void) {
+    init(
+        isPresented: Binding<Bool>,
+        primaryCurrency: Currency,
+        prefillAmount: String? = nil,
+        prefillMerchant: String? = nil,
+        prefillNote: String? = nil,
+        prefillCategoryId: UUID? = nil,
+        prefillDate: Date? = nil,
+        prefillCurrency: Currency? = nil,
+        onSave: @escaping (Txn) -> Void
+    ) {
         self._isPresented = isPresented
         self.primaryCurrency = primaryCurrency
         self.onSave = onSave
-        self._selectedCurrency = State(initialValue: primaryCurrency)
+        self._selectedCurrency = State(initialValue: prefillCurrency ?? primaryCurrency)
+        self._amountText = State(initialValue: prefillAmount ?? "")
+        self._merchantName = State(initialValue: prefillMerchant ?? "")
+        self._note = State(initialValue: prefillNote ?? "")
+        self._selectedCategoryId = State(initialValue: prefillCategoryId)
+        self._date = State(initialValue: prefillDate ?? Date())
     }
 
     // Computed property to get category name for display

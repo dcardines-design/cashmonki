@@ -10,7 +10,6 @@ import SwiftUI
 // MARK: - Reminder Days Option
 
 enum ReminderDays: Int, CaseIterable {
-    case testSeconds = 0  // For testing: 5 seconds before
     case twelveHours = -1  // 12 hours before (using -1 to distinguish from days)
     case one = 1
     case three = 3
@@ -18,7 +17,6 @@ enum ReminderDays: Int, CaseIterable {
 
     var displayName: String {
         switch self {
-        case .testSeconds: return "5 sec before"
         case .twelveHours: return "12 hrs before"
         case .one: return "1 day before"
         case .three: return "3 days before"
@@ -26,15 +24,9 @@ enum ReminderDays: Int, CaseIterable {
         }
     }
 
-    /// Whether this is a test mode (uses seconds instead of days)
-    var isTestMode: Bool {
-        return self == .testSeconds
-    }
-
     /// Time interval in seconds for notification scheduling
     var timeIntervalBeforeDue: TimeInterval {
         switch self {
-        case .testSeconds: return 5  // 5 seconds
         case .twelveHours: return 12 * 60 * 60  // 12 hours
         case .one: return 1 * 24 * 60 * 60  // 1 day
         case .three: return 3 * 24 * 60 * 60  // 3 days

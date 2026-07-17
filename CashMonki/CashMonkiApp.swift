@@ -12,6 +12,9 @@ import RevenueCat
 #endif
 #if canImport(FirebaseCore)
 import FirebaseCore
+#if canImport(FirebaseAppCheck)
+import FirebaseAppCheck
+#endif
 #endif
 #if canImport(FirebaseAuth)
 import FirebaseAuth
@@ -34,7 +37,93 @@ struct CashMonkiApp: App {
     // Note: showingPaywallAfterOnboarding removed - paywall now shown directly from OnboardingFlow
     @StateObject private var authManager = AuthenticationManager.shared
     @StateObject private var toastManager = ToastManager()
-    
+
+    init() {
+        #if DEBUG
+        // TEMPORARY recovery tool (2026-07-08 data-loss incident). READ-ONLY:
+        // reads UserDefaults user-storage keys, copies raw bytes to new
+        // Documents/RECOVERY_*.json files, prints them. Writes nothing over
+        // existing data. Runs at the earliest launch point, before any load/save.
+        // Remove after recovery.
+        CashMonkiApp.dumpUserStorageForRecovery()
+        CashMonkiApp.restoreDanteData()
+        #endif
+    }
+
+    #if DEBUG
+    // TEMPORARY one-shot restore (2026-07-08 incident). Copies Dante's intact
+    // blob into the currently-active guest key so the app loads it. Runs ONCE
+    // (guarded by a flag). Source blob left untouched as a safety copy; current
+    // guest key backed up before overwrite. Remove after recovery confirmed.
+    private static func restoreDanteData() {
+        let d = UserDefaults.standard
+        let doneFlag = "didRestoreDante_v2_20260713"
+        if d.bool(forKey: doneFlag) {
+            print("🧯 RESTORE v2: already ran, skipping")
+            return
+        }
+        // NON-DESTRUCTIVE. The real data blob still exists in UserDefaults; the app
+        // just loads the wrong (empty guest) key because last_authenticated_firebase_uid
+        // points at it. Auto-detect the real blob = the LARGEST currentUser_firebase_*
+        // blob (Dante's ~1.5MB vs empty guests ~1.3KB) and repoint the session pointer
+        // at it. Writes NO user blob — nothing is overwritten, fully reversible.
+        let prefix = "currentUser_firebase_"
+        let keys = d.dictionaryRepresentation().keys.filter {
+            $0.hasPrefix(prefix) && !$0.hasSuffix("_preRestoreBackup")
+        }
+        var bestKey: String?
+        var bestSize = 0
+        for k in keys {
+            if let data = d.data(forKey: k), data.count > bestSize {
+                bestSize = data.count
+                bestKey = k
+            }
+        }
+        guard let sourceKey = bestKey else {
+            print("🧯 RESTORE v2: no user blobs found — ABORT, nothing changed")
+            return
+        }
+        let sourceUID = String(sourceKey.dropFirst(prefix.count))
+        let currentPointer = d.string(forKey: "last_authenticated_firebase_uid")
+        print("🧯 RESTORE v2: real-data blob = \(sourceKey) (\(bestSize) bytes)")
+        print("🧯 RESTORE v2: current pointer last_authenticated_firebase_uid = \(String(describing: currentPointer))")
+        if currentPointer == sourceUID {
+            print("🧯 RESTORE v2: pointer already at real blob — nothing to do")
+            d.set(true, forKey: doneFlag)
+            return
+        }
+        // Repoint session at the real blob. Guest mode sets no currentUser, so the
+        // load path keys off last_authenticated_firebase_uid.
+        d.set(sourceUID, forKey: "last_authenticated_firebase_uid")
+        d.set(true, forKey: doneFlag)
+        print("🧯 RESTORE v2: repointed last_authenticated_firebase_uid = \(sourceUID). Source untouched. Relaunch to load real data.")
+    }
+
+    private static func dumpUserStorageForRecovery() {
+        let defaults = UserDefaults.standard
+        let all = defaults.dictionaryRepresentation()
+        let keys = all.keys.filter {
+            $0.hasPrefix("currentUser") || $0 == "userData" || $0.hasPrefix("user_")
+        }.sorted()
+        print("🧯 RECOVERY DUMP START — \(keys.count) candidate storage keys")
+        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        for k in keys {
+            if let data = defaults.data(forKey: k) {
+                let str = String(data: data, encoding: .utf8) ?? "<non-utf8 \(data.count) bytes>"
+                print("🧯 KEY \(k) — \(data.count) bytes:\n\(str)\n🧯 END \(k)")
+                let safe = k.replacingOccurrences(of: "/", with: "_")
+                try? data.write(to: docs.appendingPathComponent("RECOVERY_\(safe).json"))
+            } else {
+                print("🧯 KEY \(k) — non-data value: \(String(describing: all[k]))")
+            }
+        }
+        for p in ["currentUserId", "currentUserName", "currentUserEmail", "last_authenticated_firebase_uid"] {
+            print("🧯 SESSION \(p) = \(String(describing: defaults.object(forKey: p)))")
+        }
+        print("🧯 RECOVERY DUMP COMPLETE — files saved to Documents/RECOVERY_*.json")
+    }
+    #endif
+
     private var sharedModelContainer: ModelContainer = CashMonkiApp.createModelContainer()
 
     /// Create ModelContainer as a static function to ensure consistent initialization
@@ -55,85 +144,59 @@ struct CashMonkiApp: App {
                 // Only show main content after welcome screen is dismissed
                 if !showingWelcome {
                     Group {
-                        // CURRENT: No-auth flow - use showingOnboarding as primary control
-                        // ContentView is always the base, onboarding shows as fullScreenCover
-                        ContentView()
-                            .environmentObject(toastManager)
-                            .preferredColorScheme(.light)
-                            .fullScreenCover(isPresented: $showingOnboarding) {
-                                OnboardingFlow(
-                                    isPresented: $showingOnboarding,
-                                    onComplete: {
-                                        print("🎉 CashMonkiApp: ======= ONBOARDING COMPLETION CALLBACK =======")
-                                        // Paywall is now shown directly from OnboardingFlow
-                                        // Just dismiss onboarding - welcome toast is also handled by OnboardingFlow
-                                        showingOnboarding = false
-                                        isNewUser = false
-                                        print("✅ CashMonkiApp: Onboarding dismissed")
-                                    },
-                                    onBack: nil, // No back button needed - no login to go back to
-                                    userEmail: nil, // No email yet - collected during onboarding
-                                    isNewRegistration: true, // Treat all first-time users as new
-                                    forceStartStep: nil
-                                )
+                        // Auth-first flow: require login OR an explicit "continue as guest".
+                        // Anonymous sessions alone do NOT pass (see AuthenticationManager) - the
+                        // gate shows the login screen until the user signs in or taps guest.
+                        // Guest keeps the app usable without an account (App Store 5.1.1(v)).
+                        if authManager.isAuthenticated || authManager.isGuestMode {
+                            ContentView()
                                 .environmentObject(toastManager)
-                            }
-                            // Note: Paywall after onboarding is now shown directly from OnboardingFlow
-                            // This eliminates the 2-second delay between onboarding and paywall
-                            .onAppear {
-                                // Check if onboarding needs to be shown
-                                if !OnboardingStateManager.shared.isOnboardingComplete() {
-                                    showingOnboarding = true
-                                }
-                            }
-
-                        // MARK: - FUTURE: Auth-first flow (commented out for future use)
-                        /*
-                        if authManager.isAuthenticated {
-                            if showingOnboarding {
-                                OnboardingFlow(
-                                    isPresented: $showingOnboarding,
-                                    onComplete: {
-                                        print("🎉 CashMonkiApp: ======= ONBOARDING COMPLETION CALLBACK =======")
-                                        showingOnboarding = false
-                                        isNewUser = false
-                                        authManager.isNewRegistration = false
-
-                                        // Show welcome toast with user's first name
-                                        if let currentUser = authManager.currentUser {
-                                            let firstName = currentUser.name.components(separatedBy: " ").first ?? "there"
-                                            let hasShownWelcomeKey = "hasShownWelcomeToast_\(currentUser.firebaseUID)"
-                                            if !UserDefaults.standard.bool(forKey: hasShownWelcomeKey) {
-                                                UserDefaults.standard.set(true, forKey: hasShownWelcomeKey)
-                                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-                                                    NotificationCenter.default.post(
-                                                        name: NSNotification.Name("ShowWelcomeToast"),
-                                                        object: firstName
-                                                    )
-                                                }
-                                            }
-                                        }
-                                    },
-                                    onBack: {
-                                        authManager.logout()
-                                        showingOnboarding = false
-                                        isNewUser = false
-                                    },
-                                    userEmail: authManager.currentUser?.email,
-                                    isNewRegistration: authManager.isNewRegistration,
-                                    forceStartStep: nil
-                                )
-                                .environmentObject(toastManager)
-                            } else {
-                                ContentView()
+                                .preferredColorScheme(.light)
+                                .fullScreenCover(isPresented: $showingOnboarding) {
+                                    OnboardingFlow(
+                                        isPresented: $showingOnboarding,
+                                        onComplete: {
+                                            print("🎉 CashMonkiApp: ======= ONBOARDING COMPLETION CALLBACK =======")
+                                            // Paywall is shown directly from OnboardingFlow
+                                            showingOnboarding = false
+                                            isNewUser = false
+                                            authManager.isNewRegistration = false
+                                            print("✅ CashMonkiApp: Onboarding dismissed")
+                                        },
+                                        onBack: {
+                                            // Back on onboarding = log out, return to login screen.
+                                            authManager.logout()
+                                            showingOnboarding = false
+                                            isNewUser = false
+                                        },
+                                        userEmail: authManager.currentUser?.email,
+                                        isNewRegistration: authManager.isNewRegistration,
+                                        forceStartStep: nil
+                                    )
                                     .environmentObject(toastManager)
-                                    .preferredColorScheme(.light)
-                            }
+                                }
+                                .onAppear {
+                                    // Check if onboarding needs to be shown. Local-first restore
+                                    // usually has the real progress here already.
+                                    if !OnboardingStateManager.shared.isOnboardingComplete() {
+                                        showingOnboarding = true
+                                    }
+                                }
+                                .onReceive(NotificationCenter.default.publisher(
+                                    for: NSNotification.Name("UserManagerFirebaseLoadComplete"))
+                                ) { _ in
+                                    // Restore finished (local or async cloud). If the logged-in user
+                                    // already completed onboarding, dismiss it. Fixes returning users
+                                    // seeing onboarding again because onAppear ran before their saved
+                                    // progress loaded.
+                                    if OnboardingStateManager.shared.isOnboardingComplete() {
+                                        showingOnboarding = false
+                                    }
+                                }
                         } else {
                             AuthenticationView()
                                 .preferredColorScheme(.light)
                         }
-                        */
                     }
                     .transition(.opacity)
                 }
@@ -310,8 +373,11 @@ struct CashMonkiApp: App {
                         print("   - Updated showingOnboarding: \(showingOnboarding)")
                         print("   - Updated isNewUser: \(isNewUser)")
                         
-                        // Identify user to RevenueCat and PostHog
-                        if let userId = authManager.currentUser?.id.uuidString {
+                        // Identify user to RevenueCat and PostHog.
+                        // MUST use the stable Firebase UID — currentUser.id is a fresh random
+                        // UUID each launch, which made RevenueCat mint a new anonymous user
+                        // daily and drop the user's entitlement (subscription "reset" every day).
+                        if let userId = authManager.currentUser?.firebaseUID, !userId.isEmpty {
                             Task {
                                 await RevenueCatManager.shared.identifyUser(userId: userId)
                             }
@@ -346,9 +412,29 @@ struct CashMonkiApp: App {
         print("✅ FirebaseCore is available")
         if FirebaseApp.app() == nil {
             print("🔥 Configuring Firebase...")
+            #if canImport(FirebaseAppCheck)
+            // App Check (App Attest) — must be set BEFORE configure().
+            // Requires the FirebaseAppCheck package product on the target and
+            // the app registered under Firebase console → App Check.
+            AppCheck.setAppCheckProviderFactory(CashMonkiAppCheckProviderFactory())
+            #endif
             FirebaseApp.configure()
             print("✅ Firebase configured successfully")
-            
+
+            #if canImport(FirebaseAuth)
+            // Anonymous session so Firestore rules can require request.auth.
+            // Upgraded in place if the user later signs in properly.
+            if Auth.auth().currentUser == nil {
+                Auth.auth().signInAnonymously { result, error in
+                    if let error {
+                        print("🔐 Anonymous sign-in failed: \(error.localizedDescription)")
+                    } else {
+                        print("🔐 Anonymous session ready: \(result?.user.uid.prefix(8) ?? "")")
+                    }
+                }
+            }
+            #endif
+
             // Now that Firebase is configured, check authentication
             authManager.checkAuthenticationStatus()
             print("🔐 App startup: Auth status - isAuthenticated: \(authManager.isAuthenticated)")
@@ -552,3 +638,17 @@ struct CashMonkiApp: App {
         return receiptURL.path.contains("sandboxReceipt")
     }
 }
+
+
+#if canImport(FirebaseAppCheck)
+/// App Attest on device, debug provider in the simulator.
+final class CashMonkiAppCheckProviderFactory: NSObject, AppCheckProviderFactory {
+    func createProvider(with app: FirebaseApp) -> AppCheckProvider? {
+        #if targetEnvironment(simulator)
+        return AppCheckDebugProvider(app: app)
+        #else
+        return AppAttestProvider(app: app)
+        #endif
+    }
+}
+#endif

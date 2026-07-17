@@ -14,7 +14,7 @@ import UIKit
 import FirebaseAuth
 #endif
 
-enum Tab: Hashable { case home, transactions, budgets, settings }
+enum Tab: Hashable { case home, transactions, ask, budgets, settings }
 
 struct NavbarFramePreferenceKey: PreferenceKey {
     static var defaultValue: CGRect = .zero
@@ -62,6 +62,8 @@ struct ContentView: View {
                         )
                     case .transactions:
                         ReceiptsPage()
+                    case .ask:
+                        AskPage()
                     case .budgets:
                         BudgetsPage()
                     case .settings:
@@ -626,6 +628,27 @@ struct ContentView: View {
                                 .weight(.semibold)
                         )
                         .foregroundColor(selectedTab == .budgets ? AppColors.primary : AppColors.foregroundTertiary)
+                }
+            }
+            .frame(maxWidth: .infinity)
+            .buttonStyle(PlainButtonStyle())
+            .animation(nil, value: selectedTab)
+
+            // Ask (AI chat) tab
+            Button(action: { selectedTab = .ask }) {
+                VStack(spacing: 2) {
+                    Image("stars-01")
+                        .renderingMode(.template)
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(width: 24, height: 24)
+                        .foregroundColor(selectedTab == .ask ? AppColors.primary : AppColors.foregroundTertiary)
+                    Text("Ask")
+                        .font(
+                            Font.custom("Overused Grotesk", size: 11)
+                                .weight(.semibold)
+                        )
+                        .foregroundColor(selectedTab == .ask ? AppColors.primary : AppColors.foregroundTertiary)
                 }
             }
             .frame(maxWidth: .infinity)

@@ -25,6 +25,7 @@ struct DebugSettingsSection: View {
 
     @ObservedObject var userManager: UserManager
     @EnvironmentObject var toastManager: ToastManager
+    @ObservedObject private var feedbackManager = FeedbackManager.shared
 
     var body: some View {
         VStack(spacing: 0) {
@@ -35,6 +36,7 @@ struct DebugSettingsSection: View {
                 debugDataManagementRows
                 debugOnboardingTestRows
                 debugCurrencyPickerTestRows
+                debugFeedbackRows
             }
             .background(AppColors.backgroundWhite)
             .clipShape(RoundedRectangle(cornerRadius: 16))
@@ -276,6 +278,25 @@ struct DebugSettingsSection: View {
                 icon: "🏳️"
             ) {
                 showingSecondaryCurrencyPicker = true
+            }
+        }
+    }
+
+    // MARK: - Feedback
+
+    private var debugFeedbackRows: some View {
+        Group {
+            Divider()
+                .padding(.leading, 52)
+
+            debugSettingsRow(
+                title: "Feedback: Admin Mode",
+                subtitle: feedbackManager.isAdminMode
+                    ? "ON — showing New tab, Approve & moderation"
+                    : "OFF — regular user view",
+                icon: "🛡️"
+            ) {
+                feedbackManager.isAdminMode.toggle()
             }
         }
     }

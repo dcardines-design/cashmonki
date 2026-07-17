@@ -289,6 +289,22 @@ class RevenueCatManager: NSObject, ObservableObject {
             customerInfo = result.customerInfo
             updateSubscriptionStatus(result.customerInfo)
             print("✅ RevenueCat: User identified - created: \(result.created)")
+
+            // Recovery: if this identity has NO active entitlement, the sub may be stranded on
+            // an old identity (a guest/anonymous session, a prior login, or a pre-identity-fix
+            // random RC user). Sync the device's Apple receipt to this now-current user so the
+            // entitlement re-binds to the account they logged in with. No UI — silent receipt sync.
+            if !isSubscriptionActive {
+                print("🔄 RevenueCat: No active entitlement after login — syncing Apple receipt to recover a stranded sub")
+                do {
+                    let synced = try await Purchases.shared.syncPurchases()
+                    customerInfo = synced
+                    updateSubscriptionStatus(synced)
+                    print("✅ RevenueCat: Receipt sync complete — active: \(isSubscriptionActive)")
+                } catch {
+                    print("⚠️ RevenueCat: Receipt sync failed - \(error.localizedDescription)")
+                }
+            }
         } catch {
             print("❌ RevenueCat: Failed to identify user - \(error.localizedDescription)")
         }

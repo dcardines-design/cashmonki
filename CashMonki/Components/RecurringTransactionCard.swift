@@ -148,13 +148,7 @@ struct RecurringTransactionCard: View {
             nextDate = frequency.nextOccurrence(from: nextDate)
         }
 
-        // For 5-minute frequency, show seconds (live countdown)
-        if frequency == .fiveMinutes {
-            let seconds = Calendar.current.dateComponents([.second], from: currentDate, to: nextDate).second ?? 0
-            return (max(0, seconds), seconds == 1 ? "second" : "seconds")
-        }
-
-        // For other frequencies, show days
+        // Show days until renewal
         let days = Calendar.current.dateComponents([.day], from: currentDate, to: nextDate).day ?? 0
         return (max(0, days), days == 1 ? "day" : "days")
     }
@@ -230,28 +224,15 @@ struct RecurringTransactionCard: View {
                 }
             }
 
-            // "Renews in X days/seconds" - live countdown for 5-minute frequency
-            if transaction.recurringFrequency == .fiveMinutes {
-                TimelineView(.periodic(from: .now, by: 1)) { context in
-                    let renewal = timeUntilRenewal(from: context.date)
-                    HStack(spacing: 4) {
-                        Text("Renews in")
-                            .foregroundColor(AppColors.foregroundTertiary)
-                        Text("\(renewal.value) \(renewal.unit)")
-                            .foregroundColor(renewal.value <= 7 ? AppColors.foregroundSecondary : AppColors.foregroundTertiary)
-                    }
-                    .font(AppFonts.overusedGroteskMedium(size: 14))
-                }
-            } else {
-                let renewal = timeUntilRenewal(from: Date())
-                HStack(spacing: 4) {
-                    Text("Renews in")
-                        .foregroundColor(AppColors.foregroundTertiary)
-                    Text("\(renewal.value) \(renewal.unit)")
-                        .foregroundColor(renewal.value <= 7 ? AppColors.foregroundSecondary : AppColors.foregroundTertiary)
-                }
-                .font(AppFonts.overusedGroteskMedium(size: 14))
+            // "Renews in X days"
+            let renewal = timeUntilRenewal(from: Date())
+            HStack(spacing: 4) {
+                Text("Renews in")
+                    .foregroundColor(AppColors.foregroundTertiary)
+                Text("\(renewal.value) \(renewal.unit)")
+                    .foregroundColor(renewal.value <= 7 ? AppColors.foregroundSecondary : AppColors.foregroundTertiary)
             }
+            .font(AppFonts.overusedGroteskMedium(size: 14))
         }
         .padding(.leading, 18)
         .padding(.trailing, 14)

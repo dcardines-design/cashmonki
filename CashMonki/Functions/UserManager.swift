@@ -17,12 +17,32 @@ import FirebaseCore
 import FirebaseAuth
 #endif
 
+/// A local data box on this device, surfaced in the "Connect device data" picker so the
+/// user can choose which one to attach to their login.
+struct LocalDataBox: Identifiable, Equatable {
+    let uid: String            // the currentUser_firebase_<uid> key suffix
+    let name: String
+    let email: String
+    let transactionCount: Int
+    let walletCount: Int
+    let updatedAt: Date
+    var id: String { uid }
+}
+
 class UserManager: ObservableObject {
     static let shared = UserManager()
 
     @Published var currentUser: UserData
     @Published var isLoadingFromFirebase = false
     @Published var firebaseError: String?
+
+    // Real cloud-sync status (drives the truthful "Sync to Cloud" subtitle).
+    @Published var isSyncingToCloud = false
+    @Published var lastCloudSyncFailed = false
+    @Published var lastCloudSyncAt: Date? = {
+        let t = UserDefaults.standard.double(forKey: "lastCloudSyncAt")
+        return t > 0 ? Date(timeIntervalSince1970: t) : nil
+    }()
 
     // Track if we've requested an app review (persisted across sessions)
     @AppStorage("hasRequestedAppReview") private var hasRequestedAppReview = false
@@ -57,7 +77,7 @@ class UserManager: ObservableObject {
             transactions: [],
             accounts: [defaultWallet],
             onboardingCompleted: 0, // Default: not started
-            enableFirebaseSync: false // DEFAULT TO OFF for local-first approach
+            enableFirebaseSync: true // DEFAULT ON - cloud backup so data survives reinstall
         )
         
         print("🏗️ UserManager: Default user created - \(currentUser.name) (\(currentUser.email))")
@@ -97,6 +117,37 @@ class UserManager: ObservableObject {
         print("🔄 UserManager: Refreshing with newly authenticated user...")
         restoreUserSession()
     }
+
+    // MARK: - Role assignment
+
+    /// Emails that get the "admin" role. Everyone else is "user".
+    private static let adminEmails: Set<String> = ["dcardinesiii@gmail.com"]
+
+    /// Fills in currentUser.role after load/login. Allowlisted emails are
+    /// always admins; everyone else gets "user" only when the role is unset,
+    /// so a manually assigned role (profile-name tap trick) survives relaunch.
+    func ensureRoleAssigned() {
+        let email = currentUser.email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if Self.adminEmails.contains(email) {
+            guard currentUser.role != "admin" else { return }
+            setRole("admin")
+        } else if currentUser.role == nil {
+            setRole("user")
+        }
+    }
+
+    /// Sets the role explicitly and persists it (local + Firebase).
+    func setRole(_ role: String) {
+        currentUser.role = role
+        objectWillChange.send()
+        print("🛡️ UserManager: Role set to '\(role)' for \(currentUser.email)")
+        saveCurrentUserLocally()
+        if currentUser.enableFirebaseSync {
+            syncToFirebase { success in
+                print(success ? "🛡️ UserManager: Role synced to Firebase" : "⚠️ UserManager: Role sync failed")
+            }
+        }
+    }
     
     // MARK: - User Authentication & Session Management
     
@@ -117,6 +168,14 @@ class UserManager: ObservableObject {
 
             // Use the locally stored user data
             self.currentUser = localUser
+            ensureRoleAssigned()
+
+            // Returning user with real data must skip onboarding + the post-onboarding paywall
+            // on launch. The onboarding gate reads currentUser.onboardingCompleted, so promote it
+            // when the box clearly belongs to a set-up user (transactions / default wallet / prior
+            // completion flags). Without this, a box saved at < 16 shows onboarding every launch.
+            checkAndMarkOnboardingComplete()
+
             self.objectWillChange.send()
 
             // Trigger AccountManager refresh
@@ -125,7 +184,9 @@ class UserManager: ObservableObject {
             }
 
             print("💾 UserManager: Session restored from LOCAL STORAGE")
-            print("🚫 UserManager: Skipping Firebase load - transactions are local-only")
+
+            // Local data is source of truth. Ensure sync is ON and push a backup to cloud.
+            migrateEnableSyncIfNeeded()
 
             // Notify that loading is complete
             NotificationCenter.default.post(name: NSNotification.Name("UserManagerFirebaseLoadComplete"), object: nil)
@@ -150,13 +211,39 @@ class UserManager: ObservableObject {
             UserDefaults.standard.set(authenticatedUser.id.uuidString, forKey: "currentUserId")
             UserDefaults.standard.set(authenticatedUser.name, forKey: "currentUserName")
             UserDefaults.standard.set(authenticatedUser.email, forKey: "currentUserEmail")
-        } else {
-            // Fallback to test user for development
-            print("🔧 UserManager: No authenticated user, using test user for development")
-            useTestUser()
+
+            // CLOUD RESTORE: only when this device genuinely has NO transactions.
+            // setCurrentUser may have recovered local data via legacy-key migration; if so,
+            // local wins and we must NOT pull cloud (loadFromFirebase replaces transactions,
+            // which would clobber local with a possibly-staler cloud copy).
+            if currentUser.transactions.isEmpty {
+                print("☁️ UserManager: No local transactions - attempting cloud restore for \(authenticatedUser.email)")
+                loadFromFirebase { [weak self] success in
+                    guard let self = self else { return }
+                    DispatchQueue.main.async {
+                        if success {
+                            print("☁️ UserManager: Cloud restore complete - persisting to local storage")
+                        } else {
+                            print("💾 UserManager: No cloud data / restore failed - starting fresh on this device")
+                        }
+                        // Persist whatever we ended up with (restored cloud data, or the fresh default).
+                        self.saveCurrentUserLocally()
+                        self.objectWillChange.send()
+                        NotificationCenter.default.post(name: NSNotification.Name("UserManagerFirebaseLoadComplete"), object: nil)
+                    }
+                }
+            } else {
+                // Local data was recovered inside setCurrentUser's local-found branch, which
+                // already ran migrateEnableSyncIfNeeded() + posted the load-complete notification.
+                // Nothing more to do here - do NOT re-run them (would double-upload / double-notify).
+                print("💾 UserManager: Local transactions present (\(currentUser.transactions.count)) - handled by setCurrentUser, local kept")
+            }
+            return
         }
 
-        // STEP 3: New user with no local data - start with empty transactions
+        // STEP 3: No authenticated user (dev/test) - start empty locally.
+        print("🔧 UserManager: No authenticated user, using test user for development")
+        useTestUser()
         print("👋 UserManager: NEW USER - Starting with empty transaction list")
         print("📱 UserManager: Transactions will be stored locally on this device")
         self.currentUser.transactions = []
@@ -181,6 +268,30 @@ class UserManager: ObservableObject {
         */
     }
     
+    /// Cloud-sync migration for users whose local data predates default-on sync.
+    /// SAFE: only ever turns sync ON and PUSHES local data up. Never pulls, never
+    /// overwrites local. Respects an explicit user opt-out if one was saved.
+    private func migrateEnableSyncIfNeeded() {
+        let optOutKey = "enableFirebaseSync_\(currentUser.id.uuidString)"
+        let explicitlyDisabled = UserDefaults.standard.object(forKey: optOutKey) != nil
+            && UserDefaults.standard.bool(forKey: optOutKey) == false
+        guard !explicitlyDisabled else {
+            print("☁️ UserManager: User explicitly disabled sync - leaving OFF")
+            return
+        }
+
+        if !currentUser.enableFirebaseSync {
+            currentUser.enableFirebaseSync = true
+            saveCurrentUserLocally()
+            print("☁️ UserManager: Migrated existing user to cloud sync ON")
+        }
+
+        // Back up current LOCAL data to cloud (idempotent save; local stays source of truth).
+        syncToFirebase { success in
+            print(success ? "☁️ UserManager: Local data backed up to cloud" : "⚠️ UserManager: Cloud backup failed (will retry next launch)")
+        }
+    }
+
     /// Set current user (for authentication integration)
     func setCurrentUser(id: UUID, name: String, email: String) {
         print("👤 UserManager: Setting current user - \(name) (\(email))")
@@ -225,7 +336,7 @@ class UserManager: ObservableObject {
                 updatedAt: localUser.updatedAt,
                 goals: localUser.goals,
                 onboardingCompleted: localUser.onboardingCompleted, // Preserve onboarding progress
-                enableFirebaseSync: false // Default to OFF - local first
+                enableFirebaseSync: true // DEFAULT ON - cloud backup
             )
             
             // CRITICAL: Update AuthenticationManager to match local name
@@ -257,6 +368,9 @@ class UserManager: ObservableObject {
             
             // Check if this user has complete data and mark onboarding complete
             self.checkAndMarkOnboardingComplete()
+
+            // Local data is source of truth. Ensure sync is ON and push a backup to cloud.
+            migrateEnableSyncIfNeeded()
             return
         }
         
@@ -264,9 +378,10 @@ class UserManager: ObservableObject {
         print("🔍 WALLET DEBUG: This means existing wallets (like 'Rosebud') were not found!")
         print("🔍 WALLET DEBUG: User started fresh - all previous wallets lost")
         
-        // Create default wallet for new users (name will be set based on user's name)
+        // Create default wallet for new users (name will be set based on user's name).
+        // Stable id per identity so re-entry into this path never mints a duplicate default.
         let defaultWallet = AccountData(
-            id: UUID(), // Always use unique UUIDs
+            id: stableDefaultWalletID(),
             name: "Personal Wallet", // Default - updated to "[Name]'s Wallet" if name provided
             type: .personal,
             currency: .usd, // Temporary placeholder - will be updated during currency selection onboarding
@@ -280,7 +395,7 @@ class UserManager: ObservableObject {
             transactions: [],
             accounts: [defaultWallet],
             onboardingCompleted: 0, // New user starts onboarding from beginning
-            enableFirebaseSync: false // DEFAULT TO OFF - local first approach
+            enableFirebaseSync: true // DEFAULT ON - cloud backup
         )
         
         // Update the default wallet name based on user's name
@@ -361,7 +476,15 @@ class UserManager: ObservableObject {
             
             // CRITICAL: Also update OnboardingStateManager to prevent conflicts
             OnboardingStateManager.shared.markAsComplete()
-            
+
+            // The onboarding gate (isOnboardingComplete) reads the NUMERIC progress, so the
+            // flags + state above are not enough on their own — bump the number to complete.
+            // Without this the user is forced back through onboarding + paywall despite clearly
+            // having finished before.
+            if currentUser.onboardingCompleted < 16 {
+                updateOnboardingProgress(16)
+            }
+
             if hasExplicitCompletion {
                 print("✅ UserManager: RETURNING USER WITH EXPLICIT COMPLETION - Marked onboarding as complete")
                 print("🎯 UserManager: User previously completed all onboarding steps")
@@ -1032,30 +1155,9 @@ class UserManager: ObservableObject {
             )
         }
         
-        // LOCAL-ONLY MODE: Firebase sync disabled for now
-        // TODO: Re-enable when data sync feature is implemented
-        print("📱 UserManager: Transaction saved locally only (Firebase sync disabled)")
-
-        /*
-        // Enable automatic sync for transaction creation
-        syncManager?.syncTransaction(transactionToSync, operation: .create)
-
-        // FALLBACK: Also save directly to Firebase to ensure transaction is persisted
-        // This provides redundancy in case sync manager is not yet initialized
-        // Use Firebase UID for consistent Firebase operations
-        let firebaseUserID = AuthenticationManager.shared.currentUser?.firebaseUID ?? currentUser.id.uuidString
-        firestore.saveTransaction(transactionToSync, userId: firebaseUserID) { result in
-            switch result {
-            case .success():
-                print("✅ UserManager: FALLBACK - Transaction \(transaction.id.uuidString.prefix(8)) saved directly to Firebase")
-            case .failure(let error):
-                print("❌ UserManager: FALLBACK - Failed to save transaction directly: \(error)")
-                DispatchQueue.main.async {
-                    self.firebaseError = "Failed to save transaction: \(error.localizedDescription)"
-                }
-            }
-        }
-        */
+        // DELTA write: push just this one transaction to the cloud. Adding a transaction
+        // doesn't touch wallets/budgets, so no full user-doc sync is needed.
+        pushTransactionToCloud(transactionToSync)
 
         print("✅ UserManager: ADD TRANSACTION COMPLETED")
         print("📈 UserManager: Current balance: ₱\(String(format: "%.2f", currentUser.userBalance))")
@@ -1109,7 +1211,7 @@ class UserManager: ObservableObject {
                         
                         // Save to Firebase under correct user
                         // Use Firebase UID for consistent Firebase operations
-                        let firebaseUserID = AuthenticationManager.shared.currentUser?.firebaseUID ?? self.currentUser.id.uuidString
+                        let firebaseUserID = self.syncUID()
                         self.firestore.saveTransaction(migratedTransaction, userId: firebaseUserID) { _ in
                             print("✅ Saved migrated transaction to Firebase")
                         }
@@ -1138,7 +1240,7 @@ class UserManager: ObservableObject {
         
         // First, clear all transactions to remove the explosion
         // Use Firebase UID for consistent Firebase operations
-        let firebaseUserID = AuthenticationManager.shared.currentUser?.firebaseUID ?? currentUser.id.uuidString
+        let firebaseUserID = syncUID()
         firestore.clearAllTransactions(userId: firebaseUserID) { result in
             switch result {
             case .success():
@@ -1213,7 +1315,7 @@ class UserManager: ObservableObject {
     private func cleanupFakeUsers() {
         print("🧹 UserManager: Cleaning up fake user documents...")
         // Use Firebase UID for consistent Firebase operations
-        let firebaseUserID = AuthenticationManager.shared.currentUser?.firebaseUID ?? currentUser.id.uuidString
+        let firebaseUserID = syncUID()
         firestore.cleanupFakeUsers(keepOnlyUserId: firebaseUserID) { result in
             switch result {
             case .success(let deletedCount):
@@ -1237,7 +1339,7 @@ class UserManager: ObservableObject {
         
         // Clear Firebase transactions collection
         // Use Firebase UID for consistent Firebase operations
-        let firebaseUserID = AuthenticationManager.shared.currentUser?.firebaseUID ?? currentUser.id.uuidString
+        let firebaseUserID = syncUID()
         firestore.clearAllTransactions(userId: firebaseUserID) { result in
             DispatchQueue.main.async {
                 switch result {
@@ -1268,7 +1370,7 @@ class UserManager: ObservableObject {
         firebaseError = nil
         
         // Use Firebase UID for consistent Firebase operations
-        let firebaseUserID = AuthenticationManager.shared.currentUser?.firebaseUID ?? currentUser.id.uuidString
+        let firebaseUserID = syncUID()
         firestore.fetchTransactions(userId: firebaseUserID) { result in
             DispatchQueue.main.async {
                 self.isLoadingFromFirebase = false
@@ -1328,39 +1430,68 @@ class UserManager: ObservableObject {
         // Get transaction before deletion to extract userId
         let transaction = currentUser.transactions.first { $0.id == id }
         // Use Firebase UID for consistent Firebase operations
-        let firebaseUserID = AuthenticationManager.shared.currentUser?.firebaseUID ?? currentUser.id.uuidString
+        let firebaseUserID = syncUID()
         
         currentUser.removeTransaction(withId: id)
+        // Tombstone the id so a later merge (loadFromFirebase / connect) can NEVER resurrect it,
+        // even if the cloud delete below fails or the user is offline.
+        tombstoneTransaction(id)
         saveCurrentUserLocally()
         objectWillChange.send()
 
-        // LOCAL-ONLY MODE: Firebase sync disabled for now
-        // TODO: Re-enable when data sync feature is implemented
-        print("📱 UserManager: Transaction deleted locally only (Firebase sync disabled)")
-
-        /*
-        // Enable automatic sync for transaction deletion
-        if let transaction = transaction {
-            syncManager?.syncTransaction(transaction, operation: .delete)
-
-            // FALLBACK: Also delete directly from Firebase
+        // Propagate the deletion to the cloud so it's gone everywhere. Gated on sync being on.
+        if currentUser.enableFirebaseSync, transaction != nil {
             firestore.deleteTransaction(transactionId: id.uuidString, userId: firebaseUserID) { result in
                 switch result {
                 case .success():
-                    print("✅ UserManager: FALLBACK - Transaction \(id.uuidString.prefix(8)) deleted directly from Firebase")
+                    print("✅ UserManager: Transaction \(id.uuidString.prefix(8)) deleted from Firebase")
                 case .failure(let error):
-                    print("❌ UserManager: FALLBACK - Failed to delete transaction directly: \(error)")
-                    DispatchQueue.main.async {
-                        self.firebaseError = "Failed to delete transaction: \(error.localizedDescription)"
-                    }
+                    // Local tombstone still protects against resurrection until the next
+                    // successful sync retries the delete.
+                    print("❌ UserManager: Failed to delete transaction from Firebase: \(error)")
                 }
             }
         } else {
-            print("⚠️ UserManager: Could not find transaction to sync deletion")
+            print("📱 UserManager: Transaction deleted locally (sync off) — tombstoned")
         }
-        */
 
         print("🗑️ UserManager: Removed transaction with ID \(id)")
+    }
+
+    // MARK: - Deletion tombstones
+
+    /// Ids of transactions the user has deleted. Merge operations subtract these so a stale
+    /// cloud/box copy can never bring a deleted transaction back (zombie prevention).
+    /// PER-USER key (was a single global key): one account's deletions must not suppress another
+    /// account's same-id transactions on a shared device. Capped so it can't grow unbounded.
+    private var tombstoneKey: String { "deletedTransactionIDs_\(syncUID())" }
+
+    private static let tombstoneCap = 2000
+
+    private var deletedTransactionIDs: Set<String> {
+        get {
+            // One-time migration of the legacy GLOBAL key into the current user's key.
+            if let legacy = UserDefaults.standard.stringArray(forKey: "deletedTransactionIDs"), !legacy.isEmpty {
+                var merged = Set(UserDefaults.standard.stringArray(forKey: tombstoneKey) ?? [])
+                merged.formUnion(legacy)
+                UserDefaults.standard.set(Array(merged), forKey: tombstoneKey)
+                UserDefaults.standard.removeObject(forKey: "deletedTransactionIDs")
+                return merged
+            }
+            return Set(UserDefaults.standard.stringArray(forKey: tombstoneKey) ?? [])
+        }
+        set {
+            // Prune oldest-inserted (array order) beyond the cap so the list can't grow forever.
+            var arr = Array(newValue)
+            if arr.count > Self.tombstoneCap { arr = Array(arr.suffix(Self.tombstoneCap)) }
+            UserDefaults.standard.set(arr, forKey: tombstoneKey)
+        }
+    }
+
+    private func tombstoneTransaction(_ id: UUID) {
+        var ids = deletedTransactionIDs
+        ids.insert(id.uuidString)
+        deletedTransactionIDs = ids
     }
     
     func updateTransaction(_ transaction: Txn) {
@@ -1368,29 +1499,8 @@ class UserManager: ObservableObject {
         saveCurrentUserLocally()
         objectWillChange.send()
 
-        // LOCAL-ONLY MODE: Firebase sync disabled for now
-        // TODO: Re-enable when data sync feature is implemented
-        print("📱 UserManager: Transaction updated locally only (Firebase sync disabled)")
-
-        /*
-        // Enable automatic sync for transaction updates
-        syncManager?.syncTransaction(transaction, operation: .update)
-
-        // FALLBACK: Also save directly to Firebase
-        // Use Firebase UID for consistent Firebase operations
-        let firebaseUserID = AuthenticationManager.shared.currentUser?.firebaseUID ?? currentUser.id.uuidString
-        firestore.saveTransaction(transaction, userId: firebaseUserID) { result in
-            switch result {
-            case .success():
-                print("✅ UserManager: FALLBACK - Transaction \(transaction.id.uuidString.prefix(8)) updated directly in Firebase")
-            case .failure(let error):
-                print("❌ UserManager: FALLBACK - Failed to update transaction directly: \(error)")
-                DispatchQueue.main.async {
-                    self.firebaseError = "Failed to update transaction: \(error.localizedDescription)"
-                }
-            }
-        }
-        */
+        // DELTA write: push only this changed transaction to the cloud.
+        pushTransactionToCloud(transaction)
 
         print("✏️ UserManager: Updated transaction - \(transaction.category) \(transaction.amount)")
     }
@@ -1434,20 +1544,8 @@ class UserManager: ObservableObject {
         saveCurrentUserLocally()
         objectWillChange.send()
 
-        // LOCAL-ONLY MODE: Firebase sync disabled for now
-        // TODO: Re-enable when data sync feature is implemented
-        print("📱 UserManager: Budget saved locally only (Firebase sync disabled)")
-
-        /*
-        // Sync to Firebase
-        syncToFirebase { success in
-            if success {
-                print("✅ UserManager: Budget synced to Firebase")
-            } else {
-                print("⚠️ UserManager: Budget sync to Firebase failed")
-            }
-        }
-        */
+        // Budgets live in the user doc — debounced backup (coalesces rapid budget edits).
+        backupSoon()
     }
 
     func updateBudget(_ budget: Budget) {
@@ -1597,7 +1695,7 @@ class UserManager: ObservableObject {
         print("💰 UserManager: Sample data balance: ₱\(String(format: "%.2f", currentUser.userBalance))")
         
         // Upload to Firebase
-        syncToFirebase { success in
+        fullSyncToFirebase { success in
             DispatchQueue.main.async {
                 if success {
                     print("✅ UserManager: Sample data successfully uploaded to Firebase!")
@@ -1652,8 +1750,189 @@ class UserManager: ObservableObject {
         print("📊 UserManager: Added \(sampleTransactions.count) sample transactions with varied times")
     }
     
+    // MARK: - Account Linking (guest/anonymous -> real login)
+
+    /// Claim the current in-memory (guest/anonymous) data for a real account and make it
+    /// cloud-backed. Called after any successful sign-in/sign-up. NON-DESTRUCTIVE: unions
+    /// the guest data with whatever the account already has (local under the new key +
+    /// cloud in Firestore), re-keys everything under `firebaseUID`, then pushes to cloud.
+    /// This is what makes data "follow the login" the way the subscription already does.
+    ///
+    /// Merge rule (user-approved "merge both"):
+    ///   - transactions: union by id; on id-collision keep the newer syncMetadata.lastModified.
+    ///     Recurring templates + their children keep their ids, so parent/child links never dangle.
+    ///   - accounts/wallets: existing mergeAccounts() union.
+    ///   - onboarding: keep the furthest progress.
+    func claimLocalDataIntoAccount(firebaseUID: String, completion: @escaping (Bool) -> Void = { _ in }) {
+        print("🔗 UserManager: CLAIM - linking local data into account \(firebaseUID.prefix(8))…")
+
+        // 1. Merge any data ALREADY stored locally under the new uid (returning user, same device).
+        if let existingLocal = loadUserFromLocalStorage(firebaseUID: firebaseUID, userEmail: currentUser.email) {
+            print("🔗 UserManager: CLAIM - found existing local data for this account, merging")
+            currentUser.transactions = mergeTransactions(currentUser.transactions, existingLocal.transactions)
+            currentUser.accounts = mergeAccounts(local: currentUser.accounts, firebase: existingLocal.accounts)
+            if currentUser.onboardingCompleted < existingLocal.onboardingCompleted {
+                currentUser.onboardingCompleted = existingLocal.onboardingCompleted
+            }
+        }
+
+        currentUser.enableFirebaseSync = true
+
+        // 2. Pull the account's CLOUD data and merge (returning user on a fresh install).
+        #if canImport(FirebaseCore) && canImport(FirebaseFirestore)
+        guard FirebaseApp.app() != nil else { finishClaim(completion: completion); return }
+        firestore.fetchUserData(userId: firebaseUID) { [weak self] userResult in
+            guard let self = self else { completion(false); return }
+            if case .success(let cloudUser?) = userResult {
+                DispatchQueue.main.async {
+                    self.currentUser.accounts = self.mergeAccounts(local: self.currentUser.accounts, firebase: cloudUser.accounts)
+                    if self.currentUser.name.isEmpty { self.currentUser.name = cloudUser.name }
+                    // Restore onboarding progress from the cloud too — a returning user on a
+                    // FRESH INSTALL has no local box, so without this they'd be forced through
+                    // onboarding + the post-onboarding paywall on every login.
+                    if self.currentUser.onboardingCompleted < cloudUser.onboardingCompleted {
+                        self.currentUser.onboardingCompleted = cloudUser.onboardingCompleted
+                    }
+                    // Restore budgets from the cloud (union by id). Budgets live in the user doc and
+                    // are written to cloud, but a fresh-install login had no path to read them back,
+                    // so previously-set budgets vanished after signing in.
+                    self.currentUser.budgets = self.mergeBudgets(self.currentUser.budgets, cloudUser.budgets)
+                }
+            }
+            self.firestore.fetchTransactions(userId: firebaseUID) { txnResult in
+                DispatchQueue.main.async {
+                    if case .success(let cloudTxns) = txnResult, !cloudTxns.isEmpty {
+                        print("🔗 UserManager: CLAIM - merging \(cloudTxns.count) cloud transactions")
+                        self.currentUser.transactions = self.mergeTransactions(self.currentUser.transactions, cloudTxns)
+                    }
+                    self.finishClaim(completion: completion)
+                }
+            }
+        }
+        #else
+        finishClaim(completion: completion)
+        #endif
+    }
+
+    /// Persist the merged result under the new uid + push to Firestore.
+    private func finishClaim(completion: @escaping (Bool) -> Void) {
+        currentUser.updatedAt = Date()
+        UserDefaults.standard.set(currentUser.id.uuidString, forKey: "currentUserId")
+        UserDefaults.standard.set(currentUser.name, forKey: "currentUserName")
+        UserDefaults.standard.set(currentUser.email, forKey: "currentUserEmail")
+        // Returning user with real data (transactions / default wallet / prior completion flags)
+        // should skip onboarding + the post-onboarding paywall. Do this BEFORE posting the
+        // load-complete notification so the onboarding gate reads the corrected state.
+        checkAndMarkOnboardingComplete()
+        saveCurrentUserLocally() // keys by new firebaseUID + sets last_authenticated_firebase_uid
+        ensureRoleAssigned()
+        objectWillChange.send()
+        NotificationCenter.default.post(name: NSNotification.Name("UserManagerFirebaseLoadComplete"), object: nil)
+        print("🔗 UserManager: CLAIM - saved locally (\(currentUser.transactions.count) txns, \(currentUser.accounts.count) wallets), pushing to cloud")
+        fullSyncToFirebase { success in
+            print("🔗 UserManager: CLAIM - cloud push \(success ? "OK" : "failed (will retry on next sync)")")
+            completion(success)
+        }
+    }
+
+    /// All local data boxes on this device that hold data, other than the current account's
+    /// own box. Powers the "Connect device data" picker so the user chooses which box to
+    /// attach to their login. Sorted by transaction count (richest first).
+    func availableLocalDataBoxes() -> [LocalDataBox] {
+        let prefix = "currentUser_firebase_"
+        let currentUID = AuthenticationManager.shared.currentUser?.firebaseUID
+        let d = UserDefaults.standard
+        var boxes: [LocalDataBox] = []
+        for key in d.dictionaryRepresentation().keys where
+            key.hasPrefix(prefix) &&
+            !key.hasSuffix("_preRestoreBackup") &&
+            !key.hasSuffix("_legacy_backup") {
+            let uid = String(key.dropFirst(prefix.count))
+            if uid == currentUID { continue } // its own box — nothing to connect
+            guard let data = d.data(forKey: key),
+                  let u = try? JSONDecoder().decode(UserData.self, from: data) else { continue }
+            if u.transactions.isEmpty && u.accounts.isEmpty { continue }
+            boxes.append(LocalDataBox(
+                uid: uid,
+                name: u.name,
+                email: u.email,
+                transactionCount: u.transactions.count,
+                walletCount: u.accounts.count,
+                updatedAt: u.updatedAt
+            ))
+        }
+        return boxes.sorted { $0.transactionCount > $1.transactionCount }
+    }
+
+    /// Attach a chosen local box to the currently signed-in account: its data is re-keyed to
+    /// the login's Firebase UID and uploaded to the cloud. Non-destructive union with whatever
+    /// the account already has; the source box is left in place as a safety copy.
+    func connectLocalBox(sourceUID: String, completion: @escaping (Bool) -> Void = { _ in }) {
+        guard AuthenticationManager.shared.currentUser?.firebaseUID != nil else {
+            print("🔗 UserManager: CONNECT-BOX aborted — not signed in")
+            completion(false); return
+        }
+        guard let data = UserDefaults.standard.data(forKey: "currentUser_firebase_\(sourceUID)"),
+              let source = try? JSONDecoder().decode(UserData.self, from: data) else {
+            print("🔗 UserManager: CONNECT-BOX aborted — source box \(sourceUID.prefix(8)) missing")
+            completion(false); return
+        }
+        print("🔗 UserManager: CONNECT-BOX - re-keying box \(sourceUID.prefix(8)) (\(source.transactions.count) txns) to the logged-in account")
+        currentUser.transactions = mergeTransactions(currentUser.transactions, source.transactions)
+        currentUser.accounts = mergeAccounts(local: currentUser.accounts, firebase: source.accounts)
+        if currentUser.onboardingCompleted < source.onboardingCompleted {
+            currentUser.onboardingCompleted = source.onboardingCompleted
+        }
+        currentUser.enableFirebaseSync = true
+
+        // Keep BOTH wallets (the merge already unions them). Select the wallet holding the most
+        // transactions after the merge — that's the one with the real data, so new transactions
+        // land there. Falls back to the imported box's default/first wallet if counts tie/empty.
+        let walletTxnCounts = currentUser.transactions.reduce(into: [UUID: Int]()) { counts, txn in
+            if let wid = txn.walletID { counts[wid, default: 0] += 1 }
+        }
+        let targetWalletId = walletTxnCounts.max(by: { $0.value < $1.value })?.key
+            ?? source.accounts.first(where: { $0.isDefault })?.id
+            ?? source.accounts.first?.id
+
+        // Bring the source box's subscriptions over too (re-keyed to the account).
+        Task { @MainActor in
+            SubscriptionManager.shared.adoptSubscriptions(fromUID: sourceUID)
+        }
+
+        finishClaim { success in
+            // Select the imported wallet AFTER the load-complete reload (which otherwise resets
+            // selection to the account's default). Run last so this selection wins.
+            if let targetWalletId {
+                DispatchQueue.main.async {
+                    AccountManager.shared.selectedSubAccountId = targetWalletId
+                    AccountManager.shared.objectWillChange.send()
+                    print("🎯 UserManager: CONNECT-BOX - selected imported wallet \(targetWalletId.uuidString.prefix(8))")
+                }
+            }
+            completion(success)
+        }
+    }
+
+    /// Union two transaction lists, unique by id. On id-collision keep the copy with the
+    /// newer syncMetadata.lastModified. Keeps recurring templates + children intact. Any id
+    /// the user has deleted (tombstoned) is dropped so a stale copy can't resurrect it.
+    private func mergeTransactions(_ a: [Txn], _ b: [Txn]) -> [Txn] {
+        var byId: [UUID: Txn] = [:]
+        for t in a { byId[t.id] = t }
+        for t in b {
+            if let existing = byId[t.id] {
+                byId[t.id] = (t.syncMetadata.lastModified > existing.syncMetadata.lastModified) ? t : existing
+            } else {
+                byId[t.id] = t
+            }
+        }
+        let tombstones = deletedTransactionIDs
+        return Array(byId.values).filter { !tombstones.contains($0.id.uuidString) }
+    }
+
     // MARK: - Firebase Sync Methods
-    
+
     func loadFromFirebase(completion: @escaping (Bool) -> Void) {
         // Always load from Firebase to get latest transactions
         // (removed hasLoadedFromFirebase guard to allow multiple loads)
@@ -1680,7 +1959,7 @@ class UserManager: ObservableObject {
         
         // Load user data first
         // Use Firebase UID for consistent Firebase operations
-        let firebaseUserID = AuthenticationManager.shared.currentUser?.firebaseUID ?? currentUser.id.uuidString
+        let firebaseUserID = syncUID()
         firestore.fetchUserData(userId: firebaseUserID) { [weak self] result in
             guard let self = self else { return }
             
@@ -1716,6 +1995,7 @@ class UserManager: ObservableObject {
                         print("   - Each device tracks its own onboarding state independently")
                         
                         self.currentUser = mergedUser
+                        self.ensureRoleAssigned()
                         print("🔄 UserManager: Merged accounts - final count: \(mergedAccounts.count)")
                         print("🔄 UserManager: Final account names: \(mergedAccounts.map { $0.name })")
                     }
@@ -1726,7 +2006,7 @@ class UserManager: ObservableObject {
                 // Load transactions separately
                 print("🔍 UserManager: Fetching transactions for user: \(self.currentUser.id.uuidString)")
                 // Use Firebase UID for consistent Firebase operations
-                let firebaseUserID = AuthenticationManager.shared.currentUser?.firebaseUID ?? self.currentUser.id.uuidString
+                let firebaseUserID = self.syncUID()
                 self.firestore.fetchTransactions(userId: firebaseUserID) { transactionResult in
                     DispatchQueue.main.async {
                         self.isLoadingFromFirebase = false
@@ -1753,13 +2033,22 @@ class UserManager: ObservableObject {
                             
                             // Log before assignment
                             print("🔄 UserManager: BEFORE assignment - current transaction count: \(self.currentUser.transactions.count)")
-                            
-                            self.currentUser.transactions = transactions
+
+                            // MERGE, don't replace. An empty or stale cloud pull must NEVER wipe
+                            // local transactions — that made balances "disappear" after sync.
+                            // Union by id (newer syncMetadata.lastModified wins); keeps local data
+                            // even when the cloud copy is behind, and persists the result.
+                            let localBefore = self.currentUser.transactions
+                            self.currentUser.transactions = self.mergeTransactions(localBefore, transactions)
                             self.hasLoadedFromFirebase = true
-                            
+                            if self.currentUser.transactions.count != transactions.count {
+                                // Local had data the cloud lacked — push the union back up.
+                                self.saveCurrentUserLocally()
+                            }
+
                             // Log after assignment
-                            print("🔄 UserManager: AFTER assignment - current transaction count: \(self.currentUser.transactions.count)")
-                            print("☁️ UserManager: Loaded \(transactions.count) transactions from Firebase")
+                            print("🔄 UserManager: AFTER merge - transaction count: \(self.currentUser.transactions.count) (local \(localBefore.count) + cloud \(transactions.count))")
+                            print("☁️ UserManager: Merged \(transactions.count) cloud transactions")
                             print("💰 UserManager: Updated balance after Firebase sync: ₱\(String(format: "%.2f", self.currentUser.userBalance))")
                             
                             // Add a delay to see what happens to the data
@@ -1816,28 +2105,89 @@ class UserManager: ObservableObject {
         }
     }
     
+    private var pendingBackupWork: DispatchWorkItem?
+
+    /// Push a single transaction to the cloud (delta write, gated on sync). One doc, cheap —
+    /// avoids re-uploading every transaction just because one changed.
+    private func pushTransactionToCloud(_ transaction: Txn) {
+        guard currentUser.enableFirebaseSync else { return }
+        let firebaseUserID = syncUID()
+        firestore.saveTransaction(transaction, userId: firebaseUserID) { result in
+            if case .failure(let error) = result {
+                print("❌ UserManager: cloud save failed for txn \(transaction.id.uuidString.prefix(8)): \(error)")
+            }
+        }
+    }
+
+    /// Debounced full backup (user doc + all transactions). Coalesces a burst of changes
+    /// (wallet edits, rapid entries) into ONE upload ~2s after the last change, instead of
+    /// firing a full sync per change. Explicit flows (connect, restore, sync toggle) still
+    /// call syncToFirebase directly for immediate, awaited results.
+    func backupSoon() {
+        guard currentUser.enableFirebaseSync else { return }
+        pendingBackupWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in self?.syncToFirebase { _ in } }
+        pendingBackupWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0, execute: work)
+    }
+
+    /// Lightweight default sync: writes ONLY the user document (name/email/accounts/budgets/goals/
+    /// onboarding/enableSync). Transactions are NOT looped here — they already sync individually
+    /// via the delta `pushTransactionToCloud` on add/update. Most callers (field, account, budget
+    /// changes) want exactly this. Use `fullSyncToFirebase` when you've mutated the transaction
+    /// array in bulk (login claim, recurring-txn generation, migrations, force-sync).
     func syncToFirebase(completion: @escaping (Bool) -> Void) {
+        guard currentUser.enableFirebaseSync else {
+            print("🚫 UserManager: Firebase sync disabled for user - skipping sync")
+            completion(true)
+            return
+        }
+        DispatchQueue.main.async { self.isSyncingToCloud = true }
+        firestore.saveUserData(currentUser, userId: syncUID()) { [weak self] result in
+            guard let self = self else { return }
+            DispatchQueue.main.async {
+                switch result {
+                case .success():
+                    self.markCloudSync(succeeded: true)
+                    completion(true)
+                case .failure(let error):
+                    self.firebaseError = "Failed to sync user data: \(error.localizedDescription)"
+                    self.markCloudSync(succeeded: false)
+                    completion(false)
+                }
+            }
+        }
+    }
+
+    /// Full sync: user document PLUS every transaction pushed to the subcollection. Heavier —
+    /// only for callers that changed the transaction array in bulk (login claim, recurring-txn
+    /// generation, migrations, explicit force-sync).
+    func fullSyncToFirebase(completion: @escaping (Bool) -> Void) {
         // Check if Firebase sync is enabled for this user
         guard currentUser.enableFirebaseSync else {
             print("🚫 UserManager: Firebase sync disabled for user - skipping sync")
             completion(true) // Return success since user chose not to sync
             return
         }
-        
-        // Save user data
-        firestore.saveUserData(currentUser) { [weak self] result in
+
+        DispatchQueue.main.async { self.isSyncingToCloud = true }
+
+        // Save user data under the Firebase UID (same doc fetchUserData reads + parent of the
+        // transactions subcollection), so wallets/budgets survive reinstall.
+        let userDocID = syncUID()
+        firestore.saveUserData(currentUser, userId: userDocID) { [weak self] result in
             guard let self = self else { return }
-            
+
             switch result {
             case .success():
                 // Save all transactions
                 let dispatchGroup = DispatchGroup()
                 var hasErrors = false
-                
+
                 for transaction in self.currentUser.transactions {
                     dispatchGroup.enter()
                     // Use Firebase UID for consistent Firebase operations
-                    let firebaseUserID = AuthenticationManager.shared.currentUser?.firebaseUID ?? self.currentUser.id.uuidString
+                    let firebaseUserID = self.syncUID()
                     self.firestore.saveTransaction(transaction, userId: firebaseUserID) { transactionResult in
                         if case .failure = transactionResult {
                             hasErrors = true
@@ -1845,13 +2195,15 @@ class UserManager: ObservableObject {
                         dispatchGroup.leave()
                     }
                 }
-                
+
                 dispatchGroup.notify(queue: .main) {
                     if hasErrors {
                         self.firebaseError = "Some transactions failed to sync"
+                        self.markCloudSync(succeeded: false)
                         completion(false)
                     } else {
                         print("☁️ UserManager: All data synced to Firebase successfully")
+                        self.markCloudSync(succeeded: true)
                         completion(true)
                     }
                 }
@@ -1859,46 +2211,69 @@ class UserManager: ObservableObject {
             case .failure(let error):
                 DispatchQueue.main.async {
                     self.firebaseError = "Failed to sync user data: \(error.localizedDescription)"
+                    self.markCloudSync(succeeded: false)
                     completion(false)
                 }
             }
         }
     }
-    
+
+    /// Record the outcome of a cloud sync so the UI can show the truth (backed up / failed).
+    private func markCloudSync(succeeded: Bool) {
+        isSyncingToCloud = false
+        lastCloudSyncFailed = !succeeded
+        if succeeded {
+            let now = Date()
+            lastCloudSyncAt = now
+            UserDefaults.standard.set(now.timeIntervalSince1970, forKey: "lastCloudSyncAt")
+        }
+    }
+
     func clearFirebaseError() {
         firebaseError = nil
     }
     
     // MARK: - Sync Manager Integration
-    
+    // Repointed off TransactionSyncManager (disabled in Phase 1) onto UserManager's own sync
+    // state, so the UI's "force sync" / status drive the single remaining engine.
+
     /// Get current sync status
     func getSyncStatus() -> SyncStatus {
-        return syncManager?.getSyncStatus() ?? .notSynced
+        if isSyncingToCloud { return .syncing }
+        if lastCloudSyncFailed { return .error(message: "Sync failed") }
+        if let at = lastCloudSyncAt { return .synced(lastSyncDate: at) }
+        return .notSynced
     }
-    
-    /// Force immediate sync
+
+    /// Force immediate sync (full push through the single engine).
     func forceSync() {
-        syncManager?.forcSync()
+        guard currentUser.enableFirebaseSync else {
+            print("⏸️ UserManager.forceSync: sync disabled by user")
+            return
+        }
+        fullSyncToFirebase { success in
+            print("🔄 UserManager.forceSync: \(success ? "OK" : "failed")")
+        }
     }
-    
+
     /// Check if transactions are currently syncing
     var isSyncing: Bool {
-        return syncManager?.isSyncing ?? false
+        return isSyncingToCloud
     }
-    
-    /// Get pending changes count
+
+    /// Get pending changes count (no longer tracked per-change; 0 = up to date/idle)
     var pendingChangesCount: Int {
-        return syncManager?.pendingChangesCount ?? 0
+        return 0
     }
-    
+
     /// Get last sync date
     var lastSyncDate: Date? {
-        return syncManager?.lastSyncDate
+        return lastCloudSyncAt
     }
-    
+
     /// Clear sync errors
     func clearSyncError() {
-        syncManager?.clearSyncError()
+        lastCloudSyncFailed = false
     }
     
     
@@ -1973,6 +2348,21 @@ class UserManager: ObservableObject {
         }
     }
     
+    /// Union budgets by id; on collision the newer `updatedAt` wins. Preserves local-only budgets
+    /// and pulls in any the cloud has that this device lacks (fresh-install restore).
+    private func mergeBudgets(_ local: [Budget], _ cloud: [Budget]) -> [Budget] {
+        var byId: [UUID: Budget] = [:]
+        for b in local { byId[b.id] = b }
+        for b in cloud {
+            if let existing = byId[b.id] {
+                if b.updatedAt > existing.updatedAt { byId[b.id] = b }
+            } else {
+                byId[b.id] = b
+            }
+        }
+        return Array(byId.values)
+    }
+
     // MARK: - Account Merging
     
     /// Intelligently merge local and Firebase accounts to preserve local changes
@@ -2012,19 +2402,29 @@ class UserManager: ObservableObject {
             }
         }
         
-        // 3. Ensure we always have at least one default account
+        // 3. Ensure EXACTLY ONE default account. After a union two wallets can both carry
+        // isDefault (the account's own + a connected box's), which makes wallet selection
+        // ambiguous. Keep the first default (the account's own — local accounts are processed
+        // first) and clear any others. New transactions then follow the SELECTED wallet
+        // unambiguously, whichever the user picks.
         if mergedAccounts.isEmpty {
             print("⚠️ No accounts after merge, creating default wallet...")
             let defaultWallet = AccountData(
-                id: UUID(), // Always use unique UUIDs
+                id: stableDefaultWalletID(), // Stable per identity so it never piles up
                 name: "", // Empty name - will be set during onboarding
                 type: .personal,
                 currency: .usd, // Temporary placeholder - will be updated during currency selection onboarding
                 isDefault: true
             )
             mergedAccounts.append(defaultWallet)
-        } else if !mergedAccounts.contains(where: { $0.isDefault }) {
-            // No default account - make the first one default
+        } else if let firstDefaultIndex = mergedAccounts.firstIndex(where: { $0.isDefault }) {
+            // Exactly one default: keep the first, clear the rest.
+            for i in mergedAccounts.indices where i != firstDefaultIndex && mergedAccounts[i].isDefault {
+                mergedAccounts[i].isDefault = false
+                print("🔧 Cleared duplicate default on '\(mergedAccounts[i].name)'")
+            }
+        } else {
+            // No default at all - make the first one default
             mergedAccounts[0].isDefault = true
             print("✅ Set '\(mergedAccounts[0].name)' as default account")
         }
@@ -2068,6 +2468,125 @@ class UserManager: ObservableObject {
     }
     
     /// Save current user data to local storage (UserDefaults)
+    /// Remove auto-created default-wallet placeholders that pile up on login. When a user signs
+    /// in, the anonymous/guest session's empty "Personal Wallet" placeholder gets merged into the
+    /// real account (its id differs from the account's own default, so the merge keeps both), and
+    /// each fresh anonymous session mints a new one. This prunes them:
+    ///   • Only ever touches EMPTY (zero-transaction) wallets named like the auto default
+    ///     ("", "Personal", "Personal Wallet"). Wallets with data or a custom name are never removed.
+    ///   • If the account has ANY real wallet (holds transactions, or is custom-named), remove ALL
+    ///     the empty placeholders — a real user doesn't need a blank "Personal Wallet" clutter row.
+    ///   • If EVERY wallet is an empty placeholder (brand-new user), keep exactly one.
+    /// Always leaves ≥1 wallet with exactly one default. Non-destructive to real data.
+    @discardableResult
+    func dedupeAutoDefaultWallets() -> Bool {
+        let autoNames: Set<String> = ["", "personal", "personal wallet"]
+        let txnCounts = currentUser.transactions.reduce(into: [UUID: Int]()) { counts, txn in
+            if let wid = txn.walletID { counts[wid, default: 0] += 1 }
+        }
+        func isEmptyPlaceholder(_ a: AccountData) -> Bool {
+            autoNames.contains(a.name.lowercased()) && (txnCounts[a.id] ?? 0) == 0
+        }
+        let placeholders = currentUser.accounts.filter(isEmptyPlaceholder)
+        let realWallets = currentUser.accounts.filter { !isEmptyPlaceholder($0) }
+
+        // Which placeholders to drop:
+        //  - real wallets exist → drop every placeholder.
+        //  - only placeholders exist → keep one (prefer default, then stable-id, then first).
+        let removeIDs: Set<UUID>
+        if !realWallets.isEmpty {
+            guard !placeholders.isEmpty else { return false }
+            removeIDs = Set(placeholders.map { $0.id })
+        } else {
+            guard placeholders.count > 1 else { return false }
+            let stableID = stableDefaultWalletID()
+            let survivor = placeholders.first(where: { $0.isDefault })
+                ?? placeholders.first(where: { $0.id == stableID })
+                ?? placeholders[0]
+            removeIDs = Set(placeholders.map { $0.id }).subtracting([survivor.id])
+        }
+
+        print("🧹 UserManager: Pruning \(removeIDs.count) empty default-wallet placeholder(s) (real wallets: \(realWallets.count))")
+        currentUser.accounts.removeAll { removeIDs.contains($0.id) }
+        // Ensure EXACTLY ONE default remains without stealing default from a real user wallet:
+        // keep the first default (a real wallet wins since it may sort ahead), clear the rest,
+        // and if nothing is default, promote the first account.
+        if let firstDefault = currentUser.accounts.firstIndex(where: { $0.isDefault }) {
+            for i in currentUser.accounts.indices where i != firstDefault && currentUser.accounts[i].isDefault {
+                currentUser.accounts[i].isDefault = false
+            }
+        } else if !currentUser.accounts.isEmpty {
+            currentUser.accounts[0].isDefault = true
+        }
+        currentUser.updatedAt = Date()
+        saveCurrentUserLocally()
+        return true
+    }
+
+    /// THE one canonical identity for every cloud/local key — box key (`currentUser_firebase_<uid>`),
+    /// Firestore doc id (`users/<uid>`), and any per-user storage. Prefers the live Firebase UID;
+    /// else the persisted pointer from the last authenticated session (stable across the pre-auth
+    /// window); else the app UUID as a last resort. Using the pointer instead of a fresh
+    /// `currentUser.id.uuidString` stops the key churning to a random UUID before Firebase Auth
+    /// finishes loading — the root cause of the "wallets/data lost on launch, fresh start" bug.
+    func syncUID() -> String {
+        if let f = AuthenticationManager.shared.currentUser?.firebaseUID, !f.isEmpty { return f }
+        if let p = UserDefaults.standard.string(forKey: "last_authenticated_firebase_uid"), !p.isEmpty { return p }
+        return currentUser.id.uuidString
+    }
+
+    /// Stable, persisted default-wallet id for the current identity. Every place that
+    /// auto-creates a "Personal" default wallet reuses THIS id, so repeated setup passes
+    /// (app launch, each UserManagerFirebaseLoadComplete, the merge fallback) collapse into
+    /// ONE wallet on merge instead of minting a fresh-UUID "Personal" that piles up on every
+    /// login. Keyed per identity so each real account/guest still gets its own single default.
+    func stableDefaultWalletID() -> UUID {
+        let uid = syncUID()
+        let key = "defaultWalletID_\(uid)"
+        if let stored = UserDefaults.standard.string(forKey: key),
+           let id = UUID(uuidString: stored) {
+            return id
+        }
+        let id = UUID()
+        UserDefaults.standard.set(id.uuidString, forKey: key)
+        return id
+    }
+
+    /// Rolling local safety snapshot (3 slots) of the last good non-empty state, per identity.
+    /// Cheap insurance: if any future bug corrupts/blanks the live data, `restoreFromSafetySnapshot`
+    /// can bring back the richest recent copy. Skips writing an identical slot.
+    private func writeSafetySnapshot(_ data: Data, uid: String) {
+        let d = UserDefaults.standard
+        let slotKey = "safetySnapSlot_\(uid)"
+        let slot = d.integer(forKey: slotKey) % 3
+        let snapKey = "safetySnap_\(uid)_\(slot)"
+        if let existing = d.data(forKey: snapKey), existing == data { return }
+        d.set(data, forKey: snapKey)
+        d.set(slot + 1, forKey: slotKey)
+    }
+
+    /// Manual rescue: if the current data has fewer transactions than a saved snapshot, restore the
+    /// richest snapshot for this identity. Returns true if it recovered anything.
+    @discardableResult
+    func restoreFromSafetySnapshot() -> Bool {
+        let uid = syncUID()
+        var best: UserData?
+        var bestCount = currentUser.transactions.count
+        for slot in 0..<3 {
+            if let data = UserDefaults.standard.data(forKey: "safetySnap_\(uid)_\(slot)"),
+               let u = try? JSONDecoder().decode(UserData.self, from: data),
+               u.transactions.count > bestCount {
+                best = u; bestCount = u.transactions.count
+            }
+        }
+        guard let recovered = best else { return false }
+        print("♻️ UserManager: restoring \(recovered.transactions.count) txns from safety snapshot")
+        currentUser = recovered
+        saveCurrentUserLocally()
+        objectWillChange.send()
+        return true
+    }
+
     func saveCurrentUserLocally() {
         // SECURITY: Verify wallet ownership before saving
         verifyWalletOwnership()
@@ -2089,8 +2608,30 @@ class UserManager: ObservableObject {
             let encoded = try JSONEncoder().encode(currentUser)
 
             // Use Firebase UID for consistent storage key
-            let firebaseUID = AuthenticationManager.shared.currentUser?.firebaseUID ?? currentUser.id.uuidString
+            let firebaseUID = syncUID()
             let key = "currentUser_firebase_\(firebaseUID)"
+
+            // ── DATA-LOSS GUARDRAIL ─────────────────────────────────────────────────────────
+            // Refuse to overwrite a box that HAS data with a currentUser that looks like a fresh
+            // reset (blank/default name AND no transactions). Identity churn / reset bugs used to
+            // silently blank real data this way. A user genuinely deleting everything keeps their
+            // name + wallets, so this only blocks the accidental-wipe pattern, not real edits.
+            let looksLikeReset = currentUser.transactions.isEmpty &&
+                (currentUser.name.trimmingCharacters(in: .whitespaces).isEmpty ||
+                 currentUser.name == "Cashmonki User")
+            if looksLikeReset,
+               let existingData = UserDefaults.standard.data(forKey: key),
+               let existing = try? JSONDecoder().decode(UserData.self, from: existingData),
+               !existing.transactions.isEmpty {
+                print("🛑 UserManager: SAFETY — refusing to overwrite box \(firebaseUID.prefix(8)) (\(existing.transactions.count) txns) with empty/reset data")
+                return
+            }
+            // Keep a rolling local safety snapshot of the LAST good non-empty state, so any future
+            // corruption is recoverable. Written BEFORE the overwrite.
+            if !currentUser.transactions.isEmpty {
+                writeSafetySnapshot(encoded, uid: firebaseUID)
+            }
+            // ────────────────────────────────────────────────────────────────────────────────
 
             UserDefaults.standard.set(encoded, forKey: key)
 
@@ -2287,7 +2828,7 @@ class UserManager: ObservableObject {
         // If enabling sync and we have data, sync immediately
         if enabled && !currentUser.transactions.isEmpty {
             print("📤 UserManager: Syncing existing data to Firebase...")
-            syncToFirebase { success in
+            fullSyncToFirebase { success in
                 print(success ? "✅ Initial sync completed" : "❌ Initial sync failed")
             }
         }
@@ -2368,7 +2909,7 @@ class UserManager: ObservableObject {
         print("📤 UserManager: Syncing user: \(currentUser.name) (\(currentUser.email))")
         print("🏦 UserManager: Accounts to sync: \(currentUser.accounts.map { $0.name })")
         
-        syncToFirebase { success in
+        fullSyncToFirebase { success in
             if success {
                 print("✅ UserManager: Manual sync completed successfully")
             } else {
@@ -2457,7 +2998,7 @@ class UserManager: ObservableObject {
         // Optionally sync to Firebase
         for transaction in sampleTransactions {
             // Use Firebase UID for consistent Firebase operations
-            let firebaseUserID = AuthenticationManager.shared.currentUser?.firebaseUID ?? currentUser.id.uuidString
+            let firebaseUserID = syncUID()
             firestore.saveTransaction(transaction, userId: firebaseUserID) { result in
                 switch result {
                 case .success():

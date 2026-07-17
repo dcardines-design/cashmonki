@@ -72,8 +72,6 @@ struct Subscription: Identifiable, Codable, Equatable {
         let calendar = Calendar.current
 
         switch frequency {
-        case .fiveMinutes:
-            return calendar.date(byAdding: .minute, value: 5, to: date) ?? date
         case .daily:
             return calendar.date(byAdding: .day, value: 1, to: date) ?? date
         case .weekly:
@@ -112,22 +110,8 @@ struct Subscription: Identifiable, Codable, Equatable {
         return max(0, Int(seconds))
     }
 
-    /// Human-readable due date text (with minute precision for 5-minute frequency)
+    /// Human-readable due date text
     var dueText: String {
-        // For 5-minute frequency, show precise time
-        if frequency == .fiveMinutes {
-            let seconds = secondsUntilDue
-            if seconds <= 0 {
-                return "Due now"
-            } else if seconds < 60 {
-                return "Due in \(seconds)s"
-            } else {
-                let minutes = minutesUntilDue
-                return "Due in \(minutes)m"
-            }
-        }
-
-        // For other frequencies, show days
         let days = daysUntilDue
         if days == 0 {
             return "Due today"
@@ -151,8 +135,6 @@ struct Subscription: Identifiable, Codable, Equatable {
     /// Annual cost calculation
     var annualCost: Double {
         switch frequency {
-        case .fiveMinutes:
-            return amount * 12 * 24 * 365 // For testing (12 times per hour)
         case .daily:
             return amount * 365
         case .weekly:

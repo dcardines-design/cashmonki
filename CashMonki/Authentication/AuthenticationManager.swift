@@ -26,10 +26,68 @@ class AuthenticationManager: ObservableObject {
     @Published var isLoading: Bool = false
     @Published var authError: String?
     @Published var isNewRegistration: Bool = false // Track if this is a new registration
-    
+    @Published var isGuestMode: Bool = false // User chose "Continue as guest" (no account, local-only)
+
     private init() {
+        // Restore guest choice across launches so a guest isn't forced back to the login gate.
+        self.isGuestMode = UserDefaults.standard.bool(forKey: "isGuestMode")
         // Don't check authentication immediately - wait for Firebase to be configured
-        print("🔐 AuthenticationManager: Initialized - waiting for Firebase configuration")
+        print("🔐 AuthenticationManager: Initialized - waiting for Firebase configuration (guest: \(isGuestMode))")
+    }
+
+    // MARK: - Guest Mode
+
+    /// Continue without an account. App runs on the anonymous session, data local-only
+    /// (survives reinstall only if the user later signs in from Settings).
+    func continueAsGuest() {
+        print("👤 AuthenticationManager: Continue as guest selected")
+        let d = UserDefaults.standard
+
+        // Stable guest identity so the (not-connected) local data always loads in guest mode
+        // and is never confused with an account. Established once, then reused every time.
+        var guestUID = d.string(forKey: "guest_local_uid")
+        if guestUID == nil {
+            // Adopt the largest existing on-device data box (the user's real un-linked data),
+            // else the current pointer, else a fresh guest id.
+            guestUID = Self.largestLocalUserUID()
+                ?? d.string(forKey: "last_authenticated_firebase_uid")
+                ?? "guest_\(UUID().uuidString)"
+            d.set(guestUID, forKey: "guest_local_uid")
+            print("👤 AuthenticationManager: Established guest identity = \(guestUID ?? "?")")
+        }
+        // Point local storage at the guest identity so its data loads.
+        d.set(guestUID, forKey: "last_authenticated_firebase_uid")
+
+        isGuestMode = true
+        d.set(true, forKey: "isGuestMode")
+
+        // Load the guest's own data (posts load-complete -> subscriptions reload too).
+        UserManager.shared.restoreUserSession()
+    }
+
+    /// UID of the largest `currentUser_firebase_*` blob = the device's real local data.
+    /// Used to anchor the guest identity to the user's actual (un-linked) data.
+    private static func largestLocalUserUID() -> String? {
+        let prefix = "currentUser_firebase_"
+        let d = UserDefaults.standard
+        var bestUID: String?
+        var bestSize = 0
+        for key in d.dictionaryRepresentation().keys where
+            key.hasPrefix(prefix) &&
+            !key.hasSuffix("_preRestoreBackup") &&
+            !key.hasSuffix("_legacy_backup") {
+            if let data = d.data(forKey: key), data.count > bestSize {
+                bestSize = data.count
+                bestUID = String(key.dropFirst(prefix.count))
+            }
+        }
+        return bestUID
+    }
+
+    /// Clear guest mode (called on logout / when a real account takes over).
+    func exitGuestMode() {
+        isGuestMode = false
+        UserDefaults.standard.set(false, forKey: "isGuestMode")
     }
     
     
@@ -39,7 +97,9 @@ class AuthenticationManager: ObservableObject {
         print("🔐 AuthenticationManager: Checking authentication status...")
         
         #if canImport(FirebaseAuth)
-        if let firebaseUser = Auth.auth().currentUser {
+        // NOTE: anonymous sessions (used so Firestore rules can require auth pre-login)
+        // do NOT count as authenticated — the login gate must still show for them.
+        if let firebaseUser = Auth.auth().currentUser, !firebaseUser.isAnonymous {
             print("🔐 AuthenticationManager: Found Firebase user: \(firebaseUser.email ?? "unknown")")
             
             // Create AuthenticatedUser from Firebase user
@@ -83,8 +143,30 @@ class AuthenticationManager: ObservableObject {
         print("🔐 AuthenticationManager: User is \(isAuthenticated ? "authenticated" : "not authenticated")")
     }
     
+    #if canImport(FirebaseAuth)
+    /// Link a federated credential to the current anonymous session (preserving the UID
+    /// and its data). If the credential already belongs to another account, sign into that
+    /// account instead — the caller's claim step then merges the local data in.
+    private func linkOrSignIn(with credential: AuthCredential) async throws -> AuthDataResult {
+        if let anon = Auth.auth().currentUser, anon.isAnonymous {
+            do {
+                print("🔗 AuthenticationManager: Upgrading anonymous session -> permanent (link)")
+                return try await anon.link(with: credential)
+            } catch let error as NSError where
+                error.code == AuthErrorCode.credentialAlreadyInUse.rawValue ||
+                error.code == AuthErrorCode.emailAlreadyInUse.rawValue ||
+                error.code == AuthErrorCode.providerAlreadyLinked.rawValue {
+                print("🔗 AuthenticationManager: Credential already belongs to an account - signing into it")
+                let updated = (error.userInfo[AuthErrorUserInfoUpdatedCredentialKey] as? AuthCredential) ?? credential
+                return try await Auth.auth().signIn(with: updated)
+            }
+        }
+        return try await Auth.auth().signIn(with: credential)
+    }
+    #endif
+
     // MARK: - Login
-    
+
     func login(email: String, password: String) async {
         print("🔐 AuthenticationManager: Attempting login for: \(email)")
         print("🔑 AuthenticationManager: Password provided: \(password.isEmpty ? "No" : "Yes")")
@@ -126,7 +208,11 @@ class AuthenticationManager: ObservableObject {
                 
                 // Save authentication state
                 saveAuthenticationState()
-                
+
+                // Claim current (guest/anonymous) data for this login + merge with the
+                // account's existing local/cloud data, then cloud-back it.
+                UserManager.shared.claimLocalDataIntoAccount(firebaseUID: firebaseUser.uid)
+
                 print("✅ AuthenticationManager: Login successful for \(user.name)")
                 print("🎉 AuthenticationManager: Welcome back! User ID: \(user.id)")
                 print("⏰ AuthenticationManager: Last login: \(Date())")
@@ -195,7 +281,17 @@ class AuthenticationManager: ObservableObject {
         #if canImport(FirebaseAuth)
         do {
             print("🔐 AuthenticationManager: Using Firebase Auth for registration")
-            let authResult = try await Auth.auth().createUser(withEmail: email, password: password)
+            // If a guest anonymous session exists, UPGRADE it in place (link) so the
+            // account keeps the same Firebase UID — the guest's data stays owned by this
+            // login with zero migration. Otherwise fall back to a fresh account.
+            let authResult: AuthDataResult
+            if let anon = Auth.auth().currentUser, anon.isAnonymous {
+                print("🔗 AuthenticationManager: Upgrading anonymous session -> permanent (email link)")
+                let credential = EmailAuthProvider.credential(withEmail: email, password: password)
+                authResult = try await anon.link(with: credential)
+            } else {
+                authResult = try await Auth.auth().createUser(withEmail: email, password: password)
+            }
             let firebaseUser = authResult.user
             
             // Update display name
@@ -222,7 +318,10 @@ class AuthenticationManager: ObservableObject {
                 
                 // Save authentication state
                 saveAuthenticationState()
-                
+
+                // Claim the guest/anonymous data for this new account + cloud-back it.
+                UserManager.shared.claimLocalDataIntoAccount(firebaseUID: firebaseUser.uid)
+
                 print("✅ AuthenticationManager: Registration successful for \(user.name)")
                 print("🎉 AuthenticationManager: New user created - ID: \(user.id)")
                 print("📧 AuthenticationManager: Email verified: \(user.email)")
@@ -310,7 +409,19 @@ class AuthenticationManager: ObservableObject {
         isAuthenticated = false
         authError = nil
         isNewRegistration = false // Reset registration flag
-        
+        exitGuestMode() // Returning to the login gate - no longer a guest
+
+        // Drop the account's data from memory so it can't leak into a later login, and point
+        // local storage back at the guest identity so "Continue as Guest" shows the un-linked
+        // (not-connected) data instead of the account we just left. The account's data stays
+        // safe in its own box + cloud and returns when the user signs back in.
+        UserManager.shared.signOut()
+        if let guestUID = UserDefaults.standard.string(forKey: "guest_local_uid") {
+            UserDefaults.standard.set(guestUID, forKey: "last_authenticated_firebase_uid")
+        } else {
+            UserDefaults.standard.removeObject(forKey: "last_authenticated_firebase_uid")
+        }
+
         // Clear saved authentication state
         clearAuthenticationState()
         
@@ -700,9 +811,12 @@ class AuthenticationManager: ObservableObject {
             // Create Firebase credential with Google token
             #if canImport(FirebaseAuth)
             let credential = FirebaseAuth.GoogleAuthProvider.credential(withIDToken: idToken, accessToken: accessToken)
-            
-            // Sign in to Firebase with Google credential
-            let authResult = try await Auth.auth().signIn(with: credential)
+
+            // Sign in to Firebase with Google credential. If a guest anonymous session
+            // exists, UPGRADE it (link) so the account keeps the same UID and the guest's
+            // data stays owned. If the Google account already exists elsewhere, fall back
+            // to signing into it (data is merged afterwards by the claim step).
+            let authResult = try await linkOrSignIn(with: credential)
             let firebaseUser = authResult.user
             
             print("✅ AuthenticationManager: Google Sign-In successful")
@@ -743,7 +857,12 @@ class AuthenticationManager: ObservableObject {
             
             // SYNC FIX: Update UserManager with Google profile data to ensure consistent name checking
             await syncGoogleProfileToUserManager(authenticatedUser)
-                
+
+            // Claim the guest/anonymous data for this account + cloud-back it.
+            await MainActor.run {
+                UserManager.shared.claimLocalDataIntoAccount(firebaseUID: firebaseUser.uid)
+            }
+
             print("✅ AuthenticationManager: Google Sign-In successful for \(authenticatedUser.name)")
             print("🔐 AuthenticationManager: Post-Google auth state:")
             print("   - isAuthenticated: \(self.isAuthenticated)")
@@ -975,10 +1094,12 @@ class AuthenticationManager: ObservableObject {
                 fullName: credential.fullName
             )
             
-            // Sign in to Firebase with Apple credential
-            let authResult = try await Auth.auth().signIn(with: firebaseCredential)
+            // Sign in to Firebase with Apple credential. Upgrade a guest anonymous session
+            // in place (link) when possible so data stays owned; otherwise sign into the
+            // existing account and let the claim step merge the data.
+            let authResult = try await linkOrSignIn(with: firebaseCredential)
             let firebaseUser = authResult.user
-            
+
             print("✅ AuthenticationManager: Apple Sign-In successful")
             
             // Create AuthenticatedUser from Firebase user
@@ -1019,7 +1140,12 @@ class AuthenticationManager: ObservableObject {
             
             // SYNC FIX: Update UserManager with Apple profile data to ensure consistent name checking
             await syncAppleProfileToUserManager(authenticatedUser)
-                
+
+            // Claim the guest/anonymous data for this account + cloud-back it.
+            await MainActor.run {
+                UserManager.shared.claimLocalDataIntoAccount(firebaseUID: firebaseUser.uid)
+            }
+
             print("✅ AuthenticationManager: Apple Sign-In successful for \(authenticatedUser.name)")
             print("🔐 AuthenticationManager: Post-Apple auth state:")
             print("   - isAuthenticated: \(self.isAuthenticated)")
@@ -1107,6 +1233,11 @@ class AuthenticationManager: ObservableObject {
     
     
     private func saveAuthenticationState() {
+        // A real account now owns the session — no longer a guest.
+        if isGuestMode {
+            isGuestMode = false
+            UserDefaults.standard.set(false, forKey: "isGuestMode")
+        }
         // TODO: Save to UserDefaults or Keychain
         UserDefaults.standard.set(true, forKey: "isAuthenticated")
         if let user = currentUser {

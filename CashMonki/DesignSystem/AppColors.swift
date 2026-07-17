@@ -102,6 +102,18 @@ enum AppColors {
     /// Expense chart color position 4 (lightest) - #F7CD07
     static let chartExpense4 = Color(red: 0xF7/255.0, green: 0xCD/255.0, blue: 0x07/255.0)
     
+    // MARK: - Feedback Status Chip Colors (from Figma)
+    /// Done chip text - #00A73D
+    static let statusDoneForeground = Color(red: 0x00/255.0, green: 0xA7/255.0, blue: 0x3D/255.0)
+    /// Done chip background - #ECFEF6
+    static let statusDoneBackground = Color(red: 0xEC/255.0, green: 0xFE/255.0, blue: 0xF6/255.0)
+    /// In-progress chip text - #E17100
+    static let statusInProgressForeground = Color(red: 0xE1/255.0, green: 0x71/255.0, blue: 0x00/255.0)
+    /// In-progress chip background - #FFF4C6
+    static let statusInProgressBackground = Color(red: 0xFF/255.0, green: 0xF4/255.0, blue: 0xC6/255.0)
+    /// Pending chip background - #F2F5F7
+    static let statusPendingBackground = Color(red: 0xF2/255.0, green: 0xF5/255.0, blue: 0xF7/255.0)
+
     // MARK: - Wallet System Colors
     /// Wallet avatar background color - #008080 (teal)
     static let walletAvatar = Color(red: 0x00/255.0, green: 0x80/255.0, blue: 0x80/255.0)
