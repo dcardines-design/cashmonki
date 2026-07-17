@@ -19,6 +19,9 @@ import FirebaseAppCheck
 #if canImport(FirebaseAuth)
 import FirebaseAuth
 #endif
+#if canImport(FirebaseFirestore)
+import FirebaseFirestore
+#endif
 #if canImport(PostHog)
 import PostHog
 #endif
@@ -420,6 +423,19 @@ struct CashMonkiApp: App {
             #endif
             FirebaseApp.configure()
             print("✅ Firebase configured successfully")
+
+            // Firestore offline persistence (source-of-truth migration Phase 1). MUST be set before
+            // any Firestore access. Writes hit the local cache instantly (works fully offline) and
+            // sync when online — the foundation for offline transaction adds without hand-rolled code.
+            #if canImport(FirebaseFirestore)
+            let fsSettings = FirestoreSettings()
+            fsSettings.cacheSettings = PersistentCacheSettings(sizeBytes: FirestoreCacheSizeUnlimited as NSNumber)
+            Firestore.firestore().settings = fsSettings
+            print("✅ Firestore offline persistence enabled (unlimited cache)")
+            // Register the (dormant, flag-gated) Firestore read layer so it can attach listeners
+            // on login once the source-of-truth flag is flipped. No-op while the flag is off.
+            _ = FirestoreStore.shared
+            #endif
 
             #if canImport(FirebaseAuth)
             // Anonymous session so Firestore rules can require request.auth.
