@@ -831,6 +831,7 @@ struct SettingsPage: View {
             // HIDDEN: Account section commented out for now
             // accountSection
             preferencesSection
+            dataSection
             featureUsageSection
         }
     }
@@ -976,35 +977,6 @@ struct SettingsPage: View {
             sectionHeader("Preferences")
 
             VStack(spacing: 0) {
-                // Sync to Cloud. Guests have no account to sync to, so the row becomes a
-                // "connect an account" call-to-action; signed-in users get the real toggle.
-                if authManager.isGuestMode || !authManager.isAuthenticated {
-                    settingsRow(
-                        title: "Sync to Cloud",
-                        subtitle: "Connect an account to back up your data",
-                        icon: "☁️"
-                    ) {
-                        showingConnectAccount = true
-                    }
-                } else {
-                    firebaseSyncToggleRow()
-
-                    Divider()
-                        .padding(.leading, 52)
-
-                    // Attach other local data boxes on this phone to this account.
-                    settingsRow(
-                        title: "Connect device data",
-                        subtitle: "Attach other data on this phone to your account",
-                        icon: "📲"
-                    ) {
-                        showingConnectDeviceData = true
-                    }
-                }
-
-                Divider()
-                    .padding(.leading, 52)
-
                 // COMMENTED OUT: Reset Daily Analysis
                 // settingsRow(
                 //     title: "Reset Daily Analysis",
@@ -1207,6 +1179,44 @@ struct SettingsPage: View {
         }
     }
     
+    /// Cloud sync + attaching other local data on this phone. Its own group so data-moving
+    /// actions aren't buried among display preferences.
+    private var dataSection: some View {
+        VStack(spacing: 0) {
+            sectionHeader("Data")
+
+            VStack(spacing: 0) {
+                // Sync to Cloud. Guests have no account to sync to, so the row becomes a
+                // "connect an account" call-to-action; signed-in users get the real toggle.
+                if authManager.isGuestMode || !authManager.isAuthenticated {
+                    settingsRow(
+                        title: "Sync to Cloud",
+                        subtitle: "Connect an account to back up your data",
+                        icon: "☁️"
+                    ) {
+                        showingConnectAccount = true
+                    }
+                } else {
+                    firebaseSyncToggleRow()
+
+                    Divider()
+                        .padding(.leading, 52)
+
+                    // Attach other local data boxes on this phone to this account.
+                    settingsRow(
+                        title: "Connect device data",
+                        subtitle: "Attach other data on this phone to your account",
+                        icon: "📲"
+                    ) {
+                        showingConnectDeviceData = true
+                    }
+                }
+            }
+            .background(AppColors.backgroundWhite)
+            .clipShape(RoundedRectangle(cornerRadius: 16))
+        }
+    }
+
     private var featureUsageSection: some View {
         VStack(spacing: 0) {
             sectionHeader("Feature Usage")
