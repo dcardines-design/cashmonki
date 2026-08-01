@@ -32,9 +32,6 @@ struct TurnOffBackupSheet: View {
             SheetHeader.basic(title: "Turn off cloud backup?") {
                 isPresented = false
             }
-            // Detent sheets start hard against the sheet edge, so the shared header's 20pt
-            // reads tight here. Full-height sheets don't need this.
-            .padding(.top, 8)
 
             // Figma 1714-8160 "options": 30pt padding, 20pt gap, centred.
             VStack(spacing: 20) {
@@ -67,7 +64,6 @@ struct TurnOffBackupSheet: View {
             actions
         }
         .background(AppColors.backgroundWhite)
-        .presentationDetents([.fraction(0.8)])
     }
 
     /// Figma 1714-8282: 100pt circle on #f3f5f8 with a 60pt emoji.
