@@ -272,9 +272,7 @@ class UserManager: ObservableObject {
     /// SAFE: only ever turns sync ON and PUSHES local data up. Never pulls, never
     /// overwrites local. Respects an explicit user opt-out if one was saved.
     private func migrateEnableSyncIfNeeded() {
-        let optOutKey = "enableFirebaseSync_\(currentUser.id.uuidString)"
-        let explicitlyDisabled = UserDefaults.standard.object(forKey: optOutKey) != nil
-            && UserDefaults.standard.bool(forKey: optOutKey) == false
+        let explicitlyDisabled = syncOptOutIsExplicit()
         guard !explicitlyDisabled else {
             print("☁️ UserManager: User explicitly disabled sync - leaving OFF")
             return
@@ -2882,12 +2880,36 @@ class UserManager: ObservableObject {
     // MARK: - Firebase Sync Control
     
     /// Toggle Firebase sync preference for the current user
+    /// Storage key for the explicit "I turned cloud backup off" preference.
+    private func syncOptOutKey() -> String { "enableFirebaseSync_\(syncUID())" }
+
+    /// True when the user has explicitly opted out of cloud backup for this identity. Also reads
+    /// the legacy `currentUser.id`-keyed value so an opt-out saved before the key moved is still
+    /// honoured (and re-saves it under the stable key so it survives the next sign-in).
+    private func syncOptOutIsExplicit() -> Bool {
+        let d = UserDefaults.standard
+        let key = syncOptOutKey()
+        if d.object(forKey: key) != nil { return d.bool(forKey: key) == false }
+
+        let legacyKey = "enableFirebaseSync_\(currentUser.id.uuidString)"
+        if d.object(forKey: legacyKey) != nil {
+            let legacyValue = d.bool(forKey: legacyKey)
+            d.set(legacyValue, forKey: key)   // adopt under the stable key
+            return legacyValue == false
+        }
+        return false
+    }
+
     func setFirebaseSyncEnabled(_ enabled: Bool) {
         currentUser.enableFirebaseSync = enabled
         currentUser.updatedAt = Date()
         
-        // IMPORTANT: Save this preference immediately to persist across app restarts
-        UserDefaults.standard.set(enabled, forKey: "enableFirebaseSync_\(currentUser.id.uuidString)")
+        // IMPORTANT: Save this preference immediately to persist across app restarts.
+        // Keyed on syncUID(), NOT currentUser.id — AuthenticationManager mints a fresh UUID()
+        // for currentUser.id on every sign-in, so a preference stored under it was written to a
+        // key nothing would ever read again. The old value said "off", migrateEnableSyncIfNeeded
+        // couldn't see it, and the next login turned sync back ON and uploaded.
+        UserDefaults.standard.set(enabled, forKey: syncOptOutKey())
         UserDefaults.standard.synchronize()
         
         DispatchQueue.main.async {

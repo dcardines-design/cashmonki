@@ -87,6 +87,8 @@ struct SettingsPage: View {
 
     // Signed-in "Connect device data" picker (attach a local box to this account)
     @State private var showingConnectDeviceData = false
+    // Confirmation before cloud backup is switched off (Figma 1714-8158).
+    @State private var showingTurnOffBackup = false
     @State private var deleteConfirmationText = ""
     @State private var isDeletingAccount = false
     @State private var accountDeletionError: String?
@@ -248,6 +250,11 @@ struct SettingsPage: View {
                     allowGuest: false // already a guest — connecting, not skipping
                 )
                 .environmentObject(toastManager)
+            }
+            .sheet(isPresented: $showingTurnOffBackup) {
+                TurnOffBackupSheet(isPresented: $showingTurnOffBackup) {
+                    userManager.setFirebaseSyncEnabled(false)
+                }
             }
             .sheet(isPresented: $showingConnectDeviceData) {
                 DataBoxPickerSheet(isPresented: $showingConnectDeviceData)
@@ -2874,7 +2881,14 @@ struct SettingsPage: View {
         Binding(
             get: { userManager.isFirebaseSyncEnabled },
             set: { newValue in
-                userManager.setFirebaseSyncEnabled(newValue)
+                // Turning backup ON is safe and applies immediately. Turning it OFF stops every
+                // upload path, so confirm first (Figma 1714-8158) and only apply on confirm —
+                // the toggle springs back if the sheet is dismissed any other way.
+                if newValue {
+                    userManager.setFirebaseSyncEnabled(true)
+                } else {
+                    showingTurnOffBackup = true
+                }
             }
         )
     }

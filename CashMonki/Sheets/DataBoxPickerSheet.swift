@@ -20,7 +20,9 @@ struct DataBoxPickerSheet: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            header
+            SheetHeader.basic(title: "Connect device data") {
+                isPresented = false
+            }
 
             if boxes.isEmpty {
                 // Sits in the middle of whatever the header leaves behind, not pinned under it.
@@ -77,25 +79,6 @@ struct DataBoxPickerSheet: View {
         .padding(.horizontal, 20)
         .padding(.vertical, 24)
         .frame(maxWidth: .infinity)
-    }
-
-    private var header: some View {
-        ZStack {
-            Text("Connect device data")
-                .font(Font.custom("Overused Grotesk", size: 20).weight(.semibold))
-                .foregroundColor(AppColors.foregroundPrimary)
-            HStack {
-                Button(action: { isPresented = false }) {
-                    Image("chevron-left")
-                        .renderingMode(.template)
-                        .resizable()
-                        .frame(width: 24, height: 24)
-                        .foregroundColor(AppColors.foregroundPrimary)
-                }
-                Spacer()
-            }
-        }
-        .padding(20)
     }
 
     /// Figma tile (1711-7570): white card, 1pt #dce2f4 border, radius 12, hard 0/4 shadow in the

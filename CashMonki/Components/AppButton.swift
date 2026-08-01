@@ -9,6 +9,7 @@ enum ButtonHierarchy {
     case ghostPrimary  // 5th - No background, purple text
     case text          // 6th - Text only, black text
     case textPrimary   // 7th - Text only, purple text
+    case destructive   // White background, red text - irreversible actions
 }
 
 enum ButtonSize {
@@ -134,11 +135,11 @@ struct AppButton: View {
         case (.primary, .disabled):
             return Color(red: 0x36/255.0, green: 0x10/255.0, blue: 0xe1/255.0) // AccentDarkBackground equivalent
             
-        case (.secondary, .active), (.secondary, .hover):
+        case (.secondary, .active), (.secondary, .hover), (.destructive, .active), (.destructive, .hover):
             return AppColors.backgroundWhite
-        case (.secondary, .pressed):
+        case (.secondary, .pressed), (.destructive, .pressed):
             return AppColors.surfacePrimary
-        case (.secondary, .disabled):
+        case (.secondary, .disabled), (.destructive, .disabled):
             return AppColors.surfacePrimary // Same as pressed state
             
         case (.tertiary, .active):
@@ -180,7 +181,10 @@ struct AppButton: View {
 
         case (.secondary, .active), (.secondary, .hover), (.secondary, .pressed):
             return AppColors.foregroundPrimary  // Black text for secondary
-        case (.secondary, .disabled):
+
+        case (.destructive, .active), (.destructive, .hover), (.destructive, .pressed):
+            return AppColors.destructiveForeground
+        case (.secondary, .disabled), (.destructive, .disabled):
             return AppColors.foregroundTertiary
 
         case (.tertiary, .active), (.tertiary, .hover), (.tertiary, .pressed):
@@ -222,7 +226,9 @@ struct AppButton: View {
 
         case (.secondary, .active), (.secondary, .hover), (.secondary, .pressed):
             return AppColors.primary  // Purple icons for secondary
-        case (.secondary, .disabled):
+        case (.destructive, .active), (.destructive, .hover), (.destructive, .pressed):
+            return AppColors.destructiveForeground
+        case (.secondary, .disabled), (.destructive, .disabled):
             return AppColors.foregroundTertiary
 
         default:
@@ -241,13 +247,14 @@ struct AppButton: View {
         case (.primary, .disabled):
             return AppColors.line1stLine // Use line color for disabled border
             
-        case (.secondary, .active), (.secondary, .pressed):
+        case (.secondary, .active), (.secondary, .pressed),
+             (.destructive, .active), (.destructive, .pressed):
             return AppColors.line1stLine
         case (.secondary, .hover):
             return AppColors.accentBackground
-        case (.secondary, .disabled):
+        case (.secondary, .disabled), (.destructive, .hover), (.destructive, .disabled):
             return AppColors.line1stLine // Same as pressed state
-            
+
         case (.tertiary, _):
             return Color.clear
 
@@ -260,7 +267,8 @@ struct AppButton: View {
         switch (hierarchy, buttonState) {
         case (.primary, .active), (.primary, .hover):
             return Color(red: 0x2c/255.0, green: 0x06/255.0, blue: 0xd7/255.0) // #2C06D7
-        case (.secondary, .active), (.secondary, .hover):
+        case (.secondary, .active), (.secondary, .hover),
+             (.destructive, .active), (.destructive, .hover):
             return AppColors.line1stLine // #dce2f4
         case (.tertiary, .active), (.tertiary, .hover):
             return Color.clear
@@ -275,9 +283,10 @@ struct AppButton: View {
             return true
         case (.primary, .pressed):
             return false
-        case (.secondary, .active), (.secondary, .hover):
+        case (.secondary, .active), (.secondary, .hover),
+             (.destructive, .active), (.destructive, .hover):
             return true
-        case (.secondary, .pressed):
+        case (.secondary, .pressed), (.destructive, .pressed):
             return false
         case (.tertiary, _):
             return false
@@ -510,5 +519,26 @@ struct AppButton_Previews: PreviewProvider {
         }
         .padding()
         .previewLayout(.sizeThatFits)
+    }
+}
+
+// MARK: - Destructive Convenience Initializer
+extension AppButton {
+    /// White button with red text for irreversible actions (delete, turn off backup).
+    static func destructive(
+        _ title: String,
+        size: ButtonSize = .medium,
+        leftIcon: String? = nil,
+        rightIcon: String? = nil,
+        action: @escaping () -> Void
+    ) -> AppButton {
+        AppButton(
+            title: title,
+            action: action,
+            hierarchy: .destructive,
+            size: size,
+            leftIcon: leftIcon,
+            rightIcon: rightIcon
+        )
     }
 }

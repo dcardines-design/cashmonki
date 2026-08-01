@@ -51,6 +51,10 @@ enum AppColors {
     
     /// Error foreground (alias for destructiveForeground)
     static let errorForeground = destructiveForeground
+
+    /// Tinted background behind a destructive warning callout - destructiveForeground at 9%.
+    /// (Figma draws this as #ef4444 at 9%; the app standardises on #de4706 for destructive.)
+    static let destructiveSurface = destructiveForeground.opacity(0.09)
     
     // MARK: - Success Colors
     /// Success/positive action color - #08AD93
