@@ -922,21 +922,66 @@ class CategoriesManager: ObservableObject {
         pushCategoriesToCloud()
     }
 
+    /// The untouched factory set, keyed by id. Built-in ids are stable name-derived UUIDs
+    /// (see `stableCategoryID`), so this is comparable across installs and devices.
+    private var factoryCategoriesById: [UUID: CategoryData] {
+        var index: [UUID: CategoryData] = [:]
+        for c in allCategories { index[c.id] = c }
+        for c in allIncomeCategories { index[c.id] = c }
+        return index
+    }
+
+    /// True when this device holds nothing but the untouched factory categories — i.e. the state
+    /// a fresh install (or `resetAllCategories`) seeds BEFORE any cloud restore has run. Pushing
+    /// that state would overwrite a real account's category blob with defaults, which is how a
+    /// reinstall could silently wipe every rename and deletion the user had made.
+    private var isFactoryDefaultSet: Bool {
+        let factory = factoryCategoriesById
+        guard categories.count == factory.count else { return false }
+        return categories.allSatisfy { local in
+            guard let stock = factory[local.id] else { return false }
+            return local.isBuiltIn
+                && !local.isDeleted
+                && local.name == stock.name
+                && local.emoji == stock.emoji
+        }
+    }
+
     /// Mirror categories (unified list + hierarchy) to the cloud so transactions restored on a
     /// fresh install can resolve their categoryIds (otherwise every row shows "No Category").
+    ///
+    /// Refuses to upload a pristine factory set: that carries no user intent, and doing so from a
+    /// fresh install or a reset would clobber the account's real categories in the cloud.
     private func pushCategoriesToCloud() {
         guard UserManager.shared.currentUser.enableFirebaseSync else { return }
+        guard !isFactoryDefaultSet else {
+            print("🛑 Categories: refusing to push a pristine factory set — would clobber the cloud copy")
+            return
+        }
         guard let uni = try? JSONEncoder().encode(categories),
               let hier = try? JSONEncoder().encode(categoryHierarchy) else { return }
         FirestoreService.shared.saveCategoriesBlob(unified: uni, hierarchy: hier, userId: UserManager.shared.syncUID()) { _ in }
     }
 
-    /// Pull the cloud category setup and union it in (by id for the list, by key for the
-    /// hierarchy). Call on login / user switch so a returning user's categories come back.
+    /// Pull the cloud category setup and merge it in, newest edit wins per record. Call on
+    /// login / user switch so a returning user's categories come back.
+    ///
+    /// Last-write-wins on `updatedAt` (ties keep local) is what lets renames AND deletions travel
+    /// between devices: a delete is just a record whose newer copy carries `isDeleted`. The old
+    /// add-only union could never do that — it kept the local copy of every id it already knew,
+    /// so an edit made on another device never arrived.
+    ///
+    /// Freshly seeded factory categories are stamped `.distantPast` (see
+    /// `initializeWithBuiltInCategories`), so a reinstall's defaults always lose to whatever the
+    /// cloud holds. Without that they'd carry `Date()` and beat the user's older real edits.
+    ///
+    /// `categoryHierarchy` is deliberately NOT merged: it's an untimestamped `[String: [String]]`
+    /// and subcategory deletion is a plain `removeAll`, so any union resurrects deleted entries.
+    /// The records' own `subcategories` arrays carry that data and ride the merge correctly.
     func restoreCategoriesFromCloud() {
         guard UserManager.shared.currentUser.enableFirebaseSync else { return }
         FirestoreService.shared.fetchCategoriesBlob(userId: UserManager.shared.syncUID()) { [weak self] result in
-            guard let self = self, case .success(let (uniData, hierData)) = result else { return }
+            guard let self = self, case .success(let (uniData, _)) = result else { return }
             DispatchQueue.main.async {
                 var changed = false
                 if let uniData = uniData,
@@ -944,21 +989,27 @@ class CategoriesManager: ObservableObject {
                    !cloudCats.isEmpty {
                     var byId: [UUID: UnifiedCategoryData] = [:]
                     for c in self.categories { byId[c.id] = c }
-                    for c in cloudCats where byId[c.id] == nil { byId[c.id] = c; changed = true }
+                    for c in cloudCats {
+                        if let local = byId[c.id] {
+                            guard c.updatedAt > local.updatedAt else { continue }
+                        }
+                        byId[c.id] = c
+                        changed = true
+                    }
                     if changed { self.categories = Array(byId.values) }
                 }
-                if let hierData = hierData,
-                   let cloudHier = try? JSONDecoder().decode([String: [String]].self, from: hierData) {
-                    for (k, v) in cloudHier where self.categoryHierarchy[k] == nil {
-                        self.categoryHierarchy[k] = v; changed = true
-                    }
-                }
+
                 if changed {
-                    self.saveCategories()
-                    self.saveCategoryHierarchy()
+                    self.saveCategories()          // persists locally AND pushes the merged result
                     self.rebuildLookupCache()
                     self.objectWillChange.send()
-                    print("✅ Categories: restored/merged from cloud")
+                    print("✅ Categories: merged from cloud (last-write-wins)")
+                } else {
+                    // Nothing to take from the cloud — but this device may hold categories the
+                    // cloud has never seen (customs made before login, or a user who simply never
+                    // edits categories after signing in, in which case nothing ever triggered a
+                    // push). Safe now: the fetch succeeded, and the push refuses a factory set.
+                    self.pushCategoriesToCloud()
                 }
             }
         }
@@ -1009,8 +1060,19 @@ class CategoriesManager: ObservableObject {
         }
         
         initialCategories.append(contentsOf: incomeCategories)
-        categories = initialCategories
-        
+
+        // Stamp the seed as "older than anything real". These records carry no user intent, so on
+        // a reinstall every cloud copy — renamed, deleted, whatever — must beat them in the
+        // last-write-wins merge. With the initializer's default `Date()` they'd be the NEWEST
+        // records on the device and would silently revert the user's real categories, then push
+        // that reverted state back over the cloud copy.
+        categories = initialCategories.map { seed in
+            var c = seed
+            c.createdAt = .distantPast
+            c.updatedAt = .distantPast
+            return c
+        }
+
         saveCategories()
         print("✅ Initialized with \(categories.count) built-in categories (\(allCategories.count) expense + \(allIncomeCategories.count) income)")
     }
