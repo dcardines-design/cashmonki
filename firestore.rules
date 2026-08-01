@@ -3,21 +3,14 @@ service cloud.firestore {
   match /databases/{database}/documents {
 
     // ── Feedback board ─────────────────────────────────────────────
-    // The app is local-first: most users have NO Firebase Auth session,
-    // so identity cannot be enforced server-side yet. These rules keep
-    // the board functional for guests while enforcing document SHAPE so
-    // arbitrary/oversized data can't be written.
+    // Public read (the board is meant to be visible), authenticated writes
+    // with SHAPE checks so arbitrary/oversized data can't be written.
     //
-    // TODO (real enforcement, in order):
-    //  1. Enable App Check → block non-app clients.
-    //  2. Require sign-in for feedback → request.auth.token.email checks
-    //     on authorEmail (create/update/delete own; admin custom claim).
+    // TODO (real enforcement): request.auth.token.email checks on authorEmail
+    // so a user can only edit/delete their own posts, plus an admin claim.
     match /feedback_items/{itemId} {
       allow read: if true;
 
-      // Writes require a Firebase Auth session (the app signs in
-      // anonymously at launch, so real users always have one — scripted
-      // non-app writes don't). Shape checks bound the damage.
       allow create, update: if request.auth != null
         && request.resource.data.title is string
         && request.resource.data.title.size() > 0
@@ -31,24 +24,32 @@ service cloud.firestore {
         && request.resource.data.upvoters.size() <= 10000
         && request.resource.data.comments is list;
 
-      allow delete: if request.auth != null; // author/admin check needs real accounts (TODO above)
+      allow delete: if request.auth != null; // author/admin check needs the TODO above
     }
 
-    // ── User data sync (existing local-first behavior) ─────────────
-    // Guests sync without auth today; keep that working. Tighten to
-    // request.auth checks when sign-in becomes mandatory.
+    // ── User data ──────────────────────────────────────────────────
+    // A user document and everything under it (transactions, categories,
+    // subscriptions, ask chat) belongs to exactly one signed-in identity.
+    //
+    // This previously read `allow read, write: if true` — public read/write on
+    // every user's financial data — on the premise that the app was local-first
+    // with no auth session. That premise no longer holds: the app authenticates
+    // and syncUID() keys all cloud storage on the Firebase UID, which is the
+    // same value as {userId} here.
+    //
+    // Consequence: a client with NO Firebase Auth session can no longer sync.
+    // If anonymous guest sync is wanted, do it with anonymous auth, not by
+    // reopening these rules.
     match /users/{userId} {
-      allow read, write: if true;
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+
       match /{document=**} {
-        allow read, write: if true;
+        allow read, write: if request.auth != null && request.auth.uid == userId;
       }
     }
 
-    match /transactions/{txId} {
-      allow read, write: if true;
-    }
-
-    // Everything else: closed.
+    // Everything else: closed. (The old top-level /transactions/{txId} rule was
+    // dead — transactions live under users/<uid>/transactions.)
     match /{document=**} {
       allow read, write: if false;
     }
