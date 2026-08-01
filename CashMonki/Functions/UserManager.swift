@@ -2908,6 +2908,38 @@ class UserManager: ObservableObject {
         print("📡 CloudSync: applied user doc — \(mergedAccounts.count) wallets, \(mergedBudgets.count) budgets")
     }
 
+    /// Adopt any wallet a synced transaction references but this account doesn't have yet.
+    ///
+    /// A transaction created on another device carries that device's walletID. If the wallet
+    /// itself hasn't reached the user document yet, every view filters those transactions out —
+    /// they exist locally, count toward nothing, and look lost. Adopting a placeholder wallet
+    /// keeps the transactions visible under their OWN wallet instead of reassigning them to a
+    /// different one, which would silently move money between wallets.
+    ///
+    /// The placeholder is stamped `.distantPast`, so when the real wallet does arrive,
+    /// mergeAccounts takes the real name/type over this stub (same id, newer updatedAt wins).
+    private func adoptMissingWallets() {
+        let knownWalletIDs = Set(currentUser.accounts.map(\.id))
+        let referenced = Set(currentUser.transactions.compactMap(\.walletID))
+        let missing = referenced.subtracting(knownWalletIDs)
+        guard !missing.isEmpty else { return }
+
+        for walletID in missing {
+            let count = currentUser.transactions.filter { $0.walletID == walletID }.count
+            currentUser.accounts.append(
+                AccountData(
+                    id: walletID,
+                    name: "Synced Wallet",
+                    isDefault: false,
+                    createdAt: .distantPast,
+                    updatedAt: .distantPast
+                )
+            )
+            print("🔗 UserManager: adopted missing wallet \(walletID.uuidString.prefix(8)) — \(count) synced transaction(s) were invisible without it")
+        }
+        AccountManager.shared.objectWillChange.send()
+    }
+
     /// Apply the transaction set pushed by the live listener. Union-by-id with tombstones and
     /// duplicate collapsing, so this is idempotent — our own writes echoing back change nothing.
     func applyCloudTransactions(_ cloud: [Txn]) {
@@ -2923,6 +2955,9 @@ class UserManager: ObservableObject {
         }
 
         currentUser.transactions = merged
+        // Synced rows may reference a wallet this account has never seen; without it they are
+        // filtered out of every list and total.
+        adoptMissingWallets()
         saveCurrentUserLocally()
         objectWillChange.send()
         print("📡 CloudSync: applied transactions — \(before.count) local + \(cloud.count) cloud → \(merged.count)")
