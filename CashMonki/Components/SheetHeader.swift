@@ -64,7 +64,7 @@ struct SheetHeader: View {
             
             // Title
             Text(title)
-                .font(AppFonts.overusedGroteskSemiBold(size: 18))
+                .font(AppFonts.overusedGroteskSemiBold(size: 20))
                 .foregroundColor(AppColors.foregroundPrimary)
             
             Spacer()
@@ -84,8 +84,7 @@ struct SheetHeader: View {
                     .frame(width: 24, height: 24)
             }
         }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 16)
+        .padding(20)
         .background(backgroundColor)
     }
 }
