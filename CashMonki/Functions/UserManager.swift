@@ -893,17 +893,26 @@ class UserManager: ObservableObject {
         objectWillChange.send()
     }
     
-    /// Update user's onboarding progression number
-    func updateOnboardingProgress(_ progress: Int) {
+    /// Update user's onboarding progression number.
+    ///
+    /// MONOTONIC BY DEFAULT (data-loss guard): auto-recompute paths must never LOWER a user's
+    /// onboarding progress. A completed user (16) whose global boolean flags got wiped (e.g. a
+    /// fresh install / cleared UserDefaults while the data box survived) was getting recomputed
+    /// back to a low step and shoved through onboarding again. Only explicit resets (account
+    /// deletion, last-wallet-deleted) may downgrade — those pass `allowDowngrade: true`.
+    func updateOnboardingProgress(_ progress: Int, allowDowngrade: Bool = false) {
+        if !allowDowngrade && progress < currentUser.onboardingCompleted {
+            print("🛑 UserManager: refusing onboarding DOWNGRADE \(currentUser.onboardingCompleted) → \(progress) (monotonic guard)")
+            return
+        }
         print("🔢 UserManager: Updating onboarding progress: \(currentUser.onboardingCompleted) → \(progress)")
         currentUser.onboardingCompleted = progress
         currentUser.updatedAt = Date()
-        
+
         // SINGLE SOURCE OF TRUTH: Only save locally - no Firebase sync for onboarding
         saveCurrentUserLocally()
-        
+
         print("🔢 UserManager: Onboarding progress saved locally only (no Firebase sync)")
-        print("   - Onboarding state is device-specific and doesn't need cross-device sync")
     }
     
     /// CURRENT: No-op in no-auth flow
@@ -1928,7 +1937,70 @@ class UserManager: ObservableObject {
             }
         }
         let tombstones = deletedTransactionIDs
-        return Array(byId.values).filter { !tombstones.contains($0.id.uuidString) }
+        let union = Array(byId.values).filter { !tombstones.contains($0.id.uuidString) }
+        return collapseGeneratedDuplicates(union)
+    }
+
+    /// Collapse two copies of the SAME auto-generated occurrence created on different devices.
+    /// A subscription/recurring child is minted locally with a fresh UUID, so the copy the other
+    /// device generated for the same due date arrives from the cloud under a DIFFERENT id and
+    /// survives the union-by-id above — that is the "subscription charged twice after a cloud
+    /// load" bug. Neither generator can catch it: `transactionExistsForDate` only sees the local
+    /// array, and `SubscriptionManager` drives off `nextDueDate` with no existence check at all.
+    ///
+    /// An occurrence is identified by (source subscription/template, due minute, amount). The due
+    /// date comes from `nextDueDate`, which is identical on both devices, so this only ever matches
+    /// genuine twins — two real charges in the same minute for the same amount would merge, which
+    /// is the same assumption the generators already make.
+    private func collapseGeneratedDuplicates(_ txns: [Txn]) -> [Txn] {
+        struct OccurrenceKey: Hashable {
+            let sourceId: UUID
+            let minute: Date
+            let amount: Double
+        }
+
+        let calendar = Calendar.current
+        var survivors: [Txn] = []
+        var indexByOccurrence: [OccurrenceKey: Int] = [:]
+
+        for txn in txns {
+            // Templates are not occurrences; only auto-generated children qualify.
+            guard !txn.isRecurring,
+                  let sourceId = txn.subscriptionId ?? txn.recurringTemplateId else {
+                survivors.append(txn)
+                continue
+            }
+
+            let key = OccurrenceKey(
+                sourceId: sourceId,
+                minute: calendar.date(bySetting: .second, value: 0, of: txn.date) ?? txn.date,
+                amount: txn.amount
+            )
+
+            guard let existingIndex = indexByOccurrence[key] else {
+                indexByOccurrence[key] = survivors.count
+                survivors.append(txn)
+                continue
+            }
+
+            // Deterministic winner so every device converges on the SAME surviving id:
+            // the newer edit wins, ties break on the smaller uuid string.
+            let existing = survivors[existingIndex]
+            let winner: Txn
+            if txn.syncMetadata.lastModified == existing.syncMetadata.lastModified {
+                winner = txn.id.uuidString < existing.id.uuidString ? txn : existing
+            } else {
+                winner = txn.syncMetadata.lastModified > existing.syncMetadata.lastModified ? txn : existing
+            }
+            let loser = (winner.id == txn.id) ? existing : txn
+
+            survivors[existingIndex] = winner
+            // Tombstone the dropped copy so the other device's upload can't resurrect it.
+            tombstoneTransaction(loser.id)
+            print("🧹 UserManager: collapsed duplicate occurrence \(loser.id.uuidString.prefix(8)) — kept \(winner.id.uuidString.prefix(8)) for source \(sourceId.uuidString.prefix(8))")
+        }
+
+        return survivors
     }
 
     // MARK: - Firebase Sync Methods
@@ -2302,7 +2374,7 @@ class UserManager: ObservableObject {
         if currentUser.accounts.isEmpty {
             print("🚨 UserManager: Last wallet deleted - resetting onboarding to step 1 (name collection)")
             print("   User will skip email verification but redo name/currency/goals setup")
-            updateOnboardingProgress(1)
+            updateOnboardingProgress(1, allowDowngrade: true) // explicit reset — allowed to lower
             
             // Also reset the OnboardingStateManager to ensure UI consistency
             OnboardingStateManager.shared.resetOnboardingToStep(1)

@@ -48,8 +48,10 @@ struct CashMonkiApp: App {
         // Documents/RECOVERY_*.json files, prints them. Writes nothing over
         // existing data. Runs at the earliest launch point, before any load/save.
         // Remove after recovery.
-        CashMonkiApp.dumpUserStorageForRecovery()
-        CashMonkiApp.restoreDanteData()
+        // Disabled: one-off 2026-07-08 recovery tools. They re-ran every launch, dumped ~530KB to
+        // the console (drowning real logs), and are no longer needed.
+        // CashMonkiApp.dumpUserStorageForRecovery()
+        // CashMonkiApp.restoreDanteData()
         #endif
     }
 
@@ -424,17 +426,18 @@ struct CashMonkiApp: App {
             FirebaseApp.configure()
             print("✅ Firebase configured successfully")
 
-            // Firestore offline persistence (source-of-truth migration Phase 1). MUST be set before
-            // any Firestore access. Writes hit the local cache instantly (works fully offline) and
-            // sync when online — the foundation for offline transaction adds without hand-rolled code.
+            // Firestore offline persistence (source-of-truth migration). GATED behind the feature
+            // flag so the DEFAULT build behaves exactly as before — no Firestore behavior change,
+            // no launch-path risk — until we explicitly opt in. Only when the flag is on do we
+            // configure persistence + register the read layer.
             #if canImport(FirebaseFirestore)
-            let fsSettings = FirestoreSettings()
-            fsSettings.cacheSettings = PersistentCacheSettings(sizeBytes: FirestoreCacheSizeUnlimited as NSNumber)
-            Firestore.firestore().settings = fsSettings
-            print("✅ Firestore offline persistence enabled (unlimited cache)")
-            // Register the (dormant, flag-gated) Firestore read layer so it can attach listeners
-            // on login once the source-of-truth flag is flipped. No-op while the flag is off.
-            _ = FirestoreStore.shared
+            if FeatureFlags.firestoreSourceOfTruth {
+                let fsSettings = FirestoreSettings()
+                fsSettings.cacheSettings = PersistentCacheSettings(sizeBytes: FirestoreCacheSizeUnlimited as NSNumber)
+                Firestore.firestore().settings = fsSettings
+                _ = FirestoreStore.shared
+                print("✅ Firestore offline persistence enabled (unlimited cache)")
+            }
             #endif
 
             #if canImport(FirebaseAuth)
