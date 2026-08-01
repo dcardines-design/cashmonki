@@ -200,6 +200,83 @@ final class FirestoreService {
         #endif
     }
 
+    // MARK: - Live Observers
+    //
+    // Snapshot listeners for every user-owned path. Callers get decoded values and route them
+    // through the SAME merge functions the one-shot fetches use, so our own writes echoing back
+    // are a no-op. Registrations are handed to the caller (CloudSync) to hold and cancel.
+
+#if canImport(FirebaseFirestore)
+    /// Live user document — name, wallets, budgets, goals.
+    func observeUserDoc(userId: String, onChange: @escaping (UserData) -> Void) -> ListenerRegistration? {
+        guard let db = db else { return nil }
+        return db.collection("users").document(userId).addSnapshotListener { snapshot, error in
+            if let error = error {
+                print("❌ CloudSync: user doc listener error: \(error.localizedDescription)")
+                return
+            }
+            guard let data = snapshot?.data() else { return }
+            do {
+                let jsonData = try JSONSerialization.data(withJSONObject: data)
+                let decoder = JSONDecoder()
+                decoder.dateDecodingStrategy = .secondsSince1970
+                onChange(try decoder.decode(UserData.self, from: jsonData))
+            } catch {
+                print("❌ CloudSync: user doc decode failed: \(error)")
+            }
+        }
+    }
+
+    /// Live transactions subcollection. Emits the full decoded set on every change; the merge
+    /// on the other end is union-by-id, so a full set is cheap to apply and never destructive.
+    func observeTransactions(userId: String, onChange: @escaping ([Txn]) -> Void) -> ListenerRegistration? {
+        guard let db = db else { return nil }
+        return db.collection("users").document(userId).collection("transactions")
+            .addSnapshotListener { [weak self] snapshot, error in
+                guard let self = self else { return }
+                if let error = error {
+                    print("❌ CloudSync: transactions listener error: \(error.localizedDescription)")
+                    return
+                }
+                guard let documents = snapshot?.documents else { return }
+                let txns = documents.compactMap { doc -> Txn? in
+                    try? self.firestoreDataToTransaction(doc.data(), transactionId: doc.documentID, userId: userId)
+                }
+                onChange(txns)
+            }
+    }
+
+    /// Live category blob (unified JSON, hierarchy JSON).
+    func observeCategories(userId: String, onChange: @escaping (Data?, Data?) -> Void) -> ListenerRegistration? {
+        guard let db = db else { return nil }
+        return db.collection("users").document(userId).collection("categories").document("all")
+            .addSnapshotListener { snapshot, error in
+                if let error = error {
+                    print("❌ CloudSync: categories listener error: \(error.localizedDescription)")
+                    return
+                }
+                let u = (snapshot?.data()?["unified"] as? String)?.data(using: .utf8)
+                let h = (snapshot?.data()?["hierarchy"] as? String)?.data(using: .utf8)
+                onChange(u, h)
+            }
+    }
+
+    /// Live subscriptions blob.
+    func observeSubscriptions(userId: String, onChange: @escaping (Data) -> Void) -> ListenerRegistration? {
+        guard let db = db else { return nil }
+        return db.collection("users").document(userId).collection("subscriptions").document("all")
+            .addSnapshotListener { snapshot, error in
+                if let error = error {
+                    print("❌ CloudSync: subscriptions listener error: \(error.localizedDescription)")
+                    return
+                }
+                guard let json = snapshot?.data()?["json"] as? String,
+                      let data = json.data(using: .utf8) else { return }
+                onChange(data)
+            }
+    }
+#endif
+
     /// Fetch the cloud Ask chat history JSON (nil if the user has none yet).
     func fetchAskChat(userId: String, completion: @escaping (Result<Data?, Error>) -> Void) {
         #if canImport(FirebaseFirestore)

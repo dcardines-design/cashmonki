@@ -386,6 +386,10 @@ class AuthenticationManager: ObservableObject {
     
     func logout() {
         print("🔐 AuthenticationManager: Logging out user")
+
+        // Drop the live listeners BEFORE the identity goes away, so nothing streams the old
+        // account's data into whatever state comes next.
+        CloudSync.shared.stop()
         
         #if canImport(FirebaseAuth)
         do {

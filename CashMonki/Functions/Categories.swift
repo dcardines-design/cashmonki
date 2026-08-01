@@ -983,38 +983,48 @@ class CategoriesManager: ObservableObject {
         FirestoreService.shared.fetchCategoriesBlob(userId: UserManager.shared.syncUID()) { [weak self] result in
             guard let self = self, case .success(let (uniData, _)) = result else { return }
             DispatchQueue.main.async {
-                var changed = false
-                if let uniData = uniData,
-                   let cloudCats = try? JSONDecoder().decode([UnifiedCategoryData].self, from: uniData),
-                   !cloudCats.isEmpty {
-                    var byId: [UUID: UnifiedCategoryData] = [:]
-                    for c in self.categories { byId[c.id] = c }
-                    for c in cloudCats {
-                        if let local = byId[c.id] {
-                            guard c.updatedAt > local.updatedAt else { continue }
-                        }
-                        byId[c.id] = c
-                        changed = true
-                    }
-                    if changed { self.categories = Array(byId.values) }
-                }
-
-                if changed {
-                    self.saveCategories()          // persists locally AND pushes the merged result
-                    self.rebuildLookupCache()
-                    self.objectWillChange.send()
-                    print("✅ Categories: merged from cloud (last-write-wins)")
-                } else {
-                    // Nothing to take from the cloud — but this device may hold categories the
-                    // cloud has never seen (customs made before login, or a user who simply never
-                    // edits categories after signing in, in which case nothing ever triggered a
-                    // push). Safe now: the fetch succeeded, and the push refuses a factory set.
-                    self.pushCategoriesToCloud()
-                }
+                self.applyCloudCategories(unified: uniData, pushIfNothingNew: true)
             }
         }
     }
-    
+
+    /// Merge a cloud category blob into the local set. Shared by the one-shot restore and the
+    /// live listener (CloudSync), so both take the identical last-write-wins path.
+    ///
+    /// `pushIfNothingNew` is only for the one-shot restore: when the fetch succeeded but brought
+    /// nothing, this device may still hold categories the cloud has never seen. The live listener
+    /// passes false — echoing our own snapshot straight back would be a write loop.
+    func applyCloudCategories(unified uniData: Data?, pushIfNothingNew: Bool) {
+        var changed = false
+        if let uniData = uniData,
+           let cloudCats = try? JSONDecoder().decode([UnifiedCategoryData].self, from: uniData),
+           !cloudCats.isEmpty {
+            var byId: [UUID: UnifiedCategoryData] = [:]
+            for c in self.categories { byId[c.id] = c }
+            for c in cloudCats {
+                if let local = byId[c.id] {
+                    guard c.updatedAt > local.updatedAt else { continue }
+                }
+                byId[c.id] = c
+                changed = true
+            }
+            if changed { self.categories = Array(byId.values) }
+        }
+
+        if changed {
+            self.saveCategories()          // persists locally AND pushes the merged result
+            self.rebuildLookupCache()
+            self.objectWillChange.send()
+            print("✅ Categories: merged from cloud (last-write-wins)")
+        } else if pushIfNothingNew {
+            // Nothing to take from the cloud — but this device may hold categories the cloud has
+            // never seen (customs made before login, or a user who simply never edits categories
+            // after signing in, in which case nothing ever triggered a push). Safe here: the fetch
+            // succeeded, and the push refuses a factory set.
+            self.pushCategoriesToCloud()
+        }
+    }
+
     /// Load unified categories from UserDefaults
     private func loadCategories() {
         if let data = UserDefaults.standard.data(forKey: categoriesKey),

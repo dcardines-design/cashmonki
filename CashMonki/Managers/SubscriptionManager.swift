@@ -142,6 +142,24 @@ class SubscriptionManager: ObservableObject {
         }
     }
 
+    /// Apply a subscriptions blob pushed by the live listener (CloudSync). Union by id, same as
+    /// the one-shot merge, so re-receiving our own write is a no-op.
+    @MainActor
+    func applyCloudSubscriptions(_ data: Data) {
+        guard UserManager.shared.currentUser.enableFirebaseSync,
+              let cloud = try? JSONDecoder().decode([Subscription].self, from: data),
+              !cloud.isEmpty else { return }
+
+        var byId: [UUID: Subscription] = [:]
+        for s in subscriptions { byId[s.id] = s }
+        for s in cloud where byId[s.id] == nil { byId[s.id] = s }
+        guard byId.count != subscriptions.count else { return }
+
+        subscriptions = Array(byId.values)
+        saveSubscriptions()
+        print("📡 CloudSync: applied \(cloud.count) cloud subscriptions → \(subscriptions.count) total")
+    }
+
     /// Bring another box's subscriptions into the current user's set (union by id), then
     /// persist under the current user's key. Used when connecting a chosen device data box.
     func adoptSubscriptions(fromUID uid: String) {

@@ -2053,6 +2053,10 @@ class UserManager: ObservableObject {
                             email: userData.email,
                             transactions: self.currentUser.transactions, // Will be updated separately
                             accounts: mergedAccounts,
+                            // Budgets MUST be passed explicitly. The initializer defaults them to
+                            // [], so omitting them here blanked currentUser.budgets on every cloud
+                            // load and the following saveCurrentUserLocally persisted the blank.
+                            budgets: self.mergeBudgets(self.currentUser.budgets, userData.budgets),
                             createdAt: userData.createdAt,
                             updatedAt: max(self.currentUser.updatedAt, userData.updatedAt),
                             goals: userData.goals,
@@ -2880,6 +2884,50 @@ class UserManager: ObservableObject {
     // MARK: - Firebase Sync Control
     
     /// Toggle Firebase sync preference for the current user
+    // MARK: - Live Cloud Apply (CloudSync)
+
+    /// Apply a user document pushed by the live listener. Merges — never replaces — so a snapshot
+    /// that arrives mid-edit can't drop local work. Onboarding stays local by design.
+    func applyCloudUserDoc(_ cloud: UserData) {
+        guard currentUser.enableFirebaseSync else { return }
+
+        let mergedAccounts = mergeAccounts(local: currentUser.accounts, firebase: cloud.accounts)
+        let mergedBudgets = mergeBudgets(currentUser.budgets, cloud.budgets)
+
+        let accountsChanged = mergedAccounts.count != currentUser.accounts.count
+        let budgetsChanged = mergedBudgets.count != currentUser.budgets.count
+        let nameChanged = currentUser.name.isEmpty && !cloud.name.isEmpty
+
+        currentUser.accounts = mergedAccounts
+        currentUser.budgets = mergedBudgets
+        if nameChanged { currentUser.name = cloud.name }
+
+        guard accountsChanged || budgetsChanged || nameChanged else { return }
+        saveCurrentUserLocally()
+        objectWillChange.send()
+        print("📡 CloudSync: applied user doc — \(mergedAccounts.count) wallets, \(mergedBudgets.count) budgets")
+    }
+
+    /// Apply the transaction set pushed by the live listener. Union-by-id with tombstones and
+    /// duplicate collapsing, so this is idempotent — our own writes echoing back change nothing.
+    func applyCloudTransactions(_ cloud: [Txn]) {
+        guard currentUser.enableFirebaseSync else { return }
+
+        let before = currentUser.transactions
+        let merged = mergeTransactions(before, cloud)
+
+        // Cheap change test: same count AND same id set means nothing to do.
+        if merged.count == before.count {
+            let beforeIDs = Set(before.map(\.id))
+            if merged.allSatisfy({ beforeIDs.contains($0.id) }) { return }
+        }
+
+        currentUser.transactions = merged
+        saveCurrentUserLocally()
+        objectWillChange.send()
+        print("📡 CloudSync: applied transactions — \(before.count) local + \(cloud.count) cloud → \(merged.count)")
+    }
+
     /// Storage key for the explicit "I turned cloud backup off" preference.
     private func syncOptOutKey() -> String { "enableFirebaseSync_\(syncUID())" }
 
@@ -2918,6 +2966,9 @@ class UserManager: ObservableObject {
         
         print("🔄 UserManager: Firebase sync \(enabled ? "enabled" : "disabled") for user")
         print("💾 UserManager: Sync preference saved to UserDefaults")
+
+        // Live listeners follow the toggle: attach when backup is on, drop them when it's off.
+        CloudSync.shared.refresh()
         
         // If enabling sync and we have data, sync immediately
         if enabled && !currentUser.transactions.isEmpty {
