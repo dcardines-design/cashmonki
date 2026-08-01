@@ -150,6 +150,89 @@ extension HomePage {
         .buttonStyle(PlainButtonStyle())
     }
 
+    /// Promo carousel under the action tiles: pages the "Save data to cloud" nudge + the feedback
+    /// card, ChatGPT/subscription-card style (paged, peek, dots). The sync nudge only appears when
+    /// the user isn't signed in; when signed in the carousel collapses to just the feedback card.
+    internal var promoCarousel: some View {
+        // Order matches Figma: sync nudge first, feedback second. Drop the sync page once synced.
+        let pages: [PromoPage] = authManager.isAuthenticated ? [.feedback] : [.sync, .feedback]
+        return VStack(spacing: 8) {
+            if pages.count <= 1 {
+                promoView(for: pages[0])
+            } else {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    LazyHStack(spacing: 12) {
+                        ForEach(Array(pages.enumerated()), id: \.offset) { index, page in
+                            promoView(for: page)
+                                .containerRelativeFrame(.horizontal, count: 1, span: 1, spacing: 12)
+                                .id(index)
+                        }
+                    }
+                    .scrollTargetLayout()
+                }
+                .contentMargins(.horizontal, 20, for: .scrollContent)
+                .scrollTargetBehavior(.paging)
+                .scrollPosition(id: $currentPromoPage, anchor: .leading)
+                .padding(.horizontal, -20) // bleed so the next card peeks to the screen edge
+
+                HStack(spacing: 6) {
+                    ForEach(0..<pages.count, id: \.self) { index in
+                        Circle()
+                            .fill((currentPromoPage ?? 0) == index ? AppColors.foregroundPrimary : AppColors.foregroundTertiary.opacity(0.4))
+                            .frame(width: 6, height: 6)
+                    }
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.top, 2)
+                .animation(.easeInOut(duration: 0.2), value: currentPromoPage)
+            }
+        }
+    }
+
+    enum PromoPage { case sync, feedback }
+
+    @ViewBuilder
+    private func promoView(for page: PromoPage) -> some View {
+        switch page {
+        case .sync: syncPromoCard
+        case .feedback: feedbackPromoCard
+        }
+    }
+
+    /// "Save data to cloud" nudge (Figma 1710-7185 "sync data bar"). Tap → connect-account flow.
+    /// Text block is laid out exactly like `feedbackPromoCard` — same sizes, spacing and padding —
+    /// so the two carousel pages line up. The 400×67 art sits behind, scaled to fit against a
+    /// matching #0a8cff base so it never crops; only the colours differ between the two cards.
+    internal var syncPromoCard: some View {
+        Button {
+            showingConnectAccount = true
+        } label: {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Save data to cloud")
+                    .font(AppFonts.overusedGroteskSemiBold(size: 16))
+                    .foregroundColor(.white)
+                Text("Log in to sync and secure your data!")
+                    .font(AppFonts.overusedGroteskMedium(size: 12))
+                    .foregroundColor(.white.opacity(0.85))
+            }
+            .padding(.leading, 18)
+            .padding(.trailing, 20)
+            .padding(.top, 12)
+            .padding(.bottom, 16)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+            .background(
+                ZStack(alignment: .trailing) {
+                    Color(red: 0.039, green: 0.549, blue: 1.0) // #0a8cff — same as the art's bar
+                    Image("sync-data-bar")
+                        .resizable()
+                        .scaledToFit()
+                }
+            )
+            .cornerRadius(10)
+        }
+        .buttonStyle(PlainButtonStyle())
+    }
+
     internal var actionTiles: some View {
         HStack(alignment: .top, spacing: 10) {
             BigTile.icon(

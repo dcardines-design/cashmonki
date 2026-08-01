@@ -63,8 +63,12 @@ struct HomePage: View {
     @State internal var showingCameraPermissionAlert: Bool = false
     @State internal var showingAddSubscription: Bool = false
     @State internal var showingFeedbackBoard: Bool = false
+    @State internal var showingConnectAccount: Bool = false
+    /// Reactive auth so the "Save data to cloud" nudge shows/hides as the user signs in/out.
+    @ObservedObject internal var authManager = AuthenticationManager.shared
     @State internal var selectedSubscriptionForDetail: Subscription?
     @State internal var currentSubscriptionPage: Int? = 0
+    @State internal var currentPromoPage: Int? = 0
 
     // Note: Roast feature state moved to ContentView for global availability
 
@@ -363,6 +367,14 @@ struct HomePage: View {
             .slideInSheet(isPresented: $showingFeedbackBoard) {
                 FeedbackInboxSheet(isPresented: $showingFeedbackBoard)
             }
+            .sheet(isPresented: $showingConnectAccount) {
+                LoginView(
+                    onLogin: { showingConnectAccount = false },
+                    onShowRegister: { },
+                    allowGuest: false // connecting an existing local session, not skipping
+                )
+                .environmentObject(toastManager)
+            }
             .sheet(isPresented: $showingAddSubscription) {
                 AddSubscriptionSheet(isPresented: $showingAddSubscription) { subscription in
                     print("📋 HomePage: New subscription added: \(subscription.name)")
@@ -414,7 +426,7 @@ struct HomePage: View {
             styledLineChart
             combinedTabSelectors
             actionTiles
-            feedbackPromoCard
+            promoCarousel
             recentTransactionsSection
             recurringTransactionsSection
         }
