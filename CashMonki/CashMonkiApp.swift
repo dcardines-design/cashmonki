@@ -462,6 +462,10 @@ struct CashMonkiApp: App {
             // Now it's safe to restore user session since Firebase is configured
             print("🏗️ App startup: Firebase ready - restoring user session...")
             UserManager.shared.restoreUserSession()
+            // Instantiate CloudSync so its load-complete observer exists. It is a lazy singleton:
+            // without touching it here, nothing on a normal launch ever creates it, the observer
+            // is never registered, and no live listener attaches.
+            CloudSync.shared.refresh()
         } else {
             print("✅ Firebase was already configured")
             print("🔐 App startup: Auth status - isAuthenticated: \(authManager.isAuthenticated)")
@@ -469,6 +473,7 @@ struct CashMonkiApp: App {
             
             // Firebase was already configured, safe to restore user session
             print("🏗️ App startup: Firebase already ready - restoring user session...")
+            CloudSync.shared.refresh()
             UserManager.shared.restoreUserSession()
         }
         
