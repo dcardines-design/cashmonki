@@ -200,6 +200,53 @@ final class FirestoreService {
         #endif
     }
 
+    // MARK: - Deletion Tombstones (shared across devices)
+
+    /// Deleted-transaction ids live in ONE document, users/<uid>/meta/deletions, as an array.
+    /// Deleting a transaction removes its doc from the transactions subcollection — but absence
+    /// alone can't distinguish "deleted on another device" from "created offline and not yet
+    /// uploaded". The tombstone list is what makes the cloud authoritative about deletions.
+    func appendDeletedTransactionIDs(_ ids: [String], userId: String, completion: @escaping (Result<Void, Error>) -> Void = { _ in }) {
+        #if canImport(FirebaseFirestore)
+        guard let db = db, !ids.isEmpty else { completion(.success(())); return }
+        db.collection("users").document(userId).collection("meta").document("deletions")
+            .setData(["ids": FieldValue.arrayUnion(ids)], merge: true) { error in
+                if let error = error { completion(.failure(error)) } else { completion(.success(())) }
+            }
+        #else
+        completion(.success(()))
+        #endif
+    }
+
+    /// Fetch the shared tombstone list.
+    func fetchDeletedTransactionIDs(userId: String, completion: @escaping (Result<[String], Error>) -> Void) {
+        #if canImport(FirebaseFirestore)
+        guard let db = db else { completion(.failure(NSError(domain: "FirestoreUnavailable", code: -1))); return }
+        db.collection("users").document(userId).collection("meta").document("deletions")
+            .getDocument { snapshot, error in
+                if let error = error { completion(.failure(error)); return }
+                completion(.success(snapshot?.data()?["ids"] as? [String] ?? []))
+            }
+        #else
+        completion(.success([]))
+        #endif
+    }
+
+#if canImport(FirebaseFirestore)
+    /// Live tombstones, so a delete on one device disappears on the others without a relaunch.
+    func observeDeletedTransactionIDs(userId: String, onChange: @escaping ([String]) -> Void) -> ListenerRegistration? {
+        guard let db = db else { return nil }
+        return db.collection("users").document(userId).collection("meta").document("deletions")
+            .addSnapshotListener { snapshot, error in
+                if let error = error {
+                    print("❌ CloudSync: deletions listener error: \(error.localizedDescription)")
+                    return
+                }
+                onChange(snapshot?.data()?["ids"] as? [String] ?? [])
+            }
+    }
+#endif
+
     // MARK: - Live Observers
     //
     // Snapshot listeners for every user-owned path. Callers get decoded values and route them

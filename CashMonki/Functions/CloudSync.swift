@@ -69,6 +69,12 @@ final class CloudSync {
             DispatchQueue.main.async { UserManager.shared.applyCloudTransactions(txns) }
         }) { registrations.append(reg) }
 
+        // Deletions: the cloud list is authoritative. Attaching fires immediately with the current
+        // list, so a delete made on another device lands on this one without a relaunch.
+        if let reg = service.observeDeletedTransactionIDs(userId: uid, onChange: { ids in
+            DispatchQueue.main.async { UserManager.shared.applyCloudTombstones(ids) }
+        }) { registrations.append(reg) }
+
         if let reg = service.observeCategories(userId: uid, onChange: { unified, _ in
             DispatchQueue.main.async {
                 // pushIfNothingNew: false — echoing our own snapshot back would be a write loop.

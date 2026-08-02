@@ -1454,6 +1454,9 @@ class UserManager: ObservableObject {
 
         // Propagate the deletion to the cloud so it's gone everywhere. Gated on sync being on.
         if currentUser.enableFirebaseSync, transaction != nil {
+            // Shared tombstone FIRST: deleting the doc alone is ambiguous to other devices —
+            // absence can't be told apart from "created offline, not uploaded yet".
+            firestore.appendDeletedTransactionIDs([id.uuidString], userId: firebaseUserID)
             firestore.deleteTransaction(transactionId: id.uuidString, userId: firebaseUserID) { result in
                 switch result {
                 case .success():
@@ -1499,6 +1502,29 @@ class UserManager: ObservableObject {
             if arr.count > Self.tombstoneCap { arr = Array(arr.suffix(Self.tombstoneCap)) }
             UserDefaults.standard.set(arr, forKey: tombstoneKey)
         }
+    }
+
+    /// Apply the account's shared tombstone list: the cloud is the source of truth on deletions.
+    /// Ids deleted on ANY device are unioned into this device's list and any local copy is dropped.
+    /// Returns the merged set so callers can filter without re-reading UserDefaults.
+    @discardableResult
+    func applyCloudTombstones(_ cloudIDs: [String]) -> Set<String> {
+        var ids = deletedTransactionIDs
+        let before = ids.count
+        ids.formUnion(cloudIDs)
+        guard ids.count > before || currentUser.transactions.contains(where: { ids.contains($0.id.uuidString) }) else {
+            return ids
+        }
+        deletedTransactionIDs = ids
+
+        let doomed = currentUser.transactions.filter { ids.contains($0.id.uuidString) }
+        guard !doomed.isEmpty else { return ids }
+
+        currentUser.transactions.removeAll { ids.contains($0.id.uuidString) }
+        saveCurrentUserLocally()
+        objectWillChange.send()
+        print("🗑️ UserManager: removed \(doomed.count) transaction(s) deleted on another device")
+        return ids
     }
 
     private func tombstoneTransaction(_ id: UUID) {
@@ -2900,11 +2926,19 @@ class UserManager: ObservableObject {
         guard currentUser.enableFirebaseSync else { return }
         let uid = syncUID()
 
-        firestore.fetchTransactions(userId: uid) { [weak self] result in
+        // Pull the shared tombstones BEFORE deciding what's "missing" — otherwise a row deleted
+        // on another device looks device-only here and gets re-uploaded (resurrection).
+        firestore.fetchDeletedTransactionIDs(userId: uid) { [weak self] tombResult in
+            guard let self = self else { return }
+            let tombstoned = self.applyCloudTombstones((try? tombResult.get()) ?? [])
+
+        self.firestore.fetchTransactions(userId: uid) { [weak self] result in
             guard let self = self, case .success(let cloudTxns) = result else { return }
             let cloudIDs = Set(cloudTxns.map(\.id))
             let missing = self.currentUser.transactions.filter {
-                localIDsBeforeRestore.contains($0.id) && !cloudIDs.contains($0.id)
+                localIDsBeforeRestore.contains($0.id)
+                    && !cloudIDs.contains($0.id)
+                    && !tombstoned.contains($0.id.uuidString)
             }
             guard !missing.isEmpty else {
                 print("☁️ UserManager: cloud already has every local transaction")
@@ -2918,6 +2952,7 @@ class UserManager: ObservableObject {
                     }
                 }
             }
+        }
         }
     }
 
