@@ -23,7 +23,7 @@ struct DeleteCloudDataSheet: View {
     private static let bullets = [
         "Your backup is erased from our servers",
         "Data on this phone is untouched",
-        "You stay signed in — your account isn’t deleted",
+        "You stay signed in, your account isn’t deleted",
         "With backup on, this phone re-uploads its data"
     ]
 
@@ -89,7 +89,7 @@ struct DeleteCloudDataSheet: View {
                     .foregroundColor(AppColors.destructiveForeground)
             }
 
-            Text("This can’t be undone. Anything only in the cloud — added on your other devices — is gone.")
+            Text("This can’t be undone. Anything only in the cloud, added on your other devices, is gone.")
                 .font(AppFonts.overusedGroteskMedium(size: 18))
                 .foregroundColor(AppColors.destructiveForeground)
                 .fixedSize(horizontal: false, vertical: true)

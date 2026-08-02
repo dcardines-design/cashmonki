@@ -1234,7 +1234,7 @@ struct SettingsPage: View {
                         title: "Delete cloud data",
                         subtitle: isDeletingCloudData
                             ? "Deleting…"
-                            : "Erase your backup — this phone keeps its data",
+                            : "Erase your backup, this phone keeps its data",
                         icon: "🗑️"
                     ) {
                         guard !isDeletingCloudData else { return }
