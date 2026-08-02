@@ -1410,6 +1410,10 @@ struct UserData: Identifiable, Codable {
     var email: String
     var transactions: [Txn] // User's transactions (income/expenses)
     var accounts: [AccountData] // Multiple businesses/wallets
+    /// Wallets the user deleted. Held OUT of `accounts` so nothing renders them, but persisted and
+    /// synced so the deletion reaches the account's other devices. Without a tombstone, a merge
+    /// can't tell "deleted" from "this device hasn't seen it yet" and the wallet comes back.
+    var deletedAccounts: [AccountData]
     var budgets: [Budget] // User's budgets per category/wallet
     let createdAt: Date
     var updatedAt: Date
@@ -1439,6 +1443,7 @@ struct UserData: Identifiable, Codable {
         email: String,
         transactions: [Txn] = [],
         accounts: [AccountData] = [],
+        deletedAccounts: [AccountData] = [],
         budgets: [Budget] = [],
         createdAt: Date = Date(),
         updatedAt: Date = Date(),
@@ -1458,6 +1463,7 @@ struct UserData: Identifiable, Codable {
         self.email = email
         self.transactions = transactions
         self.accounts = accounts
+        self.deletedAccounts = deletedAccounts
         self.budgets = budgets
         self.createdAt = createdAt
         self.updatedAt = updatedAt
@@ -1567,7 +1573,7 @@ struct UserData: Identifiable, Codable {
     // MARK: - Custom Codable Implementation
     
     enum CodingKeys: String, CodingKey {
-        case id, name, email, accounts, budgets, createdAt, updatedAt, goals, onboardingCompleted, enableFirebaseSync, transactions
+        case id, name, email, accounts, deletedAccounts, budgets, createdAt, updatedAt, goals, onboardingCompleted, enableFirebaseSync, transactions
         // Previously-dropped fields: these were declared but absent from CodingKeys, so they
         // silently reset to nil on every save/load. Now persisted.
         case moneyStress, overspentRealization, trackingDifficulty, idealOutcome, trackingFrequency, trackingMethod, role
@@ -1580,6 +1586,8 @@ struct UserData: Identifiable, Codable {
         name = try container.decode(String.self, forKey: .name)
         email = try container.decode(String.self, forKey: .email)
         accounts = try container.decode([AccountData].self, forKey: .accounts)
+        // Absent in data written before wallet tombstones existed.
+        deletedAccounts = try container.decodeIfPresent([AccountData].self, forKey: .deletedAccounts) ?? []
         createdAt = try container.decode(Date.self, forKey: .createdAt)
         updatedAt = try container.decode(Date.self, forKey: .updatedAt)
         // Backward compatibility for new properties

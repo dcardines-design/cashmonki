@@ -2075,8 +2075,16 @@ class UserManager: ObservableObject {
                         print("🏦 UserManager: Firebase has \(userData.accounts.count) accounts: \(userData.accounts.map { $0.name })")
                         print("🏦 UserManager: Current local has \(self.currentUser.accounts.count) accounts: \(self.currentUser.accounts.map { $0.name })")
                         
-                        // Merge accounts instead of replacing everything
-                        let mergedAccounts = self.mergeAccounts(local: self.currentUser.accounts, firebase: userData.accounts)
+                        // Merge accounts instead of replacing everything, honouring wallet
+                        // tombstones from BOTH sides so a wallet deleted on the other device
+                        // doesn't reappear here (and vice versa).
+                        let walletMerge = self.mergeAccountTombstones(
+                            localLive: self.currentUser.accounts,
+                            localDeleted: self.currentUser.deletedAccounts,
+                            cloudLive: userData.accounts,
+                            cloudDeleted: userData.deletedAccounts
+                        )
+                        let mergedAccounts = walletMerge.live
                         
                         // Create updated user with merged accounts but preserve LOCAL onboarding state
                         let mergedUser = UserData(
@@ -2085,6 +2093,7 @@ class UserManager: ObservableObject {
                             email: userData.email,
                             transactions: self.currentUser.transactions, // Will be updated separately
                             accounts: mergedAccounts,
+                            deletedAccounts: walletMerge.deleted,
                             // Budgets MUST be passed explicitly. The initializer defaults them to
                             // [], so omitting them here blanked currentUser.budgets on every cloud
                             // load and the following saveCurrentUserLocally persisted the blank.
@@ -2402,6 +2411,15 @@ class UserManager: ObservableObject {
     }
     
     func deleteAccount(withId accountId: UUID) {
+        // Tombstone BEFORE removing: the record (with a fresh updatedAt) is what tells the other
+        // devices this wallet is gone. Dropping it silently just means the next merge re-adds it
+        // from the cloud copy, and the other device pushes it straight back up.
+        if var doomed = currentUser.accounts.first(where: { $0.id == accountId }) {
+            doomed.isDefault = false          // a tombstone must never win the default election
+            doomed.updatedAt = Date()
+            currentUser.deletedAccounts.removeAll { $0.id == accountId }
+            currentUser.deletedAccounts.append(doomed)
+        }
         currentUser.removeAccount(withId: accountId)
         
         // Check if this was the last wallet - if so, reset onboarding to 1
@@ -2472,6 +2490,35 @@ class UserManager: ObservableObject {
     // MARK: - Account Merging
     
     /// Intelligently merge local and Firebase accounts to preserve local changes
+    /// Resolve wallet tombstones across the two sides, then merge the survivors.
+    ///
+    /// A wallet is dead if EITHER side holds a tombstone for it that is newer than that side's
+    /// live copy. Last-write-wins, so re-creating a wallet with the same id after deleting it
+    /// still works — the newer live record beats the older tombstone.
+    private func mergeAccountTombstones(
+        localLive: [AccountData], localDeleted: [AccountData],
+        cloudLive: [AccountData], cloudDeleted: [AccountData]
+    ) -> (live: [AccountData], deleted: [AccountData]) {
+        var tombstones: [UUID: AccountData] = [:]
+        for record in localDeleted + cloudDeleted {
+            if let existing = tombstones[record.id], existing.updatedAt >= record.updatedAt { continue }
+            tombstones[record.id] = record
+        }
+
+        // A live record newer than the tombstone means the wallet was re-created — drop the stone.
+        for record in localLive + cloudLive {
+            if let stone = tombstones[record.id], record.updatedAt > stone.updatedAt {
+                tombstones.removeValue(forKey: record.id)
+            }
+        }
+
+        let live = mergeAccounts(
+            local: localLive.filter { tombstones[$0.id] == nil },
+            firebase: cloudLive.filter { tombstones[$0.id] == nil }
+        )
+        return (live, Array(tombstones.values))
+    }
+
     private func mergeAccounts(local: [AccountData], firebase: [AccountData]) -> [AccountData] {
         print("🔄 UserManager: Starting account merge...")
         print("📱 Local accounts: \(local.map { "\($0.name) (\($0.id.uuidString.prefix(8)))" })")
@@ -2523,6 +2570,17 @@ class UserManager: ObservableObject {
                 isDefault: true
             )
             mergedAccounts.append(defaultWallet)
+        } else if let cloudDefaultId = firebase.first(where: { $0.isDefault })?.id,
+                  let cloudDefaultIndex = mergedAccounts.firstIndex(where: { $0.id == cloudDefaultId }) {
+            // SIGNED-IN RULE: the account's own default wallet wins. Keeping the first default in
+            // list order meant a wallet created on this phone (local is processed first) became
+            // the default the moment you signed in — and since every view filters by the selected
+            // wallet, the account's real transactions looked like they hadn't synced at all.
+            mergedAccounts[cloudDefaultIndex].isDefault = true
+            for i in mergedAccounts.indices where i != cloudDefaultIndex && mergedAccounts[i].isDefault {
+                mergedAccounts[i].isDefault = false
+                print("🔧 Cleared local default on '\(mergedAccounts[i].name)' — cloud default wins")
+            }
         } else if let firstDefaultIndex = mergedAccounts.firstIndex(where: { $0.isDefault }) {
             // Exactly one default: keep the first, clear the rest.
             for i in mergedAccounts.indices where i != firstDefaultIndex && mergedAccounts[i].isDefault {
@@ -2974,17 +3032,25 @@ class UserManager: ObservableObject {
     func applyCloudUserDoc(_ cloud: UserData) {
         guard currentUser.enableFirebaseSync else { return }
 
-        let mergedAccounts = mergeAccounts(local: currentUser.accounts, firebase: cloud.accounts)
+        let walletMerge = mergeAccountTombstones(
+            localLive: currentUser.accounts,
+            localDeleted: currentUser.deletedAccounts,
+            cloudLive: cloud.accounts,
+            cloudDeleted: cloud.deletedAccounts
+        )
+        let mergedAccounts = walletMerge.live
         let mergedBudgets = mergeBudgets(currentUser.budgets, cloud.budgets)
 
         // Compare CONTENT, not counts. Count-only detection missed every same-count edit —
         // wallet rename, budget amount change, category reassignment — so the merged value sat in
         // memory but was never written to disk, and the local mirror silently fell behind.
         let accountsChanged = !Self.contentEqual(mergedAccounts, currentUser.accounts)
+            || !Self.contentEqual(walletMerge.deleted, currentUser.deletedAccounts)
         let budgetsChanged = !Self.contentEqual(mergedBudgets, currentUser.budgets)
         let nameChanged = currentUser.name.isEmpty && !cloud.name.isEmpty
 
         currentUser.accounts = mergedAccounts
+        currentUser.deletedAccounts = walletMerge.deleted
         currentUser.budgets = mergedBudgets
         if nameChanged { currentUser.name = cloud.name }
 
