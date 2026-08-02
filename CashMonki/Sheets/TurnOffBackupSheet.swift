@@ -20,11 +20,12 @@ struct TurnOffBackupSheet: View {
     /// Called only when the user confirms. Dismissing any other way leaves backup ON.
     let onConfirm: () -> Void
 
+    /// Emoji per bullet so each consequence reads at a glance instead of as four grey lines.
     private static let bullets = [
-        "Your data stays on this phone, but stops backing up",
-        "Your existing backup stays, but won’t update",
-        "Lose this phone and new data is gone",
-        "Receipt scans still go to our AI provider"
+        ("📱", "Your data stays on this phone, but stops backing up"),
+        ("☁️", "Your existing backup stays, but won’t update"),
+        ("🙈", "Lose this phone and new data is gone"),
+        ("🤖", "Receipt scans still go to our AI provider")
     ]
 
     var body: some View {
@@ -43,12 +44,18 @@ struct TurnOffBackupSheet: View {
                             .font(AppFonts.overusedGroteskSemiBold(size: 20))
                             .foregroundColor(AppColors.foregroundPrimary)
 
-                        VStack(alignment: .leading, spacing: 0) {
-                            ForEach(Self.bullets, id: \.self) { bullet in
-                                Text("• \(bullet)")
-                                    .font(AppFonts.overusedGroteskMedium(size: 20))
-                                    .foregroundColor(AppColors.foregroundSecondary)
-                                    .fixedSize(horizontal: false, vertical: true)
+                        VStack(alignment: .leading, spacing: 10) {
+                            ForEach(Self.bullets, id: \.1) { emoji, bullet in
+                                HStack(alignment: .top, spacing: 8) {
+                                    Text(emoji)
+                                        .font(AppFonts.overusedGroteskMedium(size: 20))
+
+                                    Text(bullet)
+                                        .font(AppFonts.overusedGroteskMedium(size: 20))
+                                        .foregroundColor(AppColors.foregroundSecondary)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                }
                             }
                         }
                     }

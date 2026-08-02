@@ -20,11 +20,12 @@ struct DeleteCloudDataSheet: View {
     /// Called only on confirm. Any other dismissal leaves the cloud copy alone.
     let onConfirm: () -> Void
 
+    /// Emoji per bullet so each consequence reads at a glance, matching TurnOffBackupSheet.
     private static let bullets = [
-        "Your backup is erased from our servers",
-        "Data on this phone is untouched",
-        "You stay signed in, your account isn’t deleted",
-        "With backup on, this phone re-uploads its data"
+        ("🗑️", "Your backup is erased from our servers"),
+        ("📱", "Data on this phone is untouched"),
+        ("👤", "You stay signed in, your account isn’t deleted"),
+        ("⬆️", "With backup on, this phone re-uploads its data")
     ]
 
     var body: some View {
@@ -42,12 +43,18 @@ struct DeleteCloudDataSheet: View {
                             .font(AppFonts.overusedGroteskSemiBold(size: 20))
                             .foregroundColor(AppColors.foregroundPrimary)
 
-                        VStack(alignment: .leading, spacing: 0) {
-                            ForEach(Self.bullets, id: \.self) { bullet in
-                                Text("• \(bullet)")
-                                    .font(AppFonts.overusedGroteskMedium(size: 20))
-                                    .foregroundColor(AppColors.foregroundSecondary)
-                                    .fixedSize(horizontal: false, vertical: true)
+                        VStack(alignment: .leading, spacing: 10) {
+                            ForEach(Self.bullets, id: \.1) { emoji, bullet in
+                                HStack(alignment: .top, spacing: 8) {
+                                    Text(emoji)
+                                        .font(AppFonts.overusedGroteskMedium(size: 20))
+
+                                    Text(bullet)
+                                        .font(AppFonts.overusedGroteskMedium(size: 20))
+                                        .foregroundColor(AppColors.foregroundSecondary)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                }
                             }
                         }
                     }
