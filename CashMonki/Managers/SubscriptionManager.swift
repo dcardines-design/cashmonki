@@ -66,7 +66,44 @@ class SubscriptionManager: ObservableObject {
         guard let data = UserDefaults.standard.data(forKey: Self.storageKey()),
               let decoded = try? JSONDecoder().decode([Subscription].self, from: data)
         else { return [] }
-        return decoded
+        return decoded.filter { !$0.isDeleted }
+    }
+
+    /// Soft-deleted subscriptions. Kept OUT of `subscriptions` so no view can ever render one,
+    /// but persisted and pushed so the deletion reaches the account's other devices. Without this
+    /// the other device just re-uploads its live copy and the subscription comes back.
+    private var deletedRecords: [Subscription] = []
+
+    /// Newest-first cap so the graveyard can't grow without bound.
+    private static let deletedCap = 300
+
+    /// Everything that gets persisted and pushed: live rows plus tombstoned ones.
+    private var allRecords: [Subscription] { subscriptions + deletedRecords }
+
+    /// Split a decoded/merged record set into the live list and the graveyard.
+    private func applyRecords(_ records: [Subscription]) {
+        subscriptions = records.filter { !$0.isDeleted }
+        deletedRecords = records.filter { $0.isDeleted }
+            .sorted { $0.updatedAt > $1.updatedAt }
+            .prefix(Self.deletedCap)
+            .map { $0 }
+    }
+
+    /// Record-level last-write-wins, the same rule categories use. A tombstone is just a record
+    /// with a newer `updatedAt`, so a delete beats an older edit and a newer edit beats an older
+    /// delete. Returns nil when nothing actually changed, so echoing our own push back is a no-op.
+    private func mergedRecords(with incoming: [Subscription]) -> [Subscription]? {
+        var byId: [UUID: Subscription] = [:]
+        for r in allRecords { byId[r.id] = r }
+        var changed = false
+        for r in incoming {
+            if let mine = byId[r.id] {
+                guard r.updatedAt > mine.updatedAt else { continue }
+            }
+            byId[r.id] = r
+            changed = true
+        }
+        return changed ? Array(byId.values) : nil
     }
 
     // MARK: - Initialization
@@ -84,12 +121,13 @@ class SubscriptionManager: ObservableObject {
         if let data = UserDefaults.standard.data(forKey: key) {
             do {
                 let decoded = try JSONDecoder().decode([Subscription].self, from: data)
-                subscriptions = decoded
+                applyRecords(decoded)
                 updateUpcoming()
-                print("📋 SubscriptionManager: Loaded \(decoded.count) subscriptions (key: \(key))")
+                print("📋 SubscriptionManager: Loaded \(subscriptions.count) subscriptions (key: \(key))")
             } catch {
                 print("❌ SubscriptionManager: Failed to decode subscriptions - \(error)")
                 subscriptions = []
+                deletedRecords = []
                 updateUpcoming()
             }
         } else if AuthenticationManager.shared.isGuestMode,
@@ -99,13 +137,14 @@ class SubscriptionManager: ObservableObject {
             // Guest (not-connected) identity with no subs under its own key: recover the
             // original pre-split subscriptions from the backup — they belong to this local
             // data. Persist under the guest key so it's stable from here on.
-            subscriptions = decoded
+            applyRecords(decoded)
             UserDefaults.standard.set(backup, forKey: key)
             updateUpcoming()
             print("📋 SubscriptionManager: recovered \(decoded.count) subs from legacy backup for guest (key: \(key))")
         } else {
             // No data for THIS user — start empty (do not inherit the previous user's list).
             subscriptions = []
+            deletedRecords = []
             updateUpcoming()
             print("📋 SubscriptionManager: No subscriptions for current user (key: \(key))")
         }
@@ -129,11 +168,8 @@ class SubscriptionManager: ObservableObject {
                   !cloud.isEmpty else { return }
             Task { @MainActor in
                 guard let self = self else { return }
-                var byId: [UUID: Subscription] = [:]
-                for s in self.subscriptions { byId[s.id] = s }
-                for s in cloud where byId[s.id] == nil { byId[s.id] = s }
-                if byId.count != self.subscriptions.count {
-                    self.subscriptions = Array(byId.values)
+                if let merged = self.mergedRecords(with: cloud) {
+                    self.applyRecords(merged)
                     self.saveSubscriptions()  // persists + re-pushes the merged set
                 } else {
                     self.updateUpcoming()
@@ -150,14 +186,10 @@ class SubscriptionManager: ObservableObject {
               let cloud = try? JSONDecoder().decode([Subscription].self, from: data),
               !cloud.isEmpty else { return }
 
-        var byId: [UUID: Subscription] = [:]
-        for s in subscriptions { byId[s.id] = s }
-        for s in cloud where byId[s.id] == nil { byId[s.id] = s }
-        guard byId.count != subscriptions.count else { return }
-
-        subscriptions = Array(byId.values)
+        guard let merged = mergedRecords(with: cloud) else { return }
+        applyRecords(merged)
         saveSubscriptions()
-        print("📡 CloudSync: applied \(cloud.count) cloud subscriptions → \(subscriptions.count) total")
+        print("📡 CloudSync: applied \(cloud.count) cloud subscriptions → \(subscriptions.count) live")
     }
 
     /// Bring another box's subscriptions into the current user's set (union by id), then
@@ -166,20 +198,19 @@ class SubscriptionManager: ObservableObject {
         guard let data = UserDefaults.standard.data(forKey: "\(Self.legacyGlobalKey)_\(uid)"),
               let incoming = try? JSONDecoder().decode([Subscription].self, from: data),
               !incoming.isEmpty else { return }
-        var byId: [UUID: Subscription] = [:]
-        for s in subscriptions { byId[s.id] = s }
-        for s in incoming where byId[s.id] == nil { byId[s.id] = s }
-        subscriptions = Array(byId.values)
+        if let merged = mergedRecords(with: incoming) { applyRecords(merged) }
         saveSubscriptions()
         print("📋 SubscriptionManager: adopted \(incoming.count) subscriptions from box \(uid.prefix(8))")
     }
 
     private func saveSubscriptions() {
         do {
-            let data = try JSONEncoder().encode(subscriptions)
+            // Persist and push live rows AND tombstones — the tombstones are what make the
+            // deletion travel to the other devices.
+            let data = try JSONEncoder().encode(allRecords)
             UserDefaults.standard.set(data, forKey: Self.storageKey())
             updateUpcoming()
-            print("💾 SubscriptionManager: Saved \(subscriptions.count) subscriptions")
+            print("💾 SubscriptionManager: Saved \(subscriptions.count) subscriptions (+\(deletedRecords.count) tombstoned)")
             // Cloud mirror (local-first): survive reinstall / cross-device, like transactions.
             if UserManager.shared.currentUser.enableFirebaseSync {
                 FirestoreService.shared.saveSubscriptions(data, userId: UserManager.shared.syncUID()) { _ in }
@@ -251,6 +282,7 @@ class SubscriptionManager: ObservableObject {
             // nextDueDate should already be set to createdAt + interval by AddSubscriptionSheet
         }
 
+        newSubscription.updatedAt = Date()
         subscriptions.append(newSubscription)
         saveSubscriptions()
         print("➕ SubscriptionManager: Added subscription '\(subscription.name)'")
@@ -263,7 +295,9 @@ class SubscriptionManager: ObservableObject {
 
     func updateSubscription(_ subscription: Subscription) {
         if let index = subscriptions.firstIndex(where: { $0.id == subscription.id }) {
-            subscriptions[index] = subscription
+            var updated = subscription
+            updated.updatedAt = Date()   // loses the LWW race to nothing older — this IS the newest
+            subscriptions[index] = updated
             saveSubscriptions()
             print("✏️ SubscriptionManager: Updated subscription '\(subscription.name)'")
 
@@ -276,8 +310,7 @@ class SubscriptionManager: ObservableObject {
         // Cancel any pending reminder for this subscription
         NotificationManager.shared.cancelSubscriptionReminder(subscriptionId: subscription.id)
 
-        subscriptions.removeAll { $0.id == subscription.id }
-        saveSubscriptions()
+        softDelete(ids: [subscription.id])
         print("🗑️ SubscriptionManager: Deleted subscription '\(subscription.name)'")
 
         // Track deletion event
@@ -290,13 +323,31 @@ class SubscriptionManager: ObservableObject {
     }
 
     func deleteSubscription(at offsets: IndexSet) {
-        subscriptions.remove(atOffsets: offsets)
+        softDelete(ids: offsets.map { subscriptions[$0].id })
+    }
+
+    /// Move rows to the graveyard with a fresh `updatedAt`, then persist + push. The tombstone is
+    /// what the other devices merge; simply dropping the row would let them push it back.
+    private func softDelete(ids: [UUID]) {
+        guard !ids.isEmpty else { return }
+        let now = Date()
+        for id in ids {
+            guard let index = subscriptions.firstIndex(where: { $0.id == id }) else { continue }
+            var record = subscriptions.remove(at: index)
+            record.isDeleted = true
+            record.updatedAt = now
+            deletedRecords.insert(record, at: 0)
+        }
+        if deletedRecords.count > Self.deletedCap {
+            deletedRecords = Array(deletedRecords.prefix(Self.deletedCap))
+        }
         saveSubscriptions()
     }
 
     func toggleActive(_ subscription: Subscription) {
         if var sub = subscriptions.first(where: { $0.id == subscription.id }) {
             sub.isActive.toggle()
+            sub.updatedAt = Date()
             updateSubscription(sub)
             print("🔄 SubscriptionManager: Toggled '\(sub.name)' to \(sub.isActive ? "active" : "paused")")
 
@@ -335,6 +386,7 @@ class SubscriptionManager: ObservableObject {
         for index in subscriptions.indices {
             if subscriptions[index].walletId == nil {
                 subscriptions[index].walletId = defaultWalletId
+                subscriptions[index].updatedAt = Date()
                 print("📋 SubscriptionManager: Migrated '\(subscriptions[index].name)' walletId to \(subscriptions[index].walletId?.uuidString.prefix(8) ?? "nil")")
                 needsSave = true
             }
@@ -425,6 +477,7 @@ class SubscriptionManager: ObservableObject {
             }
 
             // Update in array
+            subscription.updatedAt = Date()
             subscriptions[index] = subscription
         }
 
@@ -579,6 +632,7 @@ class SubscriptionManager: ObservableObject {
 
     func loadSampleData() {
         subscriptions = Subscription.samples
+        deletedRecords = []
         saveSubscriptions()
         print("🧪 SubscriptionManager: Loaded sample data")
     }
@@ -587,7 +641,10 @@ class SubscriptionManager: ObservableObject {
         // Cancel all notifications first
         NotificationManager.shared.cancelAllSubscriptionReminders()
 
+        // Deliberately NOT tombstoned: this is a local reset / account-deletion path, and the
+        // cloud copy is removed separately. Writing 300 tombstones to a doc being deleted is noise.
         subscriptions = []
+        deletedRecords = []
         saveSubscriptions()
         print("🧹 SubscriptionManager: Cleared all subscriptions")
     }
@@ -607,6 +664,7 @@ class SubscriptionManager: ObservableObject {
                 let nextDate = subscription.calculateNextDueDate(after: now)
                 subscription.nextDueDate = nextDate
                 subscription.lastGeneratedDate = nil  // Clear last generated
+                subscription.updatedAt = Date()
                 subscriptions[index] = subscription
                 resetCount += 1
                 print("📅 SubscriptionManager: Reset '\(subscription.name)' nextDueDate to \(nextDate)")

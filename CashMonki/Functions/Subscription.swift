@@ -26,6 +26,39 @@ struct Subscription: Identifiable, Codable, Equatable {
     var note: String?                         // Optional notes
     var createdAt: Date                       // When subscription was created
     var lastGeneratedDate: Date?              // Last time a transaction was generated
+    var updatedAt: Date                       // Last edit — drives cross-device last-write-wins
+    var isDeleted: Bool                       // Soft delete, so a deletion can sync like an edit
+
+    private enum CodingKeys: String, CodingKey {
+        case id, name, amount, currency, categoryId, category, frequency, nextDueDate
+        case reminderEnabled, reminderDaysBefore, autoAddTransaction, isActive
+        case walletId, note, createdAt, lastGeneratedDate, updatedAt, isDeleted
+    }
+
+    /// Decoded by hand so records written before `updatedAt`/`isDeleted` existed still load.
+    /// A missing `updatedAt` falls back to `createdAt` — NOT `Date()`, which would make whichever
+    /// device decoded most recently win every merge.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        name = try c.decode(String.self, forKey: .name)
+        amount = try c.decode(Double.self, forKey: .amount)
+        currency = try c.decode(Currency.self, forKey: .currency)
+        categoryId = try c.decodeIfPresent(UUID.self, forKey: .categoryId)
+        category = try c.decode(String.self, forKey: .category)
+        frequency = try c.decode(RecurringFrequency.self, forKey: .frequency)
+        nextDueDate = try c.decode(Date.self, forKey: .nextDueDate)
+        reminderEnabled = try c.decode(Bool.self, forKey: .reminderEnabled)
+        reminderDaysBefore = try c.decode(Int.self, forKey: .reminderDaysBefore)
+        autoAddTransaction = try c.decode(Bool.self, forKey: .autoAddTransaction)
+        isActive = try c.decode(Bool.self, forKey: .isActive)
+        walletId = try c.decodeIfPresent(UUID.self, forKey: .walletId)
+        note = try c.decodeIfPresent(String.self, forKey: .note)
+        createdAt = try c.decode(Date.self, forKey: .createdAt)
+        lastGeneratedDate = try c.decodeIfPresent(Date.self, forKey: .lastGeneratedDate)
+        updatedAt = try c.decodeIfPresent(Date.self, forKey: .updatedAt) ?? createdAt
+        isDeleted = try c.decodeIfPresent(Bool.self, forKey: .isDeleted) ?? false
+    }
 
     // MARK: - Initialization
 
@@ -45,7 +78,9 @@ struct Subscription: Identifiable, Codable, Equatable {
         walletId: UUID? = nil,
         note: String? = nil,
         createdAt: Date = Date(),
-        lastGeneratedDate: Date? = nil
+        lastGeneratedDate: Date? = nil,
+        updatedAt: Date = Date(),
+        isDeleted: Bool = false
     ) {
         self.id = id
         self.name = name
@@ -63,6 +98,8 @@ struct Subscription: Identifiable, Codable, Equatable {
         self.note = note
         self.createdAt = createdAt
         self.lastGeneratedDate = lastGeneratedDate
+        self.updatedAt = updatedAt
+        self.isDeleted = isDeleted
     }
 
     // MARK: - Computed Properties
