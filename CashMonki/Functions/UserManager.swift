@@ -17,7 +17,7 @@ import FirebaseCore
 import FirebaseAuth
 #endif
 
-/// A local data box on this device, surfaced in the "Connect device data" picker so the
+/// A local data box on this device, surfaced in the "Upload local data" picker so the
 /// user can choose which one to attach to their login.
 struct LocalDataBox: Identifiable, Equatable {
     let uid: String            // the currentUser_firebase_<uid> key suffix
@@ -1849,7 +1849,7 @@ class UserManager: ObservableObject {
     }
 
     /// All local data boxes on this device that hold data, other than the current account's
-    /// own box. Powers the "Connect device data" picker so the user chooses which box to
+    /// own box. Powers the "Upload local data" picker so the user chooses which box to
     /// attach to their login. Sorted by transaction count (richest first).
     func availableLocalDataBoxes() -> [LocalDataBox] {
         let prefix = "currentUser_firebase_"

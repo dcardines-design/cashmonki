@@ -85,7 +85,7 @@ struct SettingsPage: View {
     // Guest "Connect Account" flow (link local data to a real login for cloud backup)
     @State private var showingConnectAccount = false
 
-    // Signed-in "Connect device data" picker (attach a local box to this account)
+    // Signed-in "Upload local data" picker (upload a local box into this account)
     @State private var showingConnectDeviceData = false
     // Confirmation before cloud backup is switched off (Figma 1714-8158).
     @State private var showingTurnOffBackup = false
@@ -1211,8 +1211,8 @@ struct SettingsPage: View {
 
                     // Attach other local data boxes on this phone to this account.
                     settingsRow(
-                        title: "Connect device data",
-                        subtitle: "Attach other data on this phone to your account",
+                        title: "Upload local data",
+                        subtitle: "Upload data stored on this phone to your account",
                         icon: "📲"
                     ) {
                         showingConnectDeviceData = true

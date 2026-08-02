@@ -20,7 +20,7 @@ struct DataBoxPickerSheet: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            SheetHeader.basic(title: "Connect device data") {
+            SheetHeader.basic(title: "Upload local data") {
                 isPresented = false
             }
 
@@ -172,10 +172,10 @@ struct DataBoxPickerSheet: View {
             DispatchQueue.main.async {
                 connectingUID = nil
                 if success {
-                    toastManager.showSuccess("Connected \(box.transactionCount) transaction\(box.transactionCount == 1 ? "" : "s") to your account")
+                    toastManager.showSuccess("Uploaded \(box.transactionCount) transaction\(box.transactionCount == 1 ? "" : "s") to your account")
                     isPresented = false
                 } else {
-                    toastManager.showError("Couldn’t connect that data. Try again.")
+                    toastManager.showError("Couldn’t upload that data. Try again.")
                 }
             }
         }
