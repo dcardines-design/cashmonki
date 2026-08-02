@@ -1897,7 +1897,9 @@ class UserManager: ObservableObject {
                 email: u.email,
                 transactionCount: u.transactions.count,
                 walletCount: u.accounts.count,
-                updatedAt: u.updatedAt
+                // Boxes written before updatedAt was stamped on save have a stale value, so fall
+                // back to the newest transaction this box holds.
+                updatedAt: max(u.updatedAt, u.transactions.map(\.date).max() ?? .distantPast)
             ))
         }
         return boxes.sorted { $0.transactionCount > $1.transactionCount }
@@ -2754,6 +2756,11 @@ class UserManager: ObservableObject {
     func saveCurrentUserLocally() {
         // SECURITY: Verify wallet ownership before saving
         verifyWalletOwnership()
+
+        // Stamp the box as changed NOW. updatedAt was only ever bumped by profile-level edits
+        // (name, goals, role), so a box could take hundreds of new transactions and still report
+        // "last update 2 weeks ago" in the Upload local data picker.
+        currentUser.updatedAt = Date()
         
         print("💾 UserManager: SAVING USER DATA TO LOCAL STORAGE")
         print("   👤 User: \(currentUser.name) (\(currentUser.email))")
