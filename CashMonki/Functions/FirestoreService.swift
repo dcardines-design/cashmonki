@@ -927,6 +927,24 @@ final class FirestoreService {
             dispatchGroup.leave()
         }
 
+        // 6. Leaf documents in the user's subcollections. Deleting users/{userId} does NOT
+        // delete anything beneath it in Firestore, so without this step categories, subscriptions,
+        // the Ask history and the deletion tombstones survive as orphans and get re-read the next
+        // time the same UID signs in.
+        for (collection, document) in [("categories", "all"), ("subscriptions", "all"),
+                                       ("ask_chat", "history"), ("meta", "deletions")] {
+            dispatchGroup.enter()
+            db.collection("users").document(userId).collection(collection).document(document)
+                .delete { error in
+                    if let error = error {
+                        warnings.append("\(collection)/\(document): \(error.localizedDescription)")
+                    } else {
+                        deletedCounts["\(collection)_\(document)"] = 1
+                    }
+                    dispatchGroup.leave()
+                }
+        }
+
         // Wait for all deletions to complete
         dispatchGroup.notify(queue: .main) {
             let totalDeleted = deletedCounts.values.reduce(0, +)

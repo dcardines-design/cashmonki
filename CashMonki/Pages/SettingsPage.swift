@@ -87,6 +87,8 @@ struct SettingsPage: View {
 
     // Signed-in "Upload local data" picker (upload a local box into this account)
     @State private var showingConnectDeviceData = false
+    @State private var showingDeleteCloudData = false
+    @State private var isDeletingCloudData = false
     // Confirmation before cloud backup is switched off (Figma 1714-8158).
     @State private var showingTurnOffBackup = false
     @State private var deleteConfirmationText = ""
@@ -254,6 +256,11 @@ struct SettingsPage: View {
             .sheet(isPresented: $showingTurnOffBackup) {
                 TurnOffBackupSheet(isPresented: $showingTurnOffBackup) {
                     userManager.setFirebaseSyncEnabled(false)
+                }
+            }
+            .sheet(isPresented: $showingDeleteCloudData) {
+                DeleteCloudDataSheet(isPresented: $showingDeleteCloudData) {
+                    deleteCloudData()
                 }
             }
             .sheet(isPresented: $showingConnectDeviceData) {
@@ -1216,6 +1223,22 @@ struct SettingsPage: View {
                         icon: "📲"
                     ) {
                         showingConnectDeviceData = true
+                    }
+
+                    Divider()
+                        .padding(.leading, 52)
+
+                    // Wipe the account's cloud copy without touching this phone. Repair tool for
+                    // a bad backup: delete it, then let this device push its data up as the truth.
+                    settingsRow(
+                        title: "Delete cloud data",
+                        subtitle: isDeletingCloudData
+                            ? "Deleting…"
+                            : "Erase your backup — this phone keeps its data",
+                        icon: "🗑️"
+                    ) {
+                        guard !isDeletingCloudData else { return }
+                        showingDeleteCloudData = true
                     }
                 }
             }
@@ -2593,6 +2616,33 @@ struct SettingsPage: View {
     
     // MARK: - Delete Account
     
+    /// Wipe the account's cloud copy, keeping this device's data and the account itself.
+    ///
+    /// Uses syncUID() — the same id every read and write in the app uses — rather than
+    /// deleteAccount's own fallback chain, so this can't wipe a different document than the one
+    /// the app actually syncs with.
+    private func deleteCloudData() {
+        guard !isDeletingCloudData else { return }
+        isDeletingCloudData = true
+        let uid = userManager.syncUID()
+        print("🗑️ Settings: deleting cloud data for \(uid.prefix(8))")
+
+        FirestoreService.shared.deleteAllUserData(userId: uid) { result in
+            DispatchQueue.main.async {
+                self.isDeletingCloudData = false
+                switch result {
+                case .success:
+                    // Local data is deliberately untouched. The live listeners will fire with
+                    // empty snapshots; every apply path merges rather than replaces, so nothing
+                    // local is removed by the wipe.
+                    self.toastManager.showSuccess("Cloud data deleted. This phone kept its data.")
+                case .failure(let error):
+                    self.toastManager.showError("Couldn't delete cloud data. \(error.localizedDescription)")
+                }
+            }
+        }
+    }
+
     private func deleteAccount() {
         print("🔴🔴🔴 DELETE ACCOUNT FUNCTION CALLED 🔴🔴🔴")
         print("🔴 DELETE: deleteAccount() function has been invoked")
