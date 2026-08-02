@@ -451,6 +451,19 @@ class SubscriptionManager: ObservableObject {
 
             // Generate transactions for ALL missed dates (catch-up)
             while subscription.isDue {
+                // Signing in (or connecting a box) brings the account's already-generated
+                // occurrences down from the cloud, but this subscription's own bookkeeping may
+                // still say the date is unpaid — generating a second copy of a transaction the
+                // user already has. Skip the create and just advance the schedule.
+                if UserManager.shared.hasGeneratedOccurrence(
+                    sourceId: subscription.id,
+                    due: subscription.nextDueDate
+                ) {
+                    print("↩️ SubscriptionManager: '\(subscription.name)' occurrence \(subscription.nextDueDate) already exists — advancing without generating")
+                    subscription.markAsGenerated()
+                    continue
+                }
+
                 // Create transaction with the due date and correct amount sign
                 let transaction = subscription.createTransaction(
                     accountId: UserManager.shared.currentUser.id,

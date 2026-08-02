@@ -2065,6 +2065,24 @@ class UserManager: ObservableObject {
     /// date comes from `nextDueDate`, which is identical on both devices, so this only ever matches
     /// genuine twins — two real charges in the same minute for the same amount would merge, which
     /// is the same assumption the generators already make.
+    /// Does a generated transaction already exist for this subscription occurrence?
+    ///
+    /// Keyed the same way collapseGeneratedDuplicates keys duplicates — source id plus the due
+    /// date to the minute — so the two agree on what "the same occurrence" means. Generation uses
+    /// this to stay idempotent: collapse only runs inside mergeTransactions, so an occurrence
+    /// generated locally AFTER a merge would otherwise sit next to the cloud's copy forever.
+    func hasGeneratedOccurrence(sourceId: UUID, due: Date) -> Bool {
+        let calendar = Calendar.current
+        let dueMinute = calendar.date(bySetting: .second, value: 0, of: due) ?? due
+        return currentUser.transactions.contains { txn in
+            guard !txn.isRecurring,
+                  let existingSource = txn.subscriptionId ?? txn.recurringTemplateId,
+                  existingSource == sourceId else { return false }
+            let txnMinute = calendar.date(bySetting: .second, value: 0, of: txn.date) ?? txn.date
+            return txnMinute == dueMinute
+        }
+    }
+
     private func collapseGeneratedDuplicates(_ txns: [Txn]) -> [Txn] {
         struct OccurrenceKey: Hashable {
             let sourceId: UUID
