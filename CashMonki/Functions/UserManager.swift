@@ -26,7 +26,24 @@ struct LocalDataBox: Identifiable, Equatable {
     let transactionCount: Int
     let walletCount: Int
     let updatedAt: Date
+    /// Already attached to this account. Firebase stays the source of truth; a linked box is a
+    /// local MIRROR of the account's data, rewritten on every save so it never goes stale.
+    let isLinked: Bool
     var id: String { uid }
+
+    /// Compact age string ("2m ago", "3d ago") shared by the picker and the Settings status row.
+    static func relativeAge(_ date: Date) -> String {
+        let seconds = max(0, Date().timeIntervalSince(date))
+        let minute = 60.0, hour = 3_600.0, day = 86_400.0, week = 604_800.0, year = 31_536_000.0
+        switch seconds {
+        case ..<minute: return "just now"
+        case ..<hour:   return "\(Int(seconds / minute))m ago"
+        case ..<day:    return "\(Int(seconds / hour))h ago"
+        case ..<week:   return "\(Int(seconds / day))d ago"
+        case ..<year:   return "\(Int(seconds / week))w ago"
+        default:        return "\(Int(seconds / year))y ago"
+        }
+    }
 }
 
 class UserManager: ObservableObject {
@@ -1874,11 +1891,68 @@ class UserManager: ObservableObject {
         }
     }
 
+    // MARK: - Linked local boxes (local mirrors of the account's data)
+
+    /// Boxes the user attached to THIS account. Kept per-account so another login on the same
+    /// phone doesn't inherit them.
+    private var linkedBoxKey: String { "linkedLocalBoxes_\(syncUID())" }
+
+    /// Cap the mirrors: each one is a full copy of the account's data in UserDefaults.
+    private static let linkedBoxCap = 5
+
+    func linkedLocalBoxUIDs() -> [String] {
+        UserDefaults.standard.stringArray(forKey: linkedBoxKey) ?? []
+    }
+
+    private func markBoxLinked(_ uid: String) {
+        var linked = linkedLocalBoxUIDs()
+        guard !linked.contains(uid) else { return }
+        linked.append(uid)
+        if linked.count > Self.linkedBoxCap { linked = Array(linked.suffix(Self.linkedBoxCap)) }
+        UserDefaults.standard.set(linked, forKey: linkedBoxKey)
+        print("🔗 UserManager: box \(uid.prefix(8)) is now a linked local mirror")
+    }
+
+    /// Rewrite every linked box with the account's current state.
+    ///
+    /// These are MIRRORS, never sources: the app reads truth from Firebase (merged into the
+    /// account box), and this copies that result outward. Before this, a connected box was a
+    /// one-time snapshot that froze at the moment of upload and drifted forever after.
+    private func mirrorToLinkedBoxes(_ encoded: Data) {
+        let linked = linkedLocalBoxUIDs()
+        guard !linked.isEmpty else { return }
+        for uid in linked {
+            UserDefaults.standard.set(encoded, forKey: "currentUser_firebase_\(uid)")
+        }
+    }
+
+    /// The account's OWN local box, read back from disk rather than reported from memory — this
+    /// answers "is my cloud data actually saved on this phone?" with what is really persisted.
+    ///
+    /// Every cloud merge ends in saveCurrentUserLocally(), so this box is the local mirror of the
+    /// Firebase data. It is deliberately excluded from availableLocalDataBoxes() (you can't upload
+    /// a box into itself), which is why it needed its own surface.
+    func localCopySummary() -> LocalDataBox? {
+        let uid = syncUID()
+        guard let data = UserDefaults.standard.data(forKey: "currentUser_firebase_\(uid)"),
+              let stored = try? JSONDecoder().decode(UserData.self, from: data) else { return nil }
+        return LocalDataBox(
+            uid: uid,
+            name: stored.name,
+            email: stored.email,
+            transactionCount: stored.transactions.count,
+            walletCount: stored.accounts.count,
+            updatedAt: max(stored.updatedAt, stored.transactions.map(\.date).max() ?? .distantPast),
+            isLinked: true
+        )
+    }
+
     /// All local data boxes on this device that hold data, other than the current account's
     /// own box. Powers the "Upload local data" picker so the user chooses which box to
     /// attach to their login. Sorted by transaction count (richest first).
     func availableLocalDataBoxes() -> [LocalDataBox] {
         let prefix = "currentUser_firebase_"
+        let linked = Set(linkedLocalBoxUIDs())
         let currentUID = AuthenticationManager.shared.currentUser?.firebaseUID
         let d = UserDefaults.standard
         var boxes: [LocalDataBox] = []
@@ -1899,10 +1973,14 @@ class UserManager: ObservableObject {
                 walletCount: u.accounts.count,
                 // Boxes written before updatedAt was stamped on save have a stale value, so fall
                 // back to the newest transaction this box holds.
-                updatedAt: max(u.updatedAt, u.transactions.map(\.date).max() ?? .distantPast)
+                updatedAt: max(u.updatedAt, u.transactions.map(\.date).max() ?? .distantPast),
+                isLinked: linked.contains(uid)
             ))
         }
-        return boxes.sorted { $0.transactionCount > $1.transactionCount }
+        return boxes.sorted {
+            if $0.isLinked != $1.isLinked { return !$0.isLinked }   // actionable boxes first
+            return $0.transactionCount > $1.transactionCount
+        }
     }
 
     /// Attach a chosen local box to the currently signed-in account: its data is re-keyed to
@@ -1925,6 +2003,9 @@ class UserManager: ObservableObject {
             currentUser.onboardingCompleted = source.onboardingCompleted
         }
         currentUser.enableFirebaseSync = true
+
+        // From here the source box is a live mirror of this account, not a frozen snapshot.
+        markBoxLinked(sourceUID)
 
         // Keep BOTH wallets (the merge already unions them). Select the wallet holding the most
         // transactions after the merge — that's the one with the real data, so new transactions
@@ -2805,6 +2886,10 @@ class UserManager: ObservableObject {
             // ────────────────────────────────────────────────────────────────────────────────
 
             UserDefaults.standard.set(encoded, forKey: key)
+
+            // Keep every linked box current with the same bytes. Firebase remains the source of
+            // truth; these are local copies of what came back from it.
+            mirrorToLinkedBoxes(encoded)
 
             // CRITICAL: Store Firebase UID separately for recovery after app restart
             // This allows us to find the correct storage key before Firebase Auth loads

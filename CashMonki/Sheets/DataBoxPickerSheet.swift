@@ -84,7 +84,7 @@ struct DataBoxPickerSheet: View {
     /// Figma tile (1711-7570): white card, 1pt #dce2f4 border, radius 12, hard 0/4 shadow in the
     /// same line colour. Row is 20pt gap, 28pt horizontal / 20pt vertical padding.
     private func boxRow(_ box: LocalDataBox) -> some View {
-        Button(action: { connect(box) }) {
+        Button(action: { if !box.isLinked { connect(box) } }) {
             HStack(spacing: 20) {
                 // Exported from Figma (node 1711-7573). 56 × 58 keeps the disk's designed
                 // drop-shadow bleed instead of squaring it off at the 54.36 leaf size.
@@ -93,10 +93,14 @@ struct DataBoxPickerSheet: View {
                     .frame(width: 56, height: 58)
 
                 VStack(alignment: .leading, spacing: 8) {
-                    Text(box.name.isEmpty ? (box.email.isEmpty ? "Untitled data" : box.email) : box.name)
-                        .font(AppFonts.overusedGroteskSemiBold(size: 20))
-                        .foregroundColor(AppColors.foregroundPrimary)
-                        .lineLimit(1)
+                    HStack(spacing: 8) {
+                        Text(box.name.isEmpty ? (box.email.isEmpty ? "Untitled data" : box.email) : box.name)
+                            .font(AppFonts.overusedGroteskSemiBold(size: 20))
+                            .foregroundColor(AppColors.foregroundPrimary)
+                            .lineLimit(1)
+
+                        if box.isLinked { linkedBadge }
+                    }
 
                     HStack(spacing: 6) {
                         Text("\(box.transactionCount) transaction\(box.transactionCount == 1 ? "" : "s")")
@@ -111,7 +115,9 @@ struct DataBoxPickerSheet: View {
                     }
 
                     // Figma 1711-7638: 9pt Medium, 0.9 tracking, uppercase, #72788a.
-                    Text("Last update \(Self.relativeAge(box.updatedAt))")
+                    Text(box.isLinked
+                         ? "Updates automatically · \(LocalDataBox.relativeAge(box.updatedAt))"
+                         : "Last update \(LocalDataBox.relativeAge(box.updatedAt))")
                         .font(AppFonts.overusedGroteskMedium(size: 9))
                         .tracking(0.9)
                         .textCase(.uppercase)
@@ -122,6 +128,9 @@ struct DataBoxPickerSheet: View {
                 if connectingUID == box.uid {
                     ProgressView()
                         .frame(width: 24, height: 24)
+                } else if box.isLinked {
+                    // Nothing to do: it's already attached and mirrors the account automatically.
+                    EmptyView()
                 } else {
                     Image("chevron-right")
                         .renderingMode(.template)
@@ -153,17 +162,16 @@ struct DataBoxPickerSheet: View {
     }
 
     /// Compact age for the tile's "LAST UPDATE …" line — 45m / 3h / 2d / 1w, matching Figma's copy.
-    private static func relativeAge(_ date: Date) -> String {
-        let seconds = max(0, Date().timeIntervalSince(date))
-        let minute = 60.0, hour = 3_600.0, day = 86_400.0, week = 604_800.0, year = 31_536_000.0
-        switch seconds {
-        case ..<minute: return "just now"
-        case ..<hour:   return "\(Int(seconds / minute))m ago"
-        case ..<day:    return "\(Int(seconds / hour))h ago"
-        case ..<week:   return "\(Int(seconds / day))d ago"
-        case ..<year:   return "\(Int(seconds / week))w ago"
-        default:        return "\(Int(seconds / year))y ago"
-        }
+    /// Status pill on a box that is already attached to this account.
+    private var linkedBadge: some View {
+        Text("LINKED")
+            .font(AppFonts.overusedGroteskMedium(size: 9))
+            .tracking(0.9)
+            .foregroundColor(AppColors.foregroundPrimary)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(AppColors.surfacePrimary)
+            .clipShape(Capsule())
     }
 
     private func connect(_ box: LocalDataBox) {
