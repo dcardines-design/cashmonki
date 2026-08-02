@@ -212,31 +212,37 @@ class UserManager: ObservableObject {
             UserDefaults.standard.set(authenticatedUser.name, forKey: "currentUserName")
             UserDefaults.standard.set(authenticatedUser.email, forKey: "currentUserEmail")
 
-            // CLOUD RESTORE: only when this device genuinely has NO transactions.
-            // setCurrentUser may have recovered local data via legacy-key migration; if so,
-            // local wins and we must NOT pull cloud (loadFromFirebase replaces transactions,
-            // which would clobber local with a possibly-staler cloud copy).
-            if currentUser.transactions.isEmpty {
-                print("☁️ UserManager: No local transactions - attempting cloud restore for \(authenticatedUser.email)")
-                loadFromFirebase { [weak self] success in
-                    guard let self = self else { return }
-                    DispatchQueue.main.async {
-                        if success {
-                            print("☁️ UserManager: Cloud restore complete - persisting to local storage")
-                        } else {
-                            print("💾 UserManager: No cloud data / restore failed - starting fresh on this device")
-                        }
-                        // Persist whatever we ended up with (restored cloud data, or the fresh default).
-                        self.saveCurrentUserLocally()
-                        self.objectWillChange.send()
-                        NotificationCenter.default.post(name: NSNotification.Name("UserManagerFirebaseLoadComplete"), object: nil)
+            // CLOUD RESTORE ON EVERY SIGN-IN. Signing in means "give me my account's data",
+            // so we always pull — not only when the device happens to be empty.
+            //
+            // This used to be gated on `currentUser.transactions.isEmpty`, which made signing in
+            // a no-op for anyone whose device already held a single transaction: the account's
+            // data simply never arrived. That guard existed because an older loadFromFirebase
+            // REPLACED the local array and an empty/stale cloud read could wipe it. It no longer
+            // replaces: mergeTransactions unions by id, honours deletion tombstones, and collapses
+            // duplicate generated occurrences. A merge cannot lose local rows, so the guard's
+            // reason is gone.
+            //
+            // Anything this device holds that the cloud lacks is pushed up right after, so the
+            // two sides converge instead of drifting.
+            let localBeforeRestore = Set(currentUser.transactions.map(\.id))
+            print("☁️ UserManager: Sign-in cloud restore for \(authenticatedUser.email) — \(localBeforeRestore.count) local transaction(s) before merge")
+            loadFromFirebase { [weak self] success in
+                guard let self = self else { return }
+                DispatchQueue.main.async {
+                    print(success ? "☁️ UserManager: Cloud restore complete — \(self.currentUser.transactions.count) transaction(s) after merge"
+                                  : "⚠️ UserManager: Cloud restore failed — keeping local data untouched")
+                    self.saveCurrentUserLocally()
+                    self.objectWillChange.send()
+                    NotificationCenter.default.post(name: NSNotification.Name("UserManagerFirebaseLoadComplete"), object: nil)
+
+                    // Push up anything the cloud didn't have. Only when the restore actually
+                    // succeeded — otherwise a failed read could look like "cloud is missing
+                    // everything" and trigger a pointless full upload.
+                    if success, !localBeforeRestore.isEmpty {
+                        self.uploadTransactionsMissingFromCloud(localIDsBeforeRestore: localBeforeRestore)
                     }
                 }
-            } else {
-                // Local data was recovered inside setCurrentUser's local-found branch, which
-                // already ran migrateEnableSyncIfNeeded() + posted the load-complete notification.
-                // Nothing more to do here - do NOT re-run them (would double-upload / double-notify).
-                print("💾 UserManager: Local transactions present (\(currentUser.transactions.count)) - handled by setCurrentUser, local kept")
             }
             return
         }
@@ -2884,6 +2890,37 @@ class UserManager: ObservableObject {
     // MARK: - Firebase Sync Control
     
     /// Toggle Firebase sync preference for the current user
+    /// Push local transactions the cloud has never seen. Called right after a successful sign-in
+    /// restore: the merge brings the account's data DOWN, this sends anything device-only UP, so
+    /// a phone that was offline (or whose writes were rejected) stops being the only copy.
+    ///
+    /// Deliberately only uploads ids that existed locally BEFORE the merge — rows that arrived
+    /// from the cloud in this same pass obviously don't need sending back.
+    func uploadTransactionsMissingFromCloud(localIDsBeforeRestore: Set<UUID>) {
+        guard currentUser.enableFirebaseSync else { return }
+        let uid = syncUID()
+
+        firestore.fetchTransactions(userId: uid) { [weak self] result in
+            guard let self = self, case .success(let cloudTxns) = result else { return }
+            let cloudIDs = Set(cloudTxns.map(\.id))
+            let missing = self.currentUser.transactions.filter {
+                localIDsBeforeRestore.contains($0.id) && !cloudIDs.contains($0.id)
+            }
+            guard !missing.isEmpty else {
+                print("☁️ UserManager: cloud already has every local transaction")
+                return
+            }
+            print("⬆️ UserManager: uploading \(missing.count) device-only transaction(s) the cloud was missing")
+            for txn in missing {
+                self.firestore.saveTransaction(txn, userId: uid) { r in
+                    if case .failure(let e) = r {
+                        print("❌ UserManager: upload failed for \(txn.id.uuidString.prefix(8)): \(e.localizedDescription)")
+                    }
+                }
+            }
+        }
+    }
+
     // MARK: - Live Cloud Apply (CloudSync)
 
     /// Apply a user document pushed by the live listener. Merges — never replaces — so a snapshot
