@@ -2960,14 +2960,28 @@ class UserManager: ObservableObject {
 
     /// Apply a user document pushed by the live listener. Merges — never replaces — so a snapshot
     /// that arrives mid-edit can't drop local work. Onboarding stays local by design.
+    /// Deep equality via canonical JSON. `.sortedKeys` keeps the encoding stable so two
+    /// value-identical arrays always produce identical bytes.
+    private static func contentEqual<T: Encodable>(_ a: [T], _ b: [T]) -> Bool {
+        guard a.count == b.count else { return false }
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        encoder.dateEncodingStrategy = .secondsSince1970
+        guard let da = try? encoder.encode(a), let db = try? encoder.encode(b) else { return false }
+        return da == db
+    }
+
     func applyCloudUserDoc(_ cloud: UserData) {
         guard currentUser.enableFirebaseSync else { return }
 
         let mergedAccounts = mergeAccounts(local: currentUser.accounts, firebase: cloud.accounts)
         let mergedBudgets = mergeBudgets(currentUser.budgets, cloud.budgets)
 
-        let accountsChanged = mergedAccounts.count != currentUser.accounts.count
-        let budgetsChanged = mergedBudgets.count != currentUser.budgets.count
+        // Compare CONTENT, not counts. Count-only detection missed every same-count edit —
+        // wallet rename, budget amount change, category reassignment — so the merged value sat in
+        // memory but was never written to disk, and the local mirror silently fell behind.
+        let accountsChanged = !Self.contentEqual(mergedAccounts, currentUser.accounts)
+        let budgetsChanged = !Self.contentEqual(mergedBudgets, currentUser.budgets)
         let nameChanged = currentUser.name.isEmpty && !cloud.name.isEmpty
 
         currentUser.accounts = mergedAccounts
