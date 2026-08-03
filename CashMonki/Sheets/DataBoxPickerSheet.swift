@@ -10,34 +10,19 @@
 import SwiftUI
 
 struct DataBoxPickerSheet: View {
-    /// What picking a box does. Upload is a non-destructive union; restore REPLACES the account's
-    /// data with the file, cloud included, so it asks for confirmation first.
-    enum Mode {
-        case upload
-        case restore
-
-        var title: String { self == .upload ? "Upload local data" : "Restore from save file" }
-
-        var intro: String {
-            self == .upload
-                ? "Choose data on this phone to attach to your account. It’s uploaded and backed up."
-                : "Choose a save file. Its contents replace your account data everywhere, including the cloud."
-        }
-    }
-
     @Binding var isPresented: Bool
-    var mode: Mode = .upload
 
     @ObservedObject private var userManager = UserManager.shared
     @EnvironmentObject var toastManager: ToastManager
 
     @State private var boxes: [LocalDataBox] = []
     @State private var connectingUID: String? = nil
+    @State private var pendingAction: LocalDataBox? = nil
     @State private var pendingRestore: LocalDataBox? = nil
 
     var body: some View {
         VStack(spacing: 0) {
-            SheetHeader.basic(title: mode.title) {
+            SheetHeader.basic(title: "Local save files") {
                 isPresented = false
             }
 
@@ -50,7 +35,7 @@ struct DataBoxPickerSheet: View {
                     // Figma 1711-7253 "options": 20pt sides + bottom (no top padding — the
                     // header supplies that), 24pt gap, centered intro, 16pt tile stack.
                     VStack(spacing: 24) {
-                        Text(mode.intro)
+                        Text(Self.introCopy)
                             .font(AppFonts.overusedGroteskMedium(size: 18))
                             .foregroundColor(AppColors.foregroundPrimary)
                             .multilineTextAlignment(.center)
@@ -70,6 +55,28 @@ struct DataBoxPickerSheet: View {
         .background(AppColors.backgroundWhite)
         .presentationDetents([.fraction(0.7)])
         .onAppear { boxes = userManager.availableLocalDataBoxes() }
+        .confirmationDialog(
+            pendingAction.map { $0.name.isEmpty ? "This save file" : $0.name } ?? "",
+            isPresented: .constant(pendingAction != nil),
+            titleVisibility: .visible
+        ) {
+            // A linked box is already in the account, so uploading it again would do nothing.
+            if let box = pendingAction, !box.isLinked {
+                Button("Add to my account") {
+                    connect(box)
+                    pendingAction = nil
+                }
+            }
+            Button("Restore from this file", role: .destructive) {
+                pendingRestore = pendingAction
+                pendingAction = nil
+            }
+            Button("Cancel", role: .cancel) { pendingAction = nil }
+        } message: {
+            Text(pendingAction?.isLinked == true
+                 ? "Already in your account. You can still restore your data from it."
+                 : "Add keeps everything you already have. Restore replaces it.")
+        }
         .alert("Restore this save file?", isPresented: .constant(pendingRestore != nil)) {
             Button("Cancel", role: .cancel) { pendingRestore = nil }
             Button("Restore", role: .destructive) {
@@ -83,7 +90,7 @@ struct DataBoxPickerSheet: View {
         }
     }
 
-    private static let introCopy = "Choose data on this phone to attach to your account. It’s uploaded and backed up."
+    private static let introCopy = "Pick a save file on this phone. Add it to your account, or restore your data from it."
 
     /// Figma 1713-7674: grey disk, 22pt heading, the same intro copy underneath. 20pt stack gap,
     /// 6pt between the two lines, 20pt sides / 24pt vertical padding.
@@ -154,7 +161,7 @@ struct DataBoxPickerSheet: View {
                 if connectingUID == box.uid {
                     ProgressView()
                         .frame(width: 24, height: 24)
-                } else if box.isLinked && mode == .upload {
+                } else if box.isLinked {
                     // Nothing to do: it's already attached and mirrors the account automatically.
                     EmptyView()
                 } else {
@@ -191,7 +198,7 @@ struct DataBoxPickerSheet: View {
     /// Small uppercase status line under the counts: freshness, plus what kind of file this is.
     private func statusLine(_ box: LocalDataBox) -> String {
         let age = LocalDataBox.relativeAge(box.updatedAt)
-        if box.isLinked && mode == .upload { return "Updates automatically · \(age)" }
+        if box.isLinked { return "In your account · \(age)" }
         if box.isCloudSnapshot { return "Last update \(age) · Cloud backup" }
         return "Last update \(age)"
     }
@@ -208,14 +215,12 @@ struct DataBoxPickerSheet: View {
             .clipShape(Capsule())
     }
 
+    /// Upload and restore are the same gesture on the same object, so they share one list and
+    /// the verb is chosen per file. They are NOT interchangeable: upload unions the file into the
+    /// account, restore replaces the account with the file. Picking for the user would mean
+    /// guessing which one deletes their data.
     private func pick(_ box: LocalDataBox) {
-        switch mode {
-        case .upload:
-            guard !box.isLinked else { return }   // already attached, nothing to upload
-            connect(box)
-        case .restore:
-            pendingRestore = box
-        }
+        pendingAction = box
     }
 
     private func restore(_ box: LocalDataBox) {

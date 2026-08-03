@@ -90,7 +90,6 @@ struct SettingsPage: View {
     @State private var showingDeleteCloudData = false
     @State private var isDeletingCloudData = false
     @State private var isDownloadingCloudData = false
-    @State private var showingRestoreFromFile = false
     // Confirmation before cloud backup is switched off (Figma 1714-8158).
     @State private var showingTurnOffBackup = false
     @State private var deleteConfirmationText = ""
@@ -264,10 +263,6 @@ struct SettingsPage: View {
                 DeleteCloudDataSheet(isPresented: $showingDeleteCloudData) {
                     deleteCloudData()
                 }
-            }
-            .sheet(isPresented: $showingRestoreFromFile) {
-                DataBoxPickerSheet(isPresented: $showingRestoreFromFile, mode: .restore)
-                    .environmentObject(toastManager)
             }
             .sheet(isPresented: $showingConnectDeviceData) {
                 DataBoxPickerSheet(isPresented: $showingConnectDeviceData)
@@ -1224,8 +1219,8 @@ struct SettingsPage: View {
 
                     // Attach other local data boxes on this phone to this account.
                     settingsRow(
-                        title: "Upload local data",
-                        subtitle: "Upload data stored on this phone to your account",
+                        title: "Local save files",
+                        subtitle: "Add a saved copy to your account, or restore from one",
                         icon: "📲"
                     ) {
                         showingConnectDeviceData = true
@@ -1247,17 +1242,6 @@ struct SettingsPage: View {
                         downloadCloudData()
                     }
 
-                    Divider()
-                        .padding(.leading, 52)
-
-                    // The inverse of a download: make a save file the truth again, everywhere.
-                    settingsRow(
-                        title: "Restore from save file",
-                        subtitle: "Replace your data with a saved copy",
-                        icon: "♻️"
-                    ) {
-                        showingRestoreFromFile = true
-                    }
 
                     Divider()
                         .padding(.leading, 52)
