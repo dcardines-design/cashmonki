@@ -804,7 +804,20 @@ struct SettingsPage: View {
                 .foregroundColor(AppColors.foregroundPrimary)
                 .onTapGesture { handleRoleTap() }
 
-            // Email hidden - no auth in current flow
+            // Signed-in identity. The old comment here said "Email hidden - no auth in current
+            // flow", which stopped being true once accounts shipped: the name alone can't tell you
+            // WHICH account you're in, and that ambiguity is exactly what makes a sync problem
+            // impossible to diagnose from the screen.
+            if authManager.isAuthenticated, !authManager.isGuestMode {
+                let email = authManager.currentUser?.email ?? userManager.currentUser.email
+                if !email.isEmpty {
+                    Text(email)
+                        .font(AppFonts.overusedGroteskMedium(size: 16))
+                        .foregroundColor(AppColors.foregroundSecondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+            }
         }
         .padding(.top, 40)
         .padding(.bottom, 20)
