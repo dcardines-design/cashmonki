@@ -206,11 +206,24 @@ class UserManager: ObservableObject {
 
             print("💾 UserManager: Session restored from LOCAL STORAGE")
 
-            // Local data is source of truth. Ensure sync is ON and push a backup to cloud.
-            migrateEnableSyncIfNeeded()
+            // Signed in? Then the cloud is the source of truth and launch has to ASK it, not just
+            // upload over it. This branch returns early, so the sign-in restore in STEP 2 never
+            // ran on a device that already had a box — the account's data only ever arrived later
+            // via the listeners, and nothing pulled at all if they failed to attach.
+            let syncEnabled = migrateEnableSyncIfNeeded(pushNow: false)
 
-            // Notify that loading is complete
+            // Posted at the same point as before: seven observers key off this, so the pull must
+            // not delay it.
             NotificationCenter.default.post(name: NSNotification.Name("UserManagerFirebaseLoadComplete"), object: nil)
+
+            if syncEnabled {
+                if AuthenticationManager.shared.currentUser != nil {
+                    pullThenPushAtLaunch()
+                } else {
+                    // Guest: there is no account to pull from, so this is the old push-only path.
+                    syncToFirebase { _ in }
+                }
+            }
             return
         }
 
@@ -298,11 +311,12 @@ class UserManager: ObservableObject {
     /// Cloud-sync migration for users whose local data predates default-on sync.
     /// SAFE: only ever turns sync ON and PUSHES local data up. Never pulls, never
     /// overwrites local. Respects an explicit user opt-out if one was saved.
-    private func migrateEnableSyncIfNeeded() {
+    @discardableResult
+    private func migrateEnableSyncIfNeeded(pushNow: Bool = true) -> Bool {
         let explicitlyDisabled = syncOptOutIsExplicit()
         guard !explicitlyDisabled else {
             print("☁️ UserManager: User explicitly disabled sync - leaving OFF")
-            return
+            return false
         }
 
         if !currentUser.enableFirebaseSync {
@@ -312,8 +326,46 @@ class UserManager: ObservableObject {
         }
 
         // Back up current LOCAL data to cloud (idempotent save; local stays source of truth).
-        syncToFirebase { success in
-            print(success ? "☁️ UserManager: Local data backed up to cloud" : "⚠️ UserManager: Cloud backup failed (will retry next launch)")
+        // Callers that intend to PULL first pass pushNow: false — pushing before pulling lets a
+        // stale local box overwrite the account's cloud wallets and budgets.
+        if pushNow {
+            syncToFirebase { success in
+                print(success ? "☁️ UserManager: Local data backed up to cloud" : "⚠️ UserManager: Cloud backup failed (will retry next launch)")
+            }
+        }
+        return true
+    }
+
+    /// Launch path for a signed-in user whose device already holds a local box: PULL, then push.
+    ///
+    /// The old order was push-only. saveUserData writes the whole user document, so the local
+    /// `accounts` array replaced the cloud's wholesale — open the app on a phone with a stale box
+    /// and it could overwrite the account's wallet list before the listeners had said a word.
+    /// Pulling first means the push carries the merged result instead of the stale one.
+    ///
+    /// If the pull FAILS the wholesale push is skipped entirely: a failed read must never be
+    /// treated as "the cloud has nothing". Individual transactions still upload by their own
+    /// paths, so nothing local is stranded.
+    private func pullThenPushAtLaunch() {
+        let localBeforeRestore = Set(currentUser.transactions.map(\.id))
+        print("☁️ UserManager: launch pull for signed-in user — \(localBeforeRestore.count) local transaction(s) before merge")
+
+        loadFromFirebase { [weak self] success in
+            guard let self = self else { return }
+            DispatchQueue.main.async {
+                guard success else {
+                    print("⚠️ UserManager: launch pull failed — keeping local, skipping the user-doc push")
+                    return
+                }
+                print("☁️ UserManager: launch pull merged — \(self.currentUser.transactions.count) transaction(s)")
+                self.saveCurrentUserLocally()
+                self.objectWillChange.send()
+
+                if !localBeforeRestore.isEmpty {
+                    self.uploadTransactionsMissingFromCloud(localIDsBeforeRestore: localBeforeRestore)
+                }
+                self.syncToFirebase { _ in }
+            }
         }
     }
 
