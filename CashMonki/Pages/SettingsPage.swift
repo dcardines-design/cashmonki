@@ -795,27 +795,31 @@ struct SettingsPage: View {
                     .foregroundColor(.white)
             }
 
-            // User Name (or "CashMonki User" if empty). Tapping the name 3×
-            // grants the admin role — "name (1)", "(2)", then "name (admin)";
-            // one tap while admin returns to user mode. Sim/debug builds only.
-            let userName = userManager.currentUser.name.trimmingCharacters(in: .whitespacesAndNewlines)
-            Text((userName.isEmpty ? "Cashmonki User" : userName) + roleSuffix)
-                .font(AppFonts.overusedGroteskSemiBold(size: 24))
-                .foregroundColor(AppColors.foregroundPrimary)
-                .onTapGesture { handleRoleTap() }
+            // Name and account read as one unit, so they sit 4pt apart inside their own stack —
+            // the 16pt of the outer stack still separates them from the avatar.
+            VStack(spacing: 4) {
+                // User Name (or "CashMonki User" if empty). Tapping the name 3×
+                // grants the admin role — "name (1)", "(2)", then "name (admin)";
+                // one tap while admin returns to user mode. Sim/debug builds only.
+                let userName = userManager.currentUser.name.trimmingCharacters(in: .whitespacesAndNewlines)
+                Text((userName.isEmpty ? "Cashmonki User" : userName) + roleSuffix)
+                    .font(AppFonts.overusedGroteskSemiBold(size: 24))
+                    .foregroundColor(AppColors.foregroundPrimary)
+                    .onTapGesture { handleRoleTap() }
 
-            // Signed-in identity. The old comment here said "Email hidden - no auth in current
-            // flow", which stopped being true once accounts shipped: the name alone can't tell you
-            // WHICH account you're in, and that ambiguity is exactly what makes a sync problem
-            // impossible to diagnose from the screen.
-            if authManager.isAuthenticated, !authManager.isGuestMode {
-                let email = authManager.currentUser?.email ?? userManager.currentUser.email
-                if !email.isEmpty {
-                    Text(email)
-                        .font(AppFonts.overusedGroteskMedium(size: 16))
-                        .foregroundColor(AppColors.foregroundSecondary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
+                // Signed-in identity. The old comment here said "Email hidden - no auth in current
+                // flow", which stopped being true once accounts shipped: the name alone can't tell
+                // you WHICH account you're in, and that ambiguity is exactly what makes a sync
+                // problem impossible to diagnose from the screen.
+                if authManager.isAuthenticated, !authManager.isGuestMode {
+                    let email = authManager.currentUser?.email ?? userManager.currentUser.email
+                    if !email.isEmpty {
+                        Text(email)
+                            .font(AppFonts.overusedGroteskMedium(size: 16))
+                            .foregroundColor(AppColors.foregroundSecondary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
                 }
             }
         }
