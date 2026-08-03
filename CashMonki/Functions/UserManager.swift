@@ -1891,6 +1891,60 @@ class UserManager: ObservableObject {
         }
     }
 
+    /// Pull the account's data straight from Firebase and write it to this phone as a local save
+    /// file (a new box in the "Upload local data" picker).
+    ///
+    /// Deliberately reads from Firestore rather than from `currentUser`: this is a snapshot of what
+    /// the SOURCE OF TRUTH actually holds, not of what this device believes. It's a frozen archive
+    /// — linked mirrors are the thing that stays live — so the box name carries the date it was
+    /// taken and each download makes a new file rather than overwriting the last.
+    ///
+    /// Scope note: a box is a UserData, so this captures transactions, wallets and budgets.
+    /// Categories and subscriptions live under their own storage keys and are not part of it.
+    func downloadCloudDataToLocalFile(completion: @escaping (Result<Int, Error>) -> Void) {
+        let uid = syncUID()
+
+        firestore.fetchUserData(userId: uid) { [weak self] userResult in
+            guard let self = self else { return }
+            switch userResult {
+            case .failure(let error):
+                DispatchQueue.main.async { completion(.failure(error)) }
+            case .success(let cloudUser):
+                guard let cloudUser = cloudUser else {
+                    DispatchQueue.main.async {
+                        completion(.failure(NSError(
+                            domain: "NoCloudData", code: 404,
+                            userInfo: [NSLocalizedDescriptionKey: "No cloud data found for this account"]
+                        )))
+                    }
+                    return
+                }
+
+                // Transactions live in the subcollection, not in the user doc.
+                self.firestore.fetchTransactions(userId: uid) { txnResult in
+                    let cloudTxns = (try? txnResult.get()) ?? []
+                    var snapshot = cloudUser
+                    snapshot.transactions = cloudTxns
+                    snapshot.updatedAt = Date()
+
+                    let stamp = DateFormatter()
+                    stamp.dateFormat = "yyyy-MM-dd-HHmm"
+                    let label = stamp.string(from: Date())
+                    snapshot.name = "Cloud backup \(label)"
+
+                    do {
+                        let encoded = try JSONEncoder().encode(snapshot)
+                        UserDefaults.standard.set(encoded, forKey: "currentUser_firebase_cloud-\(label)")
+                        print("⬇️ UserManager: saved cloud snapshot locally — \(cloudTxns.count) transactions")
+                        DispatchQueue.main.async { completion(.success(cloudTxns.count)) }
+                    } catch {
+                        DispatchQueue.main.async { completion(.failure(error)) }
+                    }
+                }
+            }
+        }
+    }
+
     // MARK: - Linked local boxes (local mirrors of the account's data)
 
     /// Boxes the user attached to THIS account. Kept per-account so another login on the same

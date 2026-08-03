@@ -89,6 +89,7 @@ struct SettingsPage: View {
     @State private var showingConnectDeviceData = false
     @State private var showingDeleteCloudData = false
     @State private var isDeletingCloudData = false
+    @State private var isDownloadingCloudData = false
     // Confirmation before cloud backup is switched off (Figma 1714-8158).
     @State private var showingTurnOffBackup = false
     @State private var deleteConfirmationText = ""
@@ -1223,6 +1224,22 @@ struct SettingsPage: View {
                         icon: "📲"
                     ) {
                         showingConnectDeviceData = true
+                    }
+
+                    Divider()
+                        .padding(.leading, 52)
+
+                    // The mirror image of "Upload local data": pull the account's cloud data down
+                    // and keep it on this phone as a dated save file.
+                    settingsRow(
+                        title: "Download cloud data",
+                        subtitle: isDownloadingCloudData
+                            ? "Downloading…"
+                            : "Save a copy of your cloud data on this phone",
+                        icon: "⬇️"
+                    ) {
+                        guard !isDownloadingCloudData else { return }
+                        downloadCloudData()
                     }
 
                     Divider()
@@ -2616,6 +2633,20 @@ struct SettingsPage: View {
     
     // MARK: - Delete Account
     
+    /// Pull the account's cloud data down and store it as a local save file.
+    private func downloadCloudData() {
+        isDownloadingCloudData = true
+        userManager.downloadCloudDataToLocalFile { result in
+            isDownloadingCloudData = false
+            switch result {
+            case .success(let count):
+                toastManager.showSuccess("Saved \(count) transaction\(count == 1 ? "" : "s") to this phone")
+            case .failure(let error):
+                toastManager.showError("Couldn't download cloud data. \(error.localizedDescription)")
+            }
+        }
+    }
+
     /// Wipe the account's cloud copy, keeping this device's data and the account itself.
     ///
     /// Uses syncUID() — the same id every read and write in the app uses — rather than
