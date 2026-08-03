@@ -1934,7 +1934,12 @@ class UserManager: ObservableObject {
                     let stamp = DateFormatter()
                     stamp.dateFormat = "yyyy-MM-dd-HHmm"
                     let label = stamp.string(from: Date())
-                    snapshot.name = "Cloud backup \(label)"
+                    // Keep the account's own name on the card — the date lives in the storage key
+                    // (so repeat downloads don't overwrite each other) and the card marks itself as
+                    // a cloud backup in its status line instead of in the title.
+                    if snapshot.name.trimmingCharacters(in: .whitespaces).isEmpty {
+                        snapshot.name = snapshot.email.isEmpty ? "Cloud backup" : snapshot.email
+                    }
 
                     do {
                         let encoded = try JSONEncoder().encode(snapshot)

@@ -143,9 +143,7 @@ struct DataBoxPickerSheet: View {
                     }
 
                     // Figma 1711-7638: 9pt Medium, 0.9 tracking, uppercase, #72788a.
-                    Text(box.isLinked && mode == .upload
-                         ? "Updates automatically · \(LocalDataBox.relativeAge(box.updatedAt))"
-                         : "Last update \(LocalDataBox.relativeAge(box.updatedAt))")
+                    Text(statusLine(box))
                         .font(AppFonts.overusedGroteskMedium(size: 9))
                         .tracking(0.9)
                         .textCase(.uppercase)
@@ -190,6 +188,14 @@ struct DataBoxPickerSheet: View {
     }
 
     /// Compact age for the tile's "LAST UPDATE …" line — 45m / 3h / 2d / 1w, matching Figma's copy.
+    /// Small uppercase status line under the counts: freshness, plus what kind of file this is.
+    private func statusLine(_ box: LocalDataBox) -> String {
+        let age = LocalDataBox.relativeAge(box.updatedAt)
+        if box.isLinked && mode == .upload { return "Updates automatically · \(age)" }
+        if box.isCloudSnapshot { return "Last update \(age) · Cloud backup" }
+        return "Last update \(age)"
+    }
+
     /// Status pill on a box that is already attached to this account.
     private var linkedBadge: some View {
         Text("LINKED")
