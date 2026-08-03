@@ -2759,6 +2759,36 @@ class UserManager: ObservableObject {
         return (live, Array(tombstones.values))
     }
 
+    /// A wallet the APP invented as a starting point, never used for anything.
+    ///
+    /// Identified by id, never by name. Every app-generated default comes from
+    /// stableDefaultWalletID(), which records each id it mints; a wallet the user creates gets a
+    /// fresh random UUID from AddWalletSheet and therefore can never match — whatever they named
+    /// it. Name matching was the wrong test: real wallets are called "<Name>'s Wallet" too.
+    private func isPristinePlaceholderWallet(_ account: AccountData) -> Bool {
+        guard Self.generatedWalletIDs().contains(account.id.uuidString) else { return false }
+        guard account.balance == nil || account.balance == 0 else { return false }
+        return !currentUser.transactions.contains { $0.walletID == account.id }
+    }
+
+    /// Ids of every default wallet this app has minted on this device.
+    ///
+    /// stableDefaultWalletID() is keyed on syncUID(), which changes as auth resolves — a
+    /// placeholder minted before login is stored under a different key than the one we would look
+    /// up afterwards. This flat list is uid-independent, so it still recognises them.
+    private static let generatedWalletIDsKey = "generatedDefaultWalletIDs"
+
+    static func generatedWalletIDs() -> Set<String> {
+        Set(UserDefaults.standard.stringArray(forKey: generatedWalletIDsKey) ?? [])
+    }
+
+    private static func rememberGeneratedWalletID(_ id: UUID) {
+        var ids = UserDefaults.standard.stringArray(forKey: generatedWalletIDsKey) ?? []
+        guard !ids.contains(id.uuidString) else { return }
+        ids.append(id.uuidString)
+        UserDefaults.standard.set(ids.suffix(50).map { $0 }, forKey: generatedWalletIDsKey)
+    }
+
     private func mergeAccounts(local: [AccountData], firebase: [AccountData]) -> [AccountData] {
         print("🔄 UserManager: Starting account merge...")
         print("📱 Local accounts: \(local.map { "\($0.name) (\($0.id.uuidString.prefix(8)))" })")
@@ -2778,6 +2808,13 @@ class UserManager: ObservableObject {
                     print("☁️ Using Firebase version of '\(firebaseAccount.name)' (newer: \(firebaseAccount.updatedAt) >= \(localAccount.updatedAt))")
                     mergedAccounts.append(firebaseAccount)
                 }
+            } else if !firebase.isEmpty, isPristinePlaceholderWallet(localAccount) {
+                // Signing in on a device with no local box mints a placeholder wallet in
+                // setCurrentUser BEFORE the cloud data arrives. Preserving it as a "local-only
+                // account" added one empty wallet to the account on every such login — and since
+                // views filter by the selected wallet, landing on it looked like the sync failed.
+                // It holds nothing, so dropping it loses nothing.
+                print("🧹 Dropping pristine placeholder wallet '\(localAccount.name)' — the account has real wallets")
             } else {
                 // Account only exists locally (like new Rosebud wallet)
                 print("✨ Preserving local-only account: '\(localAccount.name)'")
@@ -2949,10 +2986,12 @@ class UserManager: ObservableObject {
         let key = "defaultWalletID_\(uid)"
         if let stored = UserDefaults.standard.string(forKey: key),
            let id = UUID(uuidString: stored) {
+            Self.rememberGeneratedWalletID(id)
             return id
         }
         let id = UUID()
         UserDefaults.standard.set(id.uuidString, forKey: key)
+        Self.rememberGeneratedWalletID(id)
         return id
     }
 
