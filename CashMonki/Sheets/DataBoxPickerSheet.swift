@@ -88,7 +88,7 @@ struct DataBoxPickerSheet: View {
             HStack(spacing: 20) {
                 // Exported from Figma (node 1711-7573). 56 × 58 keeps the disk's designed
                 // drop-shadow bleed instead of squaring it off at the 54.36 leaf size.
-                Image("data-box-disk")
+                Image(box.isCloudSnapshot ? "data-box-disk-cloud" : "data-box-disk")
                     .resizable()
                     .frame(width: 56, height: 58)
 

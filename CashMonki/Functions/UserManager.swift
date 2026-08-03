@@ -31,6 +31,10 @@ struct LocalDataBox: Identifiable, Equatable {
     let isLinked: Bool
     var id: String { uid }
 
+    /// Written by "Download cloud data" rather than being a device's own identity box. Shown with
+    /// the cloud-marked disk so a downloaded archive is never confused with local device data.
+    var isCloudSnapshot: Bool { uid.hasPrefix("cloud-") }
+
     /// Compact age string ("2m ago", "3d ago") shared by the picker and the Settings status row.
     static func relativeAge(_ date: Date) -> String {
         let seconds = max(0, Date().timeIntervalSince(date))
