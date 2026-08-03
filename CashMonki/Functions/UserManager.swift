@@ -1944,6 +1944,7 @@ class UserManager: ObservableObject {
                     do {
                         let encoded = try JSONEncoder().encode(snapshot)
                         UserDefaults.standard.set(encoded, forKey: "currentUser_firebase_cloud-\(label)")
+                        self.pruneCloudSnapshots()
                         print("⬇️ UserManager: saved cloud snapshot locally — \(cloudTxns.count) transactions")
                         DispatchQueue.main.async { completion(.success(cloudTxns.count)) }
                     } catch {
@@ -1980,8 +1981,18 @@ class UserManager: ObservableObject {
         // Local first, so the user sees the restored state immediately even if the network is slow.
         clearTombstones(for: boxIDs)
         currentUser.transactions = box.transactions
-        currentUser.accounts = box.accounts
-        currentUser.deletedAccounts = box.deletedAccounts
+        // Wallet tombstones are UNIONED, not replaced. A box written before wallet tombstones
+        // existed decodes deletedAccounts as [], so assigning it would clear the graveyard and
+        // bring every deleted wallet back. Last-write-wins still lets the file win where it
+        // genuinely holds a newer record.
+        let walletMerge = mergeAccountTombstones(
+            localLive: box.accounts,
+            localDeleted: box.deletedAccounts,
+            cloudLive: [],
+            cloudDeleted: currentUser.deletedAccounts
+        )
+        currentUser.accounts = walletMerge.live
+        currentUser.deletedAccounts = walletMerge.deleted
         currentUser.budgets = box.budgets
         saveCurrentUserLocally()
         objectWillChange.send()
@@ -2029,6 +2040,23 @@ class UserManager: ObservableObject {
         deletedTransactionIDs = stones
         print("♻️ UserManager: cleared \(before - stones.count) tombstone(s) for restored transactions")
     }
+
+    /// Keep only the newest few downloaded snapshots. Each one measured ~575 KB against a real
+    /// account, and nothing else ever removes them, so downloads grew UserDefaults without bound.
+    /// Keys embed a sortable yyyy-MM-dd-HHmm stamp, so lexical order is chronological order.
+    private func pruneCloudSnapshots() {
+        let prefix = "currentUser_firebase_cloud-"
+        let keys = UserDefaults.standard.dictionaryRepresentation().keys
+            .filter { $0.hasPrefix(prefix) }
+            .sorted()
+        guard keys.count > Self.cloudSnapshotCap else { return }
+        for key in keys.prefix(keys.count - Self.cloudSnapshotCap) {
+            UserDefaults.standard.removeObject(forKey: key)
+            print("🧹 UserManager: pruned old cloud snapshot \(key.dropFirst(prefix.count))")
+        }
+    }
+
+    private static let cloudSnapshotCap = 3
 
     // MARK: - Linked local boxes (local mirrors of the account's data)
 
@@ -2735,7 +2763,8 @@ class UserManager: ObservableObject {
     /// still works — the newer live record beats the older tombstone.
     private func mergeAccountTombstones(
         localLive: [AccountData], localDeleted: [AccountData],
-        cloudLive: [AccountData], cloudDeleted: [AccountData]
+        cloudLive: [AccountData], cloudDeleted: [AccountData],
+        dropLocalPlaceholders: Bool = false
     ) -> (live: [AccountData], deleted: [AccountData]) {
         var tombstones: [UUID: AccountData] = [:]
         for record in localDeleted + cloudDeleted {
@@ -2752,7 +2781,8 @@ class UserManager: ObservableObject {
 
         let live = mergeAccounts(
             local: localLive.filter { tombstones[$0.id] == nil },
-            firebase: cloudLive.filter { tombstones[$0.id] == nil }
+            firebase: cloudLive.filter { tombstones[$0.id] == nil },
+            dropLocalPlaceholders: dropLocalPlaceholders
         )
         return (live, Array(tombstones.values))
     }
@@ -2787,7 +2817,14 @@ class UserManager: ObservableObject {
         UserDefaults.standard.set(ids.suffix(50).map { $0 }, forKey: generatedWalletIDsKey)
     }
 
-    private func mergeAccounts(local: [AccountData], firebase: [AccountData]) -> [AccountData] {
+    /// - Parameter dropLocalPlaceholders: only true for CLOUD merges. connectLocalBox passes the
+    ///   account as `local` and a box as `firebase`, so leaving this on there would let the rule
+    ///   discard the account's own empty default wallet — not what it was written for.
+    private func mergeAccounts(
+        local: [AccountData],
+        firebase: [AccountData],
+        dropLocalPlaceholders: Bool = false
+    ) -> [AccountData] {
         print("🔄 UserManager: Starting account merge...")
         print("📱 Local accounts: \(local.map { "\($0.name) (\($0.id.uuidString.prefix(8)))" })")
         print("☁️ Firebase accounts: \(firebase.map { "\($0.name) (\($0.id.uuidString.prefix(8)))" })")
@@ -2806,7 +2843,7 @@ class UserManager: ObservableObject {
                     print("☁️ Using Firebase version of '\(firebaseAccount.name)' (newer: \(firebaseAccount.updatedAt) >= \(localAccount.updatedAt))")
                     mergedAccounts.append(firebaseAccount)
                 }
-            } else if !firebase.isEmpty, isPristinePlaceholderWallet(localAccount) {
+            } else if dropLocalPlaceholders, !firebase.isEmpty, isPristinePlaceholderWallet(localAccount) {
                 // Signing in on a device with no local box mints a placeholder wallet in
                 // setCurrentUser BEFORE the cloud data arrives. Preserving it as a "local-only
                 // account" added one empty wallet to the account on every such login — and since

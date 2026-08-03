@@ -206,13 +206,36 @@ final class FirestoreService {
     /// Deleting a transaction removes its doc from the transactions subcollection — but absence
     /// alone can't distinguish "deleted on another device" from "created offline and not yet
     /// uploaded". The tombstone list is what makes the cloud authoritative about deletions.
+    /// A Firestore document is capped at 1 MB, roughly 25k uuid strings. arrayUnion grows this
+    /// list forever, so at some point every write would start failing and deletions would silently
+    /// stop propagating. Read-modify-write with a cap keeps the newest ids and drops the oldest,
+    /// which are the least likely to still exist on another device.
+    private static let cloudTombstoneCap = 5_000
+
     func appendDeletedTransactionIDs(_ ids: [String], userId: String, completion: @escaping (Result<Void, Error>) -> Void = { _ in }) {
         #if canImport(FirebaseFirestore)
         guard let db = db, !ids.isEmpty else { completion(.success(())); return }
-        db.collection("users").document(userId).collection("meta").document("deletions")
-            .setData(["ids": FieldValue.arrayUnion(ids)], merge: true) { error in
+        let ref = db.collection("users").document(userId).collection("meta").document("deletions")
+
+        ref.getDocument { snapshot, _ in
+            let existing = snapshot?.data()?["ids"] as? [String] ?? []
+
+            // Under the cap this is a plain union; the read just tells us we're still safe.
+            guard existing.count + ids.count > Self.cloudTombstoneCap else {
+                ref.setData(["ids": FieldValue.arrayUnion(ids)], merge: true) { error in
+                    if let error = error { completion(.failure(error)) } else { completion(.success(())) }
+                }
+                return
+            }
+
+            var merged = existing.filter { !ids.contains($0) }
+            merged.append(contentsOf: ids)
+            let trimmed = Array(merged.suffix(Self.cloudTombstoneCap))
+            print("🧹 Firebase: tombstone list at \(merged.count) — trimmed to \(trimmed.count)")
+            ref.setData(["ids": trimmed], merge: true) { error in
                 if let error = error { completion(.failure(error)) } else { completion(.success(())) }
             }
+        }
         #else
         completion(.success(()))
         #endif

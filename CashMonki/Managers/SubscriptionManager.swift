@@ -74,8 +74,10 @@ class SubscriptionManager: ObservableObject {
     /// the other device just re-uploads its live copy and the subscription comes back.
     private var deletedRecords: [Subscription] = []
 
-    /// Newest-first cap so the graveyard can't grow without bound.
-    private static let deletedCap = 300
+    /// Newest-first cap so the graveyard can't grow without bound. Generous on purpose: dropping
+    /// a tombstone lets another device re-upload that subscription, so the cap is a last resort,
+    /// not routine housekeeping.
+    private static let deletedCap = 2_000
 
     /// Everything that gets persisted and pushed: live rows plus tombstoned ones.
     private var allRecords: [Subscription] { subscriptions + deletedRecords }
