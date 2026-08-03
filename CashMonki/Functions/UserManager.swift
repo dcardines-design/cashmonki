@@ -210,6 +210,7 @@ class UserManager: ObservableObject {
             // upload over it. This branch returns early, so the sign-in restore in STEP 2 never
             // ran on a device that already had a box — the account's data only ever arrived later
             // via the listeners, and nothing pulled at all if they failed to attach.
+            reconcileSyncPreference()
             let syncEnabled = migrateEnableSyncIfNeeded(pushNow: false)
 
             // Posted at the same point as before: seven observers key off this, so the pull must
@@ -2420,7 +2421,12 @@ class UserManager: ObservableObject {
                             updatedAt: max(self.currentUser.updatedAt, userData.updatedAt),
                             goals: userData.goals,
                             onboardingCompleted: self.currentUser.onboardingCompleted, // SINGLE SOURCE OF TRUTH: Keep local progress, ignore Firebase
-                            enableFirebaseSync: userData.enableFirebaseSync
+                            // Backup on/off is a per-DEVICE choice, so the cloud copy must not
+                            // reinstate it. Taking the cloud value let a stale `true` overwrite a
+                            // local opt-out: the Settings toggle (which reads this field) showed
+                            // ON while the launch path (which reads the UserDefaults key) saw OFF
+                            // and skipped every pull and push.
+                            enableFirebaseSync: self.currentUser.enableFirebaseSync
                         )
                         
                         print("🔢 UserManager: Keeping LOCAL onboarding progress: \(self.currentUser.onboardingCompleted)")
@@ -3488,6 +3494,19 @@ class UserManager: ObservableObject {
 
     /// Storage key for the explicit "I turned cloud backup off" preference.
     private func syncOptOutKey() -> String { "enableFirebaseSync_\(syncUID())" }
+
+    /// Force the in-memory flag to match the stored preference.
+    ///
+    /// The stored key is the source of truth for backup on/off — it is what the launch path obeys.
+    /// Devices that already drifted (cloud value overwrote the local box) heal on the next launch
+    /// instead of showing a toggle that disagrees with what the app actually does.
+    private func reconcileSyncPreference() {
+        guard let stored = UserDefaults.standard.object(forKey: syncOptOutKey()) as? Bool else { return }
+        guard currentUser.enableFirebaseSync != stored else { return }
+        print("🔧 UserManager: sync flag disagreed with the saved preference (box: \(currentUser.enableFirebaseSync), saved: \(stored)) — using the saved one")
+        currentUser.enableFirebaseSync = stored
+        saveCurrentUserLocally()
+    }
 
     /// True when the user has explicitly opted out of cloud backup for this identity. Also reads
     /// the legacy `currentUser.id`-keyed value so an opt-out saved before the key moved is still
