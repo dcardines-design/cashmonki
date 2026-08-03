@@ -1949,6 +1949,82 @@ class UserManager: ObservableObject {
         }
     }
 
+    /// Restore the account from a local save file: the file becomes the truth, on this phone AND
+    /// in Firebase.
+    ///
+    /// This is a REPLACE, not the union that `connectLocalBox` performs — that distinction is the
+    /// whole point. Restoring is what you reach for when the account's data went wrong, so
+    /// anything absent from the file has to actually go away, including in the cloud.
+    ///
+    /// Transactions that exist in the cloud but not in the file are tombstoned, not merely
+    /// deleted: another device still holding them would otherwise upload them straight back.
+    /// Conversely, ids in the file that this device had previously tombstoned are un-tombstoned,
+    /// or the restore would silently drop them again on the next merge.
+    func restoreFromLocalBox(sourceUID: String, completion: @escaping (Result<Int, Error>) -> Void) {
+        guard let data = UserDefaults.standard.data(forKey: "currentUser_firebase_\(sourceUID)"),
+              let box = try? JSONDecoder().decode(UserData.self, from: data) else {
+            completion(.failure(NSError(domain: "SaveFileMissing", code: 404,
+                                        userInfo: [NSLocalizedDescriptionKey: "That save file could not be read"])))
+            return
+        }
+
+        let uid = syncUID()
+        let boxIDs = Set(box.transactions.map(\.id))
+        print("♻️ UserManager: RESTORE from \(sourceUID.prefix(12)) — \(box.transactions.count) transactions become the truth")
+
+        // Local first, so the user sees the restored state immediately even if the network is slow.
+        clearTombstones(for: boxIDs)
+        currentUser.transactions = box.transactions
+        currentUser.accounts = box.accounts
+        currentUser.deletedAccounts = box.deletedAccounts
+        currentUser.budgets = box.budgets
+        saveCurrentUserLocally()
+        objectWillChange.send()
+
+        guard currentUser.enableFirebaseSync else {
+            // Backup is off: the restore is local-only and the cloud is left exactly as it was.
+            completion(.success(box.transactions.count))
+            return
+        }
+
+        firestore.fetchTransactions(userId: uid) { [weak self] result in
+            guard let self = self else { return }
+            let cloudIDs = Set(((try? result.get()) ?? []).map(\.id))
+            let removed = cloudIDs.subtracting(boxIDs)
+
+            if !removed.isEmpty {
+                print("♻️ UserManager: RESTORE — removing \(removed.count) cloud transaction(s) absent from the save file")
+                self.firestore.appendDeletedTransactionIDs(removed.map(\.uuidString), userId: uid)
+                for id in removed {
+                    self.firestore.deleteTransaction(transactionId: id.uuidString, userId: uid) { _ in }
+                }
+            }
+
+            // Push the file's contents up. saveTransaction writes by id, so this both restores
+            // rows the cloud lost and overwrites ones it has a different version of.
+            for txn in self.currentUser.transactions {
+                self.firestore.saveTransaction(txn, userId: uid) { _ in }
+            }
+
+            self.syncToFirebase { _ in
+                DispatchQueue.main.async {
+                    NotificationCenter.default.post(name: NSNotification.Name("UserManagerFirebaseLoadComplete"), object: nil)
+                    completion(.success(box.transactions.count))
+                }
+            }
+        }
+    }
+
+    /// Drop tombstones for ids being restored, so a previously-deleted transaction can come back.
+    private func clearTombstones(for ids: Set<UUID>) {
+        var stones = deletedTransactionIDs
+        let before = stones.count
+        stones.subtract(ids.map(\.uuidString))
+        guard stones.count != before else { return }
+        deletedTransactionIDs = stones
+        print("♻️ UserManager: cleared \(before - stones.count) tombstone(s) for restored transactions")
+    }
+
     // MARK: - Linked local boxes (local mirrors of the account's data)
 
     /// Boxes the user attached to THIS account. Kept per-account so another login on the same
