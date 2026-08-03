@@ -2052,19 +2052,6 @@ class UserManager: ObservableObject {
         print("🔗 UserManager: box \(uid.prefix(8)) is now a linked local mirror")
     }
 
-    /// Rewrite every linked box with the account's current state.
-    ///
-    /// These are MIRRORS, never sources: the app reads truth from Firebase (merged into the
-    /// account box), and this copies that result outward. Before this, a connected box was a
-    /// one-time snapshot that froze at the moment of upload and drifted forever after.
-    private func mirrorToLinkedBoxes(_ encoded: Data) {
-        let linked = linkedLocalBoxUIDs()
-        guard !linked.isEmpty else { return }
-        for uid in linked {
-            UserDefaults.standard.set(encoded, forKey: "currentUser_firebase_\(uid)")
-        }
-    }
-
     /// The account's OWN local box, read back from disk rather than reported from memory — this
     /// answers "is my cloud data actually saved on this phone?" with what is really persisted.
     ///
@@ -2092,6 +2079,7 @@ class UserManager: ObservableObject {
     func availableLocalDataBoxes() -> [LocalDataBox] {
         let prefix = "currentUser_firebase_"
         let linked = Set(linkedLocalBoxUIDs())
+        let liveAccountFigures = localCopySummary()
         let currentUID = AuthenticationManager.shared.currentUser?.firebaseUID
         let d = UserDefaults.standard
         var boxes: [LocalDataBox] = []
@@ -2104,16 +2092,26 @@ class UserManager: ObservableObject {
             guard let data = d.data(forKey: key),
                   let u = try? JSONDecoder().decode(UserData.self, from: data) else { continue }
             if u.transactions.isEmpty && u.accounts.isEmpty { continue }
+
+            // A linked box's data lives in the account now, so REPORT the account's live figures
+            // rather than the box's frozen ones. This used to be done by copying the account's
+            // bytes over the box on every save, which was both a 575 KB-per-box write on the
+            // save path and — because this list includes OTHER logins' boxes — a way to overwrite
+            // a different account's local data. Showing the live numbers needs neither.
+            let isLinked = linked.contains(uid)
+            let live = isLinked ? liveAccountFigures : nil
+
             boxes.append(LocalDataBox(
                 uid: uid,
                 name: u.name,
                 email: u.email,
-                transactionCount: u.transactions.count,
-                walletCount: u.accounts.count,
+                transactionCount: live?.transactionCount ?? u.transactions.count,
+                walletCount: live?.walletCount ?? u.accounts.count,
                 // Boxes written before updatedAt was stamped on save have a stale value, so fall
                 // back to the newest transaction this box holds.
-                updatedAt: max(u.updatedAt, u.transactions.map(\.date).max() ?? .distantPast),
-                isLinked: linked.contains(uid)
+                updatedAt: live?.updatedAt
+                    ?? max(u.updatedAt, u.transactions.map(\.date).max() ?? .distantPast),
+                isLinked: isLinked
             ))
         }
         return boxes.sorted {
@@ -3082,10 +3080,6 @@ class UserManager: ObservableObject {
             // ────────────────────────────────────────────────────────────────────────────────
 
             UserDefaults.standard.set(encoded, forKey: key)
-
-            // Keep every linked box current with the same bytes. Firebase remains the source of
-            // truth; these are local copies of what came back from it.
-            mirrorToLinkedBoxes(encoded)
 
             // CRITICAL: Store Firebase UID separately for recovery after app restart
             // This allows us to find the correct storage key before Firebase Auth loads
