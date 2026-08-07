@@ -11,9 +11,16 @@ import SwiftUI
 class AccountManager: ObservableObject {
     static let shared = AccountManager()
     
-    @Published var selectedSubAccountId: UUID?
+    /// Persisted per identity — a launch, a re-login or an app update must not
+    /// bounce the user back to their default wallet (see restoredSelection).
+    @Published var selectedSubAccountId: UUID? {
+        didSet {
+            guard oldValue != selectedSubAccountId else { return }
+            persistSelection()
+        }
+    }
     @Published var showingAllAccounts: Bool = true
-    
+
     private let userManager = UserManager.shared
     private var hasEnsuredRosebudAccount = false
     private let firestoreService = FirestoreService.shared
@@ -40,8 +47,38 @@ class AccountManager: ObservableObject {
         setupDefaultAccount()
     }
     
+    // MARK: - Selection persistence
+
+    /// Identity that owns the selection — same resolution the chat and user
+    /// storage use, so the remembered wallet follows the signed-in account and
+    /// a guest session can't inherit it.
+    private var selectionUID: String {
+        AuthenticationManager.shared.currentUser?.firebaseUID
+            ?? UserDefaults.standard.string(forKey: "last_authenticated_firebase_uid")
+            ?? "guest"
+    }
+
+    private var selectionKey: String { "selected_wallet_id_\(selectionUID)" }
+
+    private func persistSelection() {
+        guard let id = selectedSubAccountId else {
+            UserDefaults.standard.removeObject(forKey: selectionKey)
+            return
+        }
+        UserDefaults.standard.set(id.uuidString, forKey: selectionKey)
+    }
+
+    /// Last wallet this identity picked, if it still exists.
+    private func restoredSelection() -> UUID? {
+        guard let raw = UserDefaults.standard.string(forKey: selectionKey),
+              let id = UUID(uuidString: raw),
+              userManager.currentUser.subAccount(withId: id) != nil
+        else { return nil }
+        return id
+    }
+
     // MARK: - Account Selection
-    
+
     var currentSubAccount: SubAccount? {
         guard let selectedId = selectedSubAccountId else { 
             print("🔍 AccountManager.currentSubAccount: No selectedSubAccountId")
@@ -543,12 +580,15 @@ class AccountManager: ObservableObject {
             removeRosebudStudioFromPersonalAccounts()
         }
         
-        // Always set initial selection to default account (never show "All Accounts")
+        // Restore the wallet this identity last picked; fall back to its default
+        // (never "All Accounts"). This runs on every load-complete, so without the
+        // restore an app update or re-login silently reset the user's choice.
         let defaultAccountId = userManager.currentUser.defaultSubAccount?.id
-        selectedSubAccountId = defaultAccountId
+        let rememberedId = restoredSelection()
+        selectedSubAccountId = rememberedId ?? defaultAccountId
         showingAllAccounts = false
-        
-        print("   - selected account set to: \(selectedSubAccountId?.uuidString.prefix(8) ?? "nil")")
+
+        print("   - selected account set to: \(selectedSubAccountId?.uuidString.prefix(8) ?? "nil") (\(rememberedId == nil ? "default" : "remembered"))")
         print("   - default account is: \(defaultAccountId?.uuidString.prefix(8) ?? "nil")")
         
         // If no default account exists, select the first available account
