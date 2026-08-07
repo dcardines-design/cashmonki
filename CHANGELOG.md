@@ -5,6 +5,33 @@ All notable changes to CashMonki will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.7.0] - 2026-08-07
+
+### Added
+- **Ask can log several transactions at once** — "add 300 groceries, 150 milk and 90 bread" renders
+  one card with a row per transaction. Add them individually, tap a row to edit it before adding, or
+  Add all. Nothing is written until you tap.
+- **Ask can manage budgets** — set, edit, pause/resume and delete budgets from chat, each behind a
+  confirmation card. Paused budgets stay visible to the assistant so they can be resumed.
+- **Ask can manage recurring items / subscriptions** — track a new one, change its amount, frequency
+  or next due date, turn auto-add off, pause, or delete. Free accounts keep the 2-item limit.
+- **Pending suggestions can be revised in chat** — "make it 150", "that's food not coffee" now
+  updates the card you are looking at instead of being ignored. A revision replaces the old card, so
+  only one proposal is ever tappable.
+- **Composer placeholder cycles through examples** with a typing animation, doubling as a tour of
+  what Ask can do. Respects Reduce Motion.
+
+### Fixed
+- **A new wallet was created on every logout and sign-in.** Signing out resets the profile, so each
+  re-login took the "new user" path and minted a wallet with an unregistered id that the cloud merge
+  then kept as if it were real. Every app-generated default wallet now comes from one registered
+  minter, keyed per account.
+- **The selected wallet is remembered.** It was reset to the account default on every launch and
+  after every app update, because the choice was never stored.
+- **Raw JSON could appear in the chat.** A structured reply that failed to decode fell back to
+  printing itself. Malformed replies now show a short apology and log the envelope for diagnosis.
+- Revising a pending transaction no longer loses its category.
+
 ## [1.0.0] - 2024-11-19
 
 ### Added
