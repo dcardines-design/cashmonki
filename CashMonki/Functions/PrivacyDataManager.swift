@@ -259,9 +259,10 @@ class PrivacyDataManager: ObservableObject {
         
         let walletName = firstName.isEmpty ? "My Wallet" : "\(firstName)'s Wallet"
         
-        // Create default wallet
+        // Create default wallet — registered app-generated id so the cloud merge
+        // recognises it as a placeholder rather than a real user wallet.
         let defaultWallet = AccountData(
-            id: UUID(), // Always use unique UUIDs
+            id: UserManager.shared.stableDefaultWalletID(),
             name: walletName,
             type: .personal,
             currency: profile.preferredCurrency,

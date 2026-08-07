@@ -81,9 +81,10 @@ class UserManager: ObservableObject {
     private var hasCompletedInitialLoad = false
     
     private init() {
-        // Create default wallet structure for initial state with unique UUID
+        // Bootstrap wallet: registered app-generated id (never a raw UUID), so the
+        // cloud merge can drop it once real wallets arrive.
         let defaultWallet = AccountData(
-            id: UUID(), // Always use unique UUIDs
+            id: Self.generatedDefaultWalletID(for: Self.bootstrapUID()),
             name: "Personal Wallet", // Default name - updated to "[Name]'s Wallet" during onboarding if name provided
             type: .personal,
             currency: .usd, // Temporary placeholder - will be updated during currency selection onboarding
@@ -3075,17 +3076,35 @@ class UserManager: ObservableObject {
     /// ONE wallet on merge instead of minting a fresh-UUID "Personal" that piles up on every
     /// login. Keyed per identity so each real account/guest still gets its own single default.
     func stableDefaultWalletID() -> UUID {
-        let uid = syncUID()
+        Self.generatedDefaultWalletID(for: syncUID())
+    }
+
+    /// Same mint-or-reuse, callable without a live `currentUser` — used by the
+    /// sign-in paths (which build a brand new UserData) and by `init`, where
+    /// touching `currentUser` isn't possible yet.
+    ///
+    /// EVERY app-generated default wallet must come from here. One that doesn't
+    /// gets an unregistered random id, so `isPristinePlaceholderWallet` can't
+    /// recognise it and the cloud merge keeps it — that is how a new wallet
+    /// appeared on each logout/login round trip.
+    static func generatedDefaultWalletID(for uid: String) -> UUID {
         let key = "defaultWalletID_\(uid)"
         if let stored = UserDefaults.standard.string(forKey: key),
            let id = UUID(uuidString: stored) {
-            Self.rememberGeneratedWalletID(id)
+            rememberGeneratedWalletID(id)
             return id
         }
         let id = UUID()
         UserDefaults.standard.set(id.uuidString, forKey: key)
-        Self.rememberGeneratedWalletID(id)
+        rememberGeneratedWalletID(id)
         return id
+    }
+
+    /// Identity for the pre-auth bootstrap wallet built in `init`. Reads only
+    /// UserDefaults — touching AuthenticationManager.shared from UserManager's
+    /// own init would risk a singleton init cycle.
+    static func bootstrapUID() -> String {
+        UserDefaults.standard.string(forKey: "last_authenticated_firebase_uid") ?? "bootstrap"
     }
 
     /// Rolling local safety snapshot (3 slots) of the last good non-empty state, per identity.

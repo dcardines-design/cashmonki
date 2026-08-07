@@ -1281,9 +1281,14 @@ class AuthenticationManager: ObservableObject {
         } else {
             print("🔄 AuthenticationManager: No user profile exists, creating new one...")
             
-            // Create new user data from Google data
+            // Create new user data from Google data.
+            // Wallet id comes from the registered app-generated pool, keyed to this
+            // account: signOut() resets the profile to guest, so this branch runs on
+            // EVERY re-login. A raw UUID() here minted an unrecognisable "real-looking"
+            // wallet each time, which the cloud merge then kept — one new wallet per
+            // logout/login round trip.
             let defaultWallet = AccountData(
-                id: UUID(),
+                id: UserManager.generatedDefaultWalletID(for: authenticatedUser.firebaseUID),
                 name: authenticatedUser.name + "'s Wallet",
                 type: .personal,
                 currency: .php,
@@ -1344,9 +1349,10 @@ class AuthenticationManager: ObservableObject {
         } else {
             print("🔄 AuthenticationManager: No user profile exists, creating new one...")
             
-            // Create new user data from Apple data
+            // Create new user data from Apple data. Registered app-generated id for
+            // the same reason as the Google path above.
             let defaultWallet = AccountData(
-                id: UUID(),
+                id: UserManager.generatedDefaultWalletID(for: authenticatedUser.firebaseUID),
                 name: authenticatedUser.name + "'s Wallet",
                 type: .personal,
                 currency: .php,
