@@ -31,6 +31,26 @@ struct AskDisplayMessage: Identifiable, Codable {
         case stat(AskStatMessage)
         case question(String, [String])
         case categoryDraft(AskCategoryDraft)
+        case draftBatch(AskTransactionDraftBatch)
+        case budgetDraft(AskBudgetDraft)
+        case budgetUpdate(AskBudgetUpdate)
+        case budgetDelete(AskBudgetDelete)
+        case subscriptionDraft(AskSubscriptionDraft)
+        case subscriptionUpdate(AskSubscriptionUpdate)
+        case subscriptionDelete(AskSubscriptionDelete)
+
+        /// Proposals the user hasn't acted on yet. A new one supersedes any
+        /// older pending card (see AskChatManager.appendPending).
+        var isPending: Bool {
+            switch self {
+            case .draft, .draftBatch, .update, .deleteRequest, .categoryDraft,
+                 .budgetDraft, .budgetUpdate, .budgetDelete,
+                 .subscriptionDraft, .subscriptionUpdate, .subscriptionDelete:
+                return true
+            case .text, .systemNote, .table, .single, .chart, .stat, .question:
+                return false
+            }
+        }
     }
 
     let id: UUID
@@ -52,15 +72,55 @@ struct AskDisplayMessage: Identifiable, Codable {
         case .text(let text): return text
         case .systemNote(let text): return "(App completed and recorded an action the user approved: \"\(text)\". You did not do this — never repeat or claim it.)"
         case .table(let table): return "(App rendered a data table titled \"\(table.title)\".)"
-        case .draft(let draft): return "(App rendered a transaction confirmation card for \(draft.amount) \(draft.currency ?? "") \(draft.merchant ?? ""), awaiting the user's Confirm.)"
-        case .update(let update): return "(App rendered an edit-confirmation card for transactions \(update.ids.joined(separator: ", ")).)"
+        case .draft(let draft):
+            return "(App is showing a PENDING transaction card, not saved yet: \(Self.describe(draft)). Revise it by emitting a fresh full transaction_draft.)"
+        case .draftBatch(let batch):
+            let rows = batch.transactions.map(Self.describe).joined(separator: "; ")
+            return "(App is showing a PENDING multi-transaction card, none saved yet: \(rows). Revise it by emitting a fresh full transaction_draft_batch with every row you still want.)"
+        case .update(let update): return "(App is showing a PENDING edit card, not applied yet, for transactions \(update.ids.joined(separator: ", ")).)"
         case .single(let ref): return "(App rendered transaction cards: \(ref.ids.joined(separator: ", ")).)"
-        case .deleteRequest(let delete): return "(App rendered a delete-confirmation card for transactions \(delete.ids.joined(separator: ", ")).)"
+        case .deleteRequest(let delete): return "(App is showing a PENDING delete card, nothing deleted yet, for transactions \(delete.ids.joined(separator: ", ")).)"
         case .chart(let chart): return "(App rendered a chart titled \"\(chart.title)\".)"
         case .stat(let stat): return "(App rendered a stat: \(stat.title) = \(stat.value).)"
         case .question(let text, _): return text
-        case .categoryDraft(let draft): return "(App rendered a new-category confirmation card for \"\(draft.name)\".)"
+        case .categoryDraft(let draft): return "(App is showing a PENDING new-category card, not created yet: \"\(draft.name)\"\(draft.parent.map { " under \($0)" } ?? "").)"
+        case .budgetDraft(let draft):
+            let period = draft.period ?? "monthly"
+            return "(App is showing a PENDING budget card, not saved yet: \(draft.category_name ?? "category") \(draft.amount) \(draft.currency ?? "") per \(period).)"
+        case .budgetUpdate(let update):
+            var changes: [String] = []
+            if let amount = update.amount { changes.append("limit \(amount)") }
+            if let currency = update.currency { changes.append("currency \(currency)") }
+            if let period = update.period { changes.append("period \(period)") }
+            if let active = update.is_active { changes.append(active ? "resume" : "pause") }
+            return "(App is showing a PENDING budget edit card, not applied yet, for budgets \(update.ids.joined(separator: ", ")): \(changes.joined(separator: ", ")).)"
+        case .budgetDelete(let delete):
+            return "(App is showing a PENDING budget delete card, nothing deleted yet, for budgets \(delete.ids.joined(separator: ", ")).)"
+        case .subscriptionDraft(let draft):
+            return "(App is showing a PENDING recurring item card, not saved yet: \(draft.name) \(draft.amount) \(draft.currency ?? "") \(draft.frequency ?? "monthly").)"
+        case .subscriptionUpdate(let update):
+            var changes: [String] = []
+            if let name = update.name { changes.append("name \(name)") }
+            if let amount = update.amount { changes.append("amount \(amount)") }
+            if let frequency = update.frequency { changes.append("frequency \(frequency)") }
+            if let due = update.next_due_date { changes.append("next due \(due)") }
+            if let autoAdd = update.auto_add { changes.append(autoAdd ? "auto add on" : "auto add off") }
+            if let active = update.is_active { changes.append(active ? "resume" : "pause") }
+            return "(App is showing a PENDING recurring edit card, not applied yet, for \(update.ids.joined(separator: ", ")): \(changes.joined(separator: ", ")).)"
+        case .subscriptionDelete(let delete):
+            return "(App is showing a PENDING recurring delete card, nothing deleted yet, for \(delete.ids.joined(separator: ", ")).)"
         }
+    }
+
+    /// Full pending values, so a follow-up like "make it 150" can be answered
+    /// with a corrected card instead of a guess.
+    private static func describe(_ draft: AskTransactionDraft) -> String {
+        var parts = ["\(draft.amount) \(draft.currency ?? "")"]
+        if let merchant = draft.merchant, !merchant.isEmpty { parts.append("at \(merchant)") }
+        if let category = draft.suggested_categories?.first?.name { parts.append("category \(category)") }
+        if let date = draft.date { parts.append("on \(date)") }
+        if let note = draft.note, !note.isEmpty { parts.append("note \"\(note)\"") }
+        return parts.joined(separator: " ")
     }
 }
 
@@ -75,6 +135,10 @@ final class AskChatManager: ObservableObject {
     /// Draft lifecycle: message id → state.
     @Published var confirmedDrafts: Set<UUID> = []
     @Published var draftErrors: [UUID: String] = [:]
+    /// Pending cards replaced by a newer proposal — shown dimmed, not actionable.
+    @Published var supersededCards: Set<UUID> = []
+    /// Multi-transaction card: message id → row indices already added.
+    @Published var addedBatchRows: [UUID: Set<Int>] = [:]
     /// Transaction opened in ReceiptDetailSheet from a chat card.
     @Published var detailTransaction: Txn? = nil
 
@@ -96,6 +160,8 @@ final class AskChatManager: ObservableObject {
             // Drop any limit notices persisted by older builds — they're daily-state, not history.
             messages = saved.messages.filter { !Self.isLimitNotice($0) }
             confirmedDrafts = Set(saved.confirmed)
+            supersededCards = Set(saved.superseded ?? [])
+            addedBatchRows = Self.decodeBatchRows(saved.batchRows)
         }
         // Follow the login the same way app data does: when a user signs in / the session
         // finishes loading, swap to that user's chat (local + cloud), and clear on sign-out.
@@ -113,6 +179,9 @@ final class AskChatManager: ObservableObject {
     private struct PersistedChat: Codable {
         let messages: [AskDisplayMessage]
         let confirmed: [UUID]
+        /// Added after launch — absent in files written by older builds.
+        let superseded: [UUID]?
+        let batchRows: [String: [Int]]?
     }
 
     /// Identity that owns the chat — resolved exactly like UserManager's storage key so the chat
@@ -150,7 +219,12 @@ final class AskChatManager: ObservableObject {
     private var syncEnabled: Bool { UserManager.shared.currentUser.enableFirebaseSync }
 
     private func persist() {
-        let snapshot = PersistedChat(messages: Array(messages.suffix(100)).filter { !Self.isLimitNotice($0) }, confirmed: Array(confirmedDrafts))
+        let snapshot = PersistedChat(
+            messages: Array(messages.suffix(100)).filter { !Self.isLimitNotice($0) },
+            confirmed: Array(confirmedDrafts),
+            superseded: Array(supersededCards),
+            batchRows: addedBatchRows.reduce(into: [String: [Int]]()) { $0[$1.key.uuidString] = Array($1.value) }
+        )
         let uid = Self.currentUID()
         let url = Self.chatFileURL(for: uid)
         let pushToCloud = syncEnabled
@@ -160,6 +234,13 @@ final class AskChatManager: ObservableObject {
             if pushToCloud {
                 FirestoreService.shared.saveAskChat(data, userId: uid) { _ in }
             }
+        }
+    }
+
+    private static func decodeBatchRows(_ stored: [String: [Int]]?) -> [UUID: Set<Int>] {
+        (stored ?? [:]).reduce(into: [UUID: Set<Int>]()) { result, entry in
+            guard let id = UUID(uuidString: entry.key) else { return }
+            result[id] = Set(entry.value)
         }
     }
 
@@ -175,6 +256,8 @@ final class AskChatManager: ObservableObject {
         let local = Self.loadPersisted()
         messages = (local?.messages ?? []).filter { !Self.isLimitNotice($0) }
         confirmedDrafts = Set(local?.confirmed ?? [])
+        supersededCards = Set(local?.superseded ?? [])
+        addedBatchRows = Self.decodeBatchRows(local?.batchRows)
         objectWillChange.send()
 
         guard syncEnabled else { return }
@@ -200,8 +283,19 @@ final class AskChatManager: ObservableObject {
         merged.append(contentsOf: other.filter { !baseIDs.contains($0.id) })
         messages = Array(merged.suffix(100))
         confirmedDrafts.formUnion(cloud.confirmed)
+        supersededCards.formUnion(cloud.superseded ?? [])
+        for (id, rows) in Self.decodeBatchRows(cloud.batchRows) {
+            addedBatchRows[id, default: []].formUnion(rows)
+        }
         objectWillChange.send()
         persist()
+    }
+
+    /// Proposals a newer card replaced are dropped from the chat and from the
+    /// model's history — leaving them visible only offers a stale card to tap,
+    /// and describing them as pending would tell the model two are live.
+    var visibleMessages: [AskDisplayMessage] {
+        messages.filter { !($0.content.isPending && supersededCards.contains($0.id)) }
     }
 
     /// Presents the paywall when a free user hits the daily message limit.
@@ -224,7 +318,7 @@ final class AskChatManager: ObservableObject {
         persist()
 
         // Cap context: only the last 20 messages go to the model.
-        let history = messages.suffix(20).map { (isUser: $0.isUser, text: $0.historyText) }
+        let history = visibleMessages.suffix(20).map { (isUser: $0.isUser, text: $0.historyText) }
         Task {
             do {
                 let reply = try await AskChatService.shared.send(
@@ -345,16 +439,19 @@ final class AskChatManager: ObservableObject {
             messages.append(AskDisplayMessage(isUser: false, content: .table(table)))
         case .transactionDraft(let draft):
             removeStreamingMessage()
-            messages.append(AskDisplayMessage(isUser: false, content: .draft(draft)))
+            appendPending(.draft(draft))
+        case .transactionDraftBatch(let batch):
+            removeStreamingMessage()
+            appendPending(.draftBatch(batch))
         case .transactionUpdate(let update):
             removeStreamingMessage()
-            messages.append(AskDisplayMessage(isUser: false, content: .update(update)))
+            appendPending(.update(update))
         case .transaction(let ref):
             removeStreamingMessage()
             messages.append(AskDisplayMessage(isUser: false, content: .single(ref)))
         case .transactionDelete(let delete):
             removeStreamingMessage()
-            messages.append(AskDisplayMessage(isUser: false, content: .deleteRequest(delete)))
+            appendPending(.deleteRequest(delete))
         case .chart(let chart):
             removeStreamingMessage()
             messages.append(AskDisplayMessage(isUser: false, content: .chart(chart)))
@@ -366,10 +463,80 @@ final class AskChatManager: ObservableObject {
             messages.append(AskDisplayMessage(isUser: false, content: .question(text, choices)))
         case .categoryDraft(let draft):
             removeStreamingMessage()
-            messages.append(AskDisplayMessage(isUser: false, content: .categoryDraft(draft)))
+            appendPending(.categoryDraft(draft))
+        case .budgetDraft(let draft):
+            removeStreamingMessage()
+            appendPending(.budgetDraft(draft))
+        case .budgetUpdate(let update):
+            removeStreamingMessage()
+            appendPending(.budgetUpdate(update))
+        case .budgetDelete(let delete):
+            removeStreamingMessage()
+            appendPending(.budgetDelete(delete))
+        case .subscriptionDraft(let draft):
+            removeStreamingMessage()
+            appendPending(.subscriptionDraft(draft))
+        case .subscriptionUpdate(let update):
+            removeStreamingMessage()
+            appendPending(.subscriptionUpdate(update))
+        case .subscriptionDelete(let delete):
+            removeStreamingMessage()
+            appendPending(.subscriptionDelete(delete))
         }
         streamingMessageID = nil
         persist()
+    }
+
+    /// Appends a proposal card and retires any older one still awaiting the
+    /// user: a revised suggestion replaces the stale one instead of leaving two
+    /// tappable cards that would both write.
+    private func appendPending(_ content: AskDisplayMessage.Content) {
+        // A revision that drops suggested_categories ("change it to 100") would
+        // otherwise land in No Category — keep the replaced card's suggestions.
+        let live = messages.last { $0.content.isPending
+            && !confirmedDrafts.contains($0.id)
+            && !supersededCards.contains($0.id) }
+        let content = live.map { Self.inheritingSuggestions(content, from: $0.content) } ?? content
+
+        for message in messages where message.content.isPending
+            && !confirmedDrafts.contains(message.id)
+            && !supersededCards.contains(message.id) {
+            // A partly-added batch keeps its remaining rows live; nothing else does.
+            if case .draftBatch = message.content, addedBatchRows[message.id]?.isEmpty == false { continue }
+            supersededCards.insert(message.id)
+        }
+        messages.append(AskDisplayMessage(isUser: false, content: content))
+    }
+
+    /// Carries category suggestions from the card being replaced into its
+    /// revision, but only where the revision supplied none of its own.
+    private static func inheritingSuggestions(
+        _ new: AskDisplayMessage.Content,
+        from old: AskDisplayMessage.Content
+    ) -> AskDisplayMessage.Content {
+        switch (new, old) {
+        case (.draft(let revised), .draft(let previous)):
+            return .draft(revised.inheritingSuggestions(from: previous))
+
+        case (.draftBatch(let revised), .draftBatch(let previous))
+            where revised.transactions.count == previous.transactions.count:
+            let rows = zip(revised.transactions, previous.transactions).map { $0.inheritingSuggestions(from: $1) }
+            return .draftBatch(AskTransactionDraftBatch(
+                type: revised.type,
+                title: revised.title ?? previous.title,
+                transactions: rows
+            ))
+
+        case (.draft(let revised), .draftBatch(let previous)):
+            // Batch narrowed to one row: match it back by merchant, then by amount.
+            let source = previous.transactions.first {
+                $0.merchant?.lowercased() == revised.merchant?.lowercased()
+            } ?? previous.transactions.first { $0.amount == revised.amount }
+            return .draft(source.map { revised.inheritingSuggestions(from: $0) } ?? revised)
+
+        default:
+            return new
+        }
     }
 
     /// Writes the transaction with whatever the user confirmed. Only called
@@ -498,6 +665,327 @@ final class AskChatManager: ObservableObject {
         messages.append(AskDisplayMessage(isUser: false, content: .text("Okay, no changes made.")))
         persist()
     }
+
+    /// Retires a pending card with a short reply. Shared by the budget cards.
+    func cancelPending(messageID: UUID, note: String) {
+        confirmedDrafts.insert(messageID)
+        messages.append(AskDisplayMessage(isUser: false, content: .text(note)))
+        persist()
+    }
+
+    // MARK: Multi-transaction card
+
+    /// Writes the chosen rows of a multi-transaction card. Rows are added at
+    /// most once each — the card tracks which are done.
+    func addBatchRows(messageID: UUID, batch: AskTransactionDraftBatch, indices: [Int]) {
+        var addedNames: [String] = []
+        for index in indices {
+            guard batch.transactions.indices.contains(index),
+                  addedBatchRows[messageID]?.contains(index) != true
+            else { continue }
+            let draft = batch.transactions[index]
+            let category = draft.topSuggestion
+            AskChatService.shared.createTransaction(
+                amount: draft.amount,
+                currency: draft.resolvedCurrency,
+                merchant: draft.merchant,
+                date: draft.resolvedDate,
+                note: draft.note,
+                categoryId: category?.id
+            )
+            addedBatchRows[messageID, default: []].insert(index)
+            addedNames.append("\(AskFormat.currency(draft.amount, code: draft.resolvedCurrency.rawValue))\(category.map { " to \($0.name)" } ?? "")")
+        }
+
+        guard !addedNames.isEmpty else { return }
+        draftErrors[messageID] = nil
+        if addedBatchRows[messageID]?.count == batch.transactions.count {
+            confirmedDrafts.insert(messageID)
+        }
+        let note = addedNames.count == 1
+            ? "✅ Added \(addedNames[0])."
+            : "✅ Added \(addedNames.count) transactions: \(addedNames.joined(separator: ", "))."
+        messages.append(AskDisplayMessage(isUser: false, content: .systemNote(note)))
+        persist()
+    }
+
+    /// Marks a row added after the user saved it through the edit sheet (which
+    /// writes the transaction itself, with whatever they changed).
+    func markBatchRowAdded(messageID: UUID, index: Int, rowCount: Int, receipt: String) {
+        addedBatchRows[messageID, default: []].insert(index)
+        draftErrors[messageID] = nil
+        if addedBatchRows[messageID]?.count == rowCount {
+            confirmedDrafts.insert(messageID)
+        }
+        messages.append(AskDisplayMessage(isUser: false, content: .systemNote(receipt)))
+        persist()
+    }
+
+    // MARK: Budget cards
+
+    func confirmBudgetDraft(messageID: UUID, draft: AskBudgetDraft) {
+        guard let categoryId = UUID(uuidString: draft.category_id) else {
+            draftErrors[messageID] = "That category no longer exists."
+            return
+        }
+        do {
+            let budget = try AskChatService.shared.createBudget(
+                categoryId: categoryId,
+                amount: draft.amount,
+                currency: draft.resolvedCurrency,
+                period: draft.resolvedPeriod,
+                applyToAllPeriods: draft.apply_to_all_periods ?? true
+            )
+            draftErrors[messageID] = nil
+            confirmedDrafts.insert(messageID)
+            let formatted = AskFormat.currency(budget.amount, code: budget.currency.rawValue)
+            messages.append(AskDisplayMessage(isUser: false, content: .systemNote("✅ Set a \(budget.period.displayName.lowercased()) budget of \(formatted) for \(budget.categoryName).")))
+            persist()
+        } catch {
+            draftErrors[messageID] = error.localizedDescription
+        }
+    }
+
+    func confirmBudgetUpdate(messageID: UUID, update: AskBudgetUpdate) {
+        let currency = update.currency.flatMap { code in
+            Currency.allCases.first { $0.rawValue.uppercased() == code.uppercased() }
+        }
+        let period = update.period.flatMap { BudgetPeriod(rawValue: $0.lowercased()) }
+
+        var updated: [Budget] = []
+        for id in update.ids {
+            guard let budgetID = UUID(uuidString: id) else { continue }
+            if let budget = try? AskChatService.shared.updateBudget(
+                id: budgetID,
+                amount: update.amount,
+                currency: currency,
+                period: period,
+                isActive: update.is_active
+            ) {
+                updated.append(budget)
+            }
+        }
+
+        guard let first = updated.first else {
+            draftErrors[messageID] = "Those budgets no longer exist."
+            return
+        }
+        draftErrors[messageID] = nil
+        confirmedDrafts.insert(messageID)
+        let receipt: String
+        if updated.count > 1 {
+            receipt = "✅ Updated \(updated.count) budgets."
+        } else if update.is_active == false {
+            receipt = "⏸️ Paused the \(first.categoryName) budget."
+        } else {
+            receipt = "✅ \(first.categoryName) budget is now \(AskFormat.currency(first.amount, code: first.currency.rawValue)) per \(first.period.displayName.lowercased())."
+        }
+        messages.append(AskDisplayMessage(isUser: false, content: .systemNote(receipt)))
+        persist()
+    }
+
+    func confirmBudgetDelete(messageID: UUID, delete: AskBudgetDelete) {
+        var deleted: [Budget] = []
+        for id in delete.ids {
+            guard let budgetID = UUID(uuidString: id) else { continue }
+            if let budget = try? AskChatService.shared.deleteBudget(id: budgetID) {
+                deleted.append(budget)
+            }
+        }
+        guard let first = deleted.first else {
+            draftErrors[messageID] = "Those budgets no longer exist."
+            return
+        }
+        draftErrors[messageID] = nil
+        confirmedDrafts.insert(messageID)
+        messages.append(AskDisplayMessage(isUser: false, content: .systemNote(
+            deleted.count > 1 ? "🗑️ Deleted \(deleted.count) budgets." : "🗑️ Deleted the \(first.categoryName) budget."
+        )))
+        persist()
+    }
+
+    // MARK: Recurring / subscription cards
+
+    func confirmSubscriptionDraft(messageID: UUID, draft: AskSubscriptionDraft) {
+        // Free accounts are capped at 2 recurring items — same gate the Add sheet uses.
+        guard SubscriptionManager.shared.canAddMoreSubscriptions else {
+            showLimitPaywall = true
+            return
+        }
+        let subscription = AskChatService.shared.createSubscription(
+            name: draft.name,
+            amount: draft.amount,
+            currency: draft.resolvedCurrency,
+            categoryId: draft.category_id.flatMap { UUID(uuidString: $0) },
+            frequency: draft.resolvedFrequency,
+            startDate: draft.resolvedStartDate,
+            autoAdd: draft.auto_add ?? true,
+            note: draft.note
+        )
+        draftErrors[messageID] = nil
+        confirmedDrafts.insert(messageID)
+        let formatted = AskFormat.currency(subscription.amount, code: subscription.currency.rawValue)
+        messages.append(AskDisplayMessage(isUser: false, content: .systemNote(
+            "✅ Tracking \(subscription.name) at \(formatted) \(subscription.frequency.displayName.lowercased())."
+        )))
+        persist()
+    }
+
+    func confirmSubscriptionUpdate(messageID: UUID, update: AskSubscriptionUpdate) {
+        let currency = update.currency.flatMap { code in
+            Currency.allCases.first { $0.rawValue.uppercased() == code.uppercased() }
+        }
+        let frequency = update.frequency.flatMap { RecurringFrequency(rawValue: $0.lowercased()) }
+        let nextDue: Date? = update.next_due_date.flatMap {
+            let formatter = DateFormatter()
+            formatter.dateFormat = "yyyy-MM-dd"
+            return formatter.date(from: $0)
+        }
+
+        var updated: [Subscription] = []
+        for id in update.ids {
+            guard let subscriptionID = UUID(uuidString: id) else { continue }
+            if let subscription = try? AskChatService.shared.updateSubscription(
+                id: subscriptionID,
+                name: update.name,
+                amount: update.amount,
+                currency: currency,
+                categoryId: update.category_id.flatMap { UUID(uuidString: $0) },
+                frequency: frequency,
+                nextDueDate: nextDue,
+                autoAdd: update.auto_add,
+                isActive: update.is_active,
+                note: update.note
+            ) {
+                updated.append(subscription)
+            }
+        }
+
+        guard let first = updated.first else {
+            draftErrors[messageID] = "Those recurring items no longer exist."
+            return
+        }
+        draftErrors[messageID] = nil
+        confirmedDrafts.insert(messageID)
+        let receipt: String
+        if updated.count > 1 {
+            receipt = "✅ Updated \(updated.count) recurring items."
+        } else if update.is_active == false {
+            receipt = "⏸️ Paused \(first.name)."
+        } else if update.is_active == true {
+            receipt = "▶️ Resumed \(first.name)."
+        } else {
+            receipt = "✅ \(first.name) is now \(AskFormat.currency(first.amount, code: first.currency.rawValue)) \(first.frequency.displayName.lowercased())."
+        }
+        messages.append(AskDisplayMessage(isUser: false, content: .systemNote(receipt)))
+        persist()
+    }
+
+    func confirmSubscriptionDelete(messageID: UUID, delete: AskSubscriptionDelete) {
+        var deleted: [Subscription] = []
+        for id in delete.ids {
+            guard let subscriptionID = UUID(uuidString: id) else { continue }
+            if let subscription = try? AskChatService.shared.deleteSubscription(id: subscriptionID) {
+                deleted.append(subscription)
+            }
+        }
+        guard let first = deleted.first else {
+            draftErrors[messageID] = "Those recurring items no longer exist."
+            return
+        }
+        draftErrors[messageID] = nil
+        confirmedDrafts.insert(messageID)
+        messages.append(AskDisplayMessage(isUser: false, content: .systemNote(
+            deleted.count > 1 ? "🗑️ Deleted \(deleted.count) recurring items." : "🗑️ Deleted \(first.name)."
+        )))
+        persist()
+    }
+}
+
+// MARK: - Draft helpers (shared by the single and multi transaction cards)
+
+extension AskTransactionDraft {
+    /// Suggested categories that still exist in the user's real list.
+    var validSuggestions: [(id: UUID, name: String)] {
+        (suggested_categories ?? []).compactMap { suggestion in
+            guard let uuid = UUID(uuidString: suggestion.id),
+                  CategoriesManager.shared.findCategoryOrSubcategoryById(uuid) != nil
+            else { return nil }
+            return (uuid, suggestion.name)
+        }
+    }
+
+    var topSuggestion: (id: UUID, name: String)? { validSuggestions.first }
+
+    /// Same proposal, but borrowing another draft's category suggestions when
+    /// this one has none that still resolve.
+    func inheritingSuggestions(from other: AskTransactionDraft) -> AskTransactionDraft {
+        guard validSuggestions.isEmpty, !other.validSuggestions.isEmpty else { return self }
+        return AskTransactionDraft(
+            type: type,
+            amount: amount,
+            currency: currency,
+            merchant: merchant ?? other.merchant,
+            date: date,
+            note: note,
+            suggested_categories: other.suggested_categories
+        )
+    }
+
+    var resolvedCurrency: Currency {
+        Currency.allCases.first { $0.rawValue.uppercased() == (currency ?? "").uppercased() }
+            ?? CurrencyPreferences.shared.primaryCurrency
+    }
+
+    var resolvedDate: Date {
+        guard let date else { return Date() }
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter.date(from: date) ?? Date()
+    }
+}
+
+extension AskBudgetDraft {
+    var resolvedCurrency: Currency {
+        Currency.allCases.first { $0.rawValue.uppercased() == (currency ?? "").uppercased() }
+            ?? CurrencyPreferences.shared.primaryCurrency
+    }
+
+    var resolvedPeriod: BudgetPeriod {
+        BudgetPeriod(rawValue: (period ?? "monthly").lowercased()) ?? .monthly
+    }
+
+    /// Name re-resolved from the real category list; the model's label is only a fallback.
+    var resolvedCategory: (id: UUID, name: String)? {
+        guard let uuid = UUID(uuidString: category_id) else { return nil }
+        return AskChatService.shared.resolveBudgetCategory(uuid)
+    }
+}
+
+extension AskSubscriptionDraft {
+    var resolvedCurrency: Currency {
+        Currency.allCases.first { $0.rawValue.uppercased() == (currency ?? "").uppercased() }
+            ?? CurrencyPreferences.shared.primaryCurrency
+    }
+
+    var resolvedFrequency: RecurringFrequency {
+        RecurringFrequency(rawValue: (frequency ?? "monthly").lowercased()) ?? .monthly
+    }
+
+    var resolvedStartDate: Date {
+        guard let start_date else { return Date() }
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter.date(from: start_date) ?? Date()
+    }
+
+    /// Real category name when the id resolves, else the app's Subscriptions bucket.
+    var resolvedCategoryName: String {
+        guard let id = category_id.flatMap({ UUID(uuidString: $0) }),
+              let result = CategoriesManager.shared.findCategoryOrSubcategoryById(id)
+        else { return category_name ?? "Subscriptions" }
+        return result.subcategory?.name ?? result.category?.name ?? (category_name ?? "Subscriptions")
+    }
 }
 
 // MARK: - Formatting helpers
@@ -592,7 +1080,7 @@ struct AskPage: View {
                 } else {
                 ScrollView(showsIndicators: false) {
                     VStack(alignment: .leading, spacing: 28) {
-                        ForEach(chat.messages) { message in
+                        ForEach(chat.visibleMessages) { message in
                             AskMessageView(message: message)
                                 .id(message.id)
                                 .transition(.opacity)
@@ -770,12 +1258,21 @@ struct AskPage: View {
     private var composerBar: some View {
         // Single line: input + send. Plus/mic hidden until those features land.
         HStack(alignment: .bottom, spacing: 12) {
-            TextField("Ask anything", text: $composeText, axis: .vertical)
+            TextField("", text: $composeText, axis: .vertical)
                 .font(AppFonts.overusedGroteskMedium(size: 16))
                 .foregroundColor(AppColors.foregroundPrimary)
                 .accentColor(AppColors.accentBackground)
                 .lineLimit(1...4)
                 .focused($composerFocused)
+                // Cycling examples stand in for the placeholder while the field is
+                // idle — they double as a menu of what Ask can actually do.
+                .overlay(alignment: .leading) {
+                    if composeText.isEmpty && !composerFocused {
+                        AskTypingPlaceholder()
+                            .allowsHitTesting(false)
+                            .transition(.opacity)
+                    }
+                }
                 .submitLabel(.done)
                 .onChange(of: composeText) { _, newValue in
                     // Vertical-axis fields insert newlines on Return: send the
@@ -817,6 +1314,76 @@ struct AskPage: View {
         .padding(.bottom, 10) // footer text sits just below
     }
 
+}
+
+// MARK: - Composer placeholder (types out what Ask can do, then cycles)
+
+private struct AskTypingPlaceholder: View {
+    /// One per capability, phrased the way a user would say it.
+    private static let phrases = [
+        "Ask anything",
+        "Add 300 groceries and 150 milk",
+        "How much did I spend this month?",
+        "Top 5 categories this month",
+        "Budget 5000 a month for food",
+        "Add my Netflix, 549 monthly",
+        "Change my last coffee to 150"
+    ]
+
+    private static let typingInterval: Duration = .milliseconds(45)
+    private static let holdAfterTyping: Duration = .milliseconds(1800)
+    private static let fadeDuration = 0.25
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    @State private var shown = ""
+    @State private var opacity: Double = 1
+    @State private var cycle: Task<Void, Never>? = nil
+
+    var body: some View {
+        Text(shown)
+            .font(AppFonts.overusedGroteskMedium(size: 16))
+            .foregroundColor(AppColors.foregroundTertiary)
+            .lineLimit(1)
+            .opacity(opacity)
+            .onAppear(perform: start)
+            .onDisappear {
+                cycle?.cancel()
+                cycle = nil
+            }
+    }
+
+    private func start() {
+        guard cycle == nil else { return }
+        // Reduce Motion: settle on the plain prompt, no typing, no cycling.
+        guard !reduceMotion else {
+            shown = Self.phrases[0]
+            return
+        }
+        cycle = Task { await run() }
+    }
+
+    private func run() async {
+        var index = 0
+        while !Task.isCancelled {
+            let phrase = Self.phrases[index % Self.phrases.count]
+
+            withAnimation(.easeIn(duration: Self.fadeDuration)) { opacity = 1 }
+            shown = ""
+            for character in phrase {
+                guard !Task.isCancelled else { return }
+                shown.append(character)
+                try? await Task.sleep(for: Self.typingInterval)
+            }
+
+            try? await Task.sleep(for: Self.holdAfterTyping)
+            guard !Task.isCancelled else { return }
+
+            withAnimation(.easeOut(duration: Self.fadeDuration)) { opacity = 0 }
+            try? await Task.sleep(for: .milliseconds(Int(Self.fadeDuration * 1000)))
+            index += 1
+        }
+    }
 }
 
 // MARK: - Message rendering
@@ -881,6 +1448,20 @@ private struct AskMessageView: View {
                 AskQuestionView(messageID: message.id, text: text, choices: choices)
             case .categoryDraft(let draft):
                 AskCategoryDraftCard(messageID: message.id, draft: draft)
+            case .draftBatch(let batch):
+                AskDraftBatchCard(messageID: message.id, batch: batch)
+            case .budgetDraft(let draft):
+                AskBudgetDraftCard(messageID: message.id, draft: draft)
+            case .budgetUpdate(let update):
+                AskBudgetUpdateCard(messageID: message.id, update: update)
+            case .budgetDelete(let delete):
+                AskBudgetDeleteCard(messageID: message.id, delete: delete)
+            case .subscriptionDraft(let draft):
+                AskSubscriptionDraftCard(messageID: message.id, draft: draft)
+            case .subscriptionUpdate(let update):
+                AskSubscriptionUpdateCard(messageID: message.id, update: update)
+            case .subscriptionDelete(let delete):
+                AskSubscriptionDeleteCard(messageID: message.id, delete: delete)
             }
         }
     }
@@ -1057,14 +1638,7 @@ private struct AskDraftCard: View {
     private var isConfirmed: Bool { chat.confirmedDrafts.contains(messageID) }
 
     /// Suggested categories validated against the user's real category list.
-    private var validSuggestions: [(id: UUID, name: String)] {
-        (draft.suggested_categories ?? []).compactMap { suggestion in
-            guard let uuid = UUID(uuidString: suggestion.id),
-                  CategoriesManager.shared.findCategoryOrSubcategoryById(uuid) != nil
-            else { return nil }
-            return (uuid, suggestion.name)
-        }
-    }
+    private var validSuggestions: [(id: UUID, name: String)] { draft.validSuggestions }
 
     private var currency: Currency {
         Currency.allCases.first { $0.rawValue.uppercased() == currencyCode.uppercased() }
@@ -1301,6 +1875,474 @@ private struct AskDraftCard: View {
             categoryId: selectedCategoryID,
             categoryName: selectedCategoryName
         )
+    }
+}
+
+// MARK: - Multi-transaction card (one row per proposal, add one or all)
+
+private struct AskDraftBatchCard: View {
+    let messageID: UUID
+    let batch: AskTransactionDraftBatch
+
+    @ObservedObject private var chat = AskChatManager.shared
+
+    /// Row being edited in the transaction sheet (Identifiable for .sheet(item:)).
+    private struct EditingRow: Identifiable { let id: Int }
+    @State private var editingRow: EditingRow? = nil
+
+    private var addedRows: Set<Int> { chat.addedBatchRows[messageID] ?? [] }
+    private var remaining: [Int] { batch.transactions.indices.filter { !addedRows.contains($0) } }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text(batch.title?.uppercased() ?? "\(batch.transactions.count) TRANSACTIONS")
+                .font(AppFonts.overusedGroteskMedium(size: 10))
+                .kerning(1)
+                .foregroundColor(AppColors.foregroundSecondary)
+                .padding(.horizontal, 20)
+                .padding(.top, 16)
+                .padding(.bottom, 12)
+
+            VStack(spacing: 4) {
+                ForEach(Array(batch.transactions.enumerated()), id: \.offset) { index, draft in
+                    row(index: index, draft: draft)
+                }
+            }
+            .padding(.horizontal, 8)
+
+            if let error = chat.draftErrors[messageID] {
+                Text(error)
+                    .font(AppFonts.overusedGroteskMedium(size: 13))
+                    .foregroundColor(AppColors.destructiveForeground)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 20)
+                    .padding(.top, 8)
+            }
+
+            if remaining.count > 1 {
+                AppButton(
+                    title: "Add all \(remaining.count)",
+                    action: { chat.addBatchRows(messageID: messageID, batch: batch, indices: remaining) },
+                    hierarchy: .primary,
+                    size: .doubleExtraSmall
+                )
+                .padding(.horizontal, 8)
+                .padding(.top, 12)
+            }
+        }
+        // Without the Add all button the rows are the last thing in the card, so
+        // the bottom inset matches their 8pt side inset.
+        .padding(.bottom, remaining.count > 1 ? 16 : 8)
+        .background(AppColors.surfacePrimary)
+        .cornerRadius(16)
+        .sheet(item: $editingRow) { editing in
+            let draft = batch.transactions[editing.id]
+            AddTransactionSheet(
+                isPresented: Binding(get: { editingRow != nil }, set: { if !$0 { editingRow = nil } }),
+                primaryCurrency: CurrencyPreferences.shared.primaryCurrency,
+                prefillAmount: String(format: "%.2f", draft.amount),
+                prefillMerchant: draft.merchant ?? "",
+                prefillNote: draft.note ?? "",
+                prefillCategoryId: draft.topSuggestion?.id,
+                prefillDate: draft.resolvedDate,
+                prefillCurrency: draft.resolvedCurrency
+            ) { newTxn in
+                UserManager.shared.addTransaction(newTxn)
+                chat.markBatchRowAdded(
+                    messageID: messageID,
+                    index: editing.id,
+                    rowCount: batch.transactions.count,
+                    receipt: "✅ Added \(AskFormat.currencyWithSymbol(abs(newTxn.amount)))\(newTxn.category.isEmpty ? "" : " to \(newTxn.category)")."
+                )
+            }
+            .presentationDetents([.fraction(0.98)])
+            .presentationDragIndicator(.hidden)
+            .presentationBackground(.thinMaterial)
+            .presentationCornerRadius(20)
+        }
+    }
+
+    private func row(index: Int, draft: AskTransactionDraft) -> some View {
+        let isAdded = addedRows.contains(index)
+        let category = draft.topSuggestion
+        let emoji = category.map { TxnCategoryIcon.emojiFor(categoryId: $0.id, categoryName: $0.name) } ?? "➕"
+        let amount = draft.resolvedCurrency.symbol + AskFormat.currency(draft.amount)
+
+        return Button {
+            guard !isAdded else { return }
+            editingRow = EditingRow(id: index)
+        } label: {
+            HStack(alignment: .center, spacing: 12) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(isAdded ? "✅ Added \(amount)" : "\(emoji) \(amount)\(category.map { " under \($0.name.lowercased())" } ?? "")")
+                        .font(AppFonts.overusedGroteskSemiBold(size: 15))
+                        .foregroundColor(AppColors.foregroundPrimary)
+                        .lineLimit(1)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+
+                    if let subtitle = subtitle(for: draft) {
+                        Text(subtitle)
+                            .font(AppFonts.overusedGroteskMedium(size: 13))
+                            .foregroundColor(AppColors.foregroundSecondary)
+                            .lineLimit(1)
+                    }
+                }
+                Spacer(minLength: 0)
+                if !isAdded {
+                    AppButton(
+                        title: "",
+                        action: { chat.addBatchRows(messageID: messageID, batch: batch, indices: [index]) },
+                        hierarchy: .secondary,
+                        size: .doubleExtraSmall,
+                        leftIcon: "plus"
+                    )
+                    .fixedSize()
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(AppColors.backgroundWhite)
+            .cornerRadius(12)
+            .opacity(isAdded ? 0.6 : 1)
+        }
+        .buttonStyle(PlainButtonStyle())
+    }
+
+    private func subtitle(for draft: AskTransactionDraft) -> String? {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MMM d"
+        var parts = [formatter.string(from: draft.resolvedDate)]
+        if let merchant = draft.merchant, !merchant.isEmpty { parts.append(merchant) }
+        else if let note = draft.note, !note.isEmpty { parts.append(note) }
+        return parts.joined(separator: " · ")
+    }
+}
+
+// MARK: - Budget cards (new / edit / delete, Confirm-gated)
+
+private struct AskBudgetDraftCard: View {
+    let messageID: UUID
+    let draft: AskBudgetDraft
+
+    @ObservedObject private var chat = AskChatManager.shared
+
+    private var isConfirmed: Bool { chat.confirmedDrafts.contains(messageID) }
+
+    private var categoryName: String {
+        draft.resolvedCategory?.name ?? draft.category_name ?? "Category"
+    }
+
+    private var emoji: String {
+        guard let category = draft.resolvedCategory else { return "🎯" }
+        return TxnCategoryIcon.emojiFor(categoryId: category.id, categoryName: category.name)
+    }
+
+    var body: some View {
+        if !isConfirmed {
+            AskConfirmCardShell(
+                label: "NEW BUDGET",
+                title: "\(emoji) \(categoryName)",
+                detail: "\(draft.resolvedCurrency.symbol)\(AskFormat.currency(draft.amount)) per \(draft.resolvedPeriod.displayName.lowercased())",
+                error: chat.draftErrors[messageID],
+                prompt: "Set this budget?",
+                actionTitle: "Yes",
+                actionColor: nil,
+                action: { chat.confirmBudgetDraft(messageID: messageID, draft: draft) }
+            )
+        }
+    }
+}
+
+private struct AskBudgetUpdateCard: View {
+    let messageID: UUID
+    let update: AskBudgetUpdate
+
+    @ObservedObject private var chat = AskChatManager.shared
+
+    private var isConfirmed: Bool { chat.confirmedDrafts.contains(messageID) }
+
+    private var targets: [Budget] {
+        update.ids.compactMap { id in
+            guard let uuid = UUID(uuidString: id) else { return nil }
+            return UserManager.shared.currentUser.budgets.first { $0.id == uuid }
+        }
+    }
+
+    /// "₱5,000 monthly → ₱6,000 monthly", built from the fields actually changing.
+    private func change(for budget: Budget) -> String {
+        let newAmount = update.amount ?? budget.amount
+        let newPeriod = update.period.flatMap { BudgetPeriod(rawValue: $0.lowercased()) } ?? budget.period
+        let newCurrency = update.currency.flatMap { code in
+            Currency.allCases.first { $0.rawValue.uppercased() == code.uppercased() }
+        } ?? budget.currency
+
+        if let active = update.is_active, update.amount == nil, update.period == nil, update.currency == nil {
+            return active ? "Resume this budget" : "Pause this budget"
+        }
+        let before = "\(budget.currency.symbol)\(AskFormat.currency(budget.amount)) \(budget.period.displayName.lowercased())"
+        let after = "\(newCurrency.symbol)\(AskFormat.currency(newAmount)) \(newPeriod.displayName.lowercased())"
+        return "\(before)  ›  \(after)"
+    }
+
+    var body: some View {
+        if !isConfirmed, let first = targets.first {
+            AskConfirmCardShell(
+                label: targets.count > 1 ? "EDIT \(targets.count) BUDGETS" : "EDIT BUDGET",
+                title: targets.count > 1
+                    ? targets.map(\.categoryName).joined(separator: ", ")
+                    : first.categoryName,
+                detail: targets.count > 1 ? nil : change(for: first),
+                error: chat.draftErrors[messageID],
+                prompt: targets.count > 1 ? "Apply to these \(targets.count) budgets?" : "Apply this change?",
+                actionTitle: "Confirm",
+                actionColor: nil,
+                action: { chat.confirmBudgetUpdate(messageID: messageID, update: update) }
+            )
+        } else if !isConfirmed && targets.isEmpty {
+            Text("That budget couldn't be found anymore.")
+                .font(AppFonts.overusedGroteskMedium(size: 14))
+                .foregroundColor(AppColors.foregroundSecondary)
+        }
+    }
+}
+
+private struct AskBudgetDeleteCard: View {
+    let messageID: UUID
+    let delete: AskBudgetDelete
+
+    @ObservedObject private var chat = AskChatManager.shared
+
+    private var isConfirmed: Bool { chat.confirmedDrafts.contains(messageID) }
+
+    private var targets: [Budget] {
+        delete.ids.compactMap { id in
+            guard let uuid = UUID(uuidString: id) else { return nil }
+            return UserManager.shared.currentUser.budgets.first { $0.id == uuid }
+        }
+    }
+
+    var body: some View {
+        if !isConfirmed, let first = targets.first {
+            AskConfirmCardShell(
+                label: "DELETE BUDGET",
+                title: targets.map(\.categoryName).joined(separator: ", "),
+                detail: targets.count > 1
+                    ? nil
+                    : "\(first.currency.symbol)\(AskFormat.currency(first.amount)) \(first.period.displayName.lowercased())",
+                error: chat.draftErrors[messageID],
+                prompt: targets.count > 1 ? "Delete these \(targets.count) budgets?" : "Delete this budget?",
+                actionTitle: "Delete",
+                actionColor: AppColors.destructiveForeground,
+                action: { chat.confirmBudgetDelete(messageID: messageID, delete: delete) }
+            )
+        } else if !isConfirmed && targets.isEmpty {
+            Text("That budget couldn't be found anymore.")
+                .font(AppFonts.overusedGroteskMedium(size: 14))
+                .foregroundColor(AppColors.foregroundSecondary)
+        }
+    }
+}
+
+// MARK: - Recurring / subscription cards
+
+private struct AskSubscriptionDraftCard: View {
+    let messageID: UUID
+    let draft: AskSubscriptionDraft
+
+    @ObservedObject private var chat = AskChatManager.shared
+
+    private var isConfirmed: Bool { chat.confirmedDrafts.contains(messageID) }
+
+    var body: some View {
+        if !isConfirmed {
+            AskConfirmCardShell(
+                label: "NEW RECURRING",
+                title: "🔁 \(draft.name)",
+                detail: "\(draft.resolvedCurrency.symbol)\(AskFormat.currency(draft.amount)) \(draft.resolvedFrequency.displayName.lowercased()) · \(draft.resolvedCategoryName)",
+                error: chat.draftErrors[messageID],
+                prompt: "Track this?",
+                actionTitle: "Yes",
+                actionColor: nil,
+                action: { chat.confirmSubscriptionDraft(messageID: messageID, draft: draft) }
+            )
+        }
+    }
+}
+
+private struct AskSubscriptionUpdateCard: View {
+    let messageID: UUID
+    let update: AskSubscriptionUpdate
+
+    @ObservedObject private var chat = AskChatManager.shared
+
+    private var isConfirmed: Bool { chat.confirmedDrafts.contains(messageID) }
+
+    private var targets: [Subscription] {
+        update.ids.compactMap { id in
+            guard let uuid = UUID(uuidString: id) else { return nil }
+            return SubscriptionManager.shared.subscriptions.first { $0.id == uuid }
+        }
+    }
+
+    /// Only the fields actually changing, as "before › after" lines.
+    private func change(for subscription: Subscription) -> String {
+        if let active = update.is_active,
+           update.amount == nil, update.frequency == nil, update.next_due_date == nil,
+           update.name == nil, update.auto_add == nil {
+            return active ? "Resume tracking" : "Pause tracking"
+        }
+
+        var lines: [String] = []
+        if let name = update.name, name != subscription.name {
+            lines.append("\(subscription.name)  ›  \(name)")
+        }
+        let newCurrency = update.currency.flatMap { code in
+            Currency.allCases.first { $0.rawValue.uppercased() == code.uppercased() }
+        } ?? subscription.currency
+        if update.amount != nil || update.currency != nil {
+            let before = "\(subscription.currency.symbol)\(AskFormat.currency(subscription.amount))"
+            let after = "\(newCurrency.symbol)\(AskFormat.currency(update.amount ?? subscription.amount))"
+            lines.append("\(before)  ›  \(after)")
+        }
+        if let raw = update.frequency, let frequency = RecurringFrequency(rawValue: raw.lowercased()),
+           frequency != subscription.frequency {
+            lines.append("\(subscription.frequency.displayName.lowercased())  ›  \(frequency.displayName.lowercased())")
+        }
+        if let due = update.next_due_date {
+            lines.append("next due \(due)")
+        }
+        if let autoAdd = update.auto_add {
+            lines.append(autoAdd ? "auto add on" : "auto add off")
+        }
+        return lines.isEmpty ? "Update this item" : lines.joined(separator: "\n")
+    }
+
+    var body: some View {
+        if !isConfirmed, let first = targets.first {
+            AskConfirmCardShell(
+                label: targets.count > 1 ? "EDIT \(targets.count) RECURRING" : "EDIT RECURRING",
+                title: targets.count > 1
+                    ? targets.map(\.name).joined(separator: ", ")
+                    : "🔁 \(first.name)",
+                detail: targets.count > 1 ? nil : change(for: first),
+                error: chat.draftErrors[messageID],
+                prompt: targets.count > 1 ? "Apply to these \(targets.count)?" : "Apply this change?",
+                actionTitle: "Confirm",
+                actionColor: nil,
+                action: { chat.confirmSubscriptionUpdate(messageID: messageID, update: update) }
+            )
+        } else if !isConfirmed && targets.isEmpty {
+            Text("That recurring item couldn't be found anymore.")
+                .font(AppFonts.overusedGroteskMedium(size: 14))
+                .foregroundColor(AppColors.foregroundSecondary)
+        }
+    }
+}
+
+private struct AskSubscriptionDeleteCard: View {
+    let messageID: UUID
+    let delete: AskSubscriptionDelete
+
+    @ObservedObject private var chat = AskChatManager.shared
+
+    private var isConfirmed: Bool { chat.confirmedDrafts.contains(messageID) }
+
+    private var targets: [Subscription] {
+        delete.ids.compactMap { id in
+            guard let uuid = UUID(uuidString: id) else { return nil }
+            return SubscriptionManager.shared.subscriptions.first { $0.id == uuid }
+        }
+    }
+
+    var body: some View {
+        if !isConfirmed, let first = targets.first {
+            AskConfirmCardShell(
+                label: "DELETE RECURRING",
+                title: targets.map(\.name).joined(separator: ", "),
+                detail: targets.count > 1
+                    ? nil
+                    : "\(first.currency.symbol)\(AskFormat.currency(first.amount)) \(first.frequency.displayName.lowercased())",
+                error: chat.draftErrors[messageID],
+                prompt: targets.count > 1 ? "Delete these \(targets.count)?" : "Delete this? It stops tracking for good.",
+                actionTitle: "Delete",
+                actionColor: AppColors.destructiveForeground,
+                action: { chat.confirmSubscriptionDelete(messageID: messageID, delete: delete) }
+            )
+        } else if !isConfirmed && targets.isEmpty {
+            Text("That recurring item couldn't be found anymore.")
+                .font(AppFonts.overusedGroteskMedium(size: 14))
+                .foregroundColor(AppColors.foregroundSecondary)
+        }
+    }
+}
+
+/// Shared chrome for the confirm-gated cards (budgets, recurring items) — same
+/// shape as the category draft card.
+private struct AskConfirmCardShell: View {
+    let label: String
+    let title: String
+    let detail: String?
+    let error: String?
+    let prompt: String
+    let actionTitle: String
+    let actionColor: Color?
+    let action: () -> Void
+
+    var body: some View {
+        VStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 12) {
+                Text(label)
+                    .font(AppFonts.overusedGroteskMedium(size: 10))
+                    .kerning(1)
+                    .foregroundColor(AppColors.foregroundSecondary)
+
+                Text(title)
+                    .font(AppFonts.overusedGroteskSemiBold(size: 16))
+                    .foregroundColor(AppColors.foregroundPrimary)
+
+                if let detail {
+                    Text(detail)
+                        .font(AppFonts.overusedGroteskMedium(size: 14))
+                        .foregroundColor(AppColors.foregroundSecondary)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 20)
+            .padding(.vertical, 16)
+            .background(AppColors.backgroundWhite)
+            .cornerRadius(12)
+            .padding(8)
+
+            if let error {
+                Text(error)
+                    .font(AppFonts.overusedGroteskMedium(size: 13))
+                    .foregroundColor(AppColors.destructiveForeground)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 6)
+            }
+
+            HStack {
+                Text(prompt)
+                    .font(AppFonts.overusedGroteskMedium(size: 15))
+                    .foregroundColor(AppColors.foregroundPrimary)
+                Spacer(minLength: 8)
+                AppButton(
+                    title: actionTitle,
+                    action: action,
+                    hierarchy: .textPrimary,
+                    size: .tripleExtraSmall,
+                    textColorOverride: actionColor
+                )
+                .fixedSize()
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, 4)
+            .padding(.bottom, 14)
+        }
+        .background(AppColors.surfacePrimary)
+        .cornerRadius(16)
     }
 }
 

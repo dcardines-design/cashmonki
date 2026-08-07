@@ -290,7 +290,10 @@ final class AskChatService {
                  ],
                  required: ["periods"]),
             tool("get_budgets",
-                 "Fetch the user's budgets (category, limit, period, spent so far this period, remaining). Real data — use before answering any budget question.",
+                 "Fetch the user's budgets (id, category, limit, period, currency, active, spent so far this period, remaining). Paused budgets are included with active=false. Real data — use before answering any budget question, and before proposing a budget edit or deletion (its \"id\" is the only valid target).",
+                 [:]),
+            tool("get_subscriptions",
+                 "Fetch the user's recurring items / subscriptions (id, name, amount, currency, category, frequency, next due date, active, auto_add). Paused ones are included with active=false. Real data — use before answering any recurring/subscription question, and before proposing an edit or deletion (its \"id\" is the only valid target).",
                  [:]),
             tool("convert_currency",
                  "Convert an amount between currencies using the app's live rates. Use for any currency question — never estimate rates yourself.",
@@ -341,6 +344,12 @@ final class AskChatService {
 
         case "get_budgets":
             let rows = budgetRows()
+            cachedRows[callID] = rows
+            lastRows = rows
+            return encodeRows(rows)
+
+        case "get_subscriptions":
+            let rows = subscriptionRows()
             cachedRows[callID] = rows
             lastRows = rows
             return encodeRows(rows)
@@ -504,8 +513,9 @@ final class AskChatService {
     private func budgetRows() -> [[String: String]] {
         let calendar = Calendar.current
         let now = Date()
+        // Paused budgets are listed too (with active=false) — otherwise the model
+        // could pause one and never see it again to resume it.
         return UserManager.shared.currentUser.budgets
-            .filter { $0.isActive }
             .map { budget in
                 // Spent = expenses in this budget's category over the current period.
                 let periodStart: Date
@@ -519,11 +529,35 @@ final class AskChatService {
                     .filter { $0.categoryId == budget.categoryId && $0.amount < 0 && $0.date >= periodStart }
                     .reduce(0) { $0 + abs($1.amount) }
                 return [
+                    "id": budget.id.uuidString,
                     "category": budget.categoryName,
+                    "category_id": budget.categoryId.uuidString,
                     "period": budget.period.rawValue,
+                    "currency": budget.currency.rawValue,
+                    "active": budget.isActive ? "true" : "false",
                     "limit": String(format: "%.2f", budget.amount),
                     "spent": String(format: "%.2f", spent),
                     "remaining": String(format: "%.2f", budget.amount - spent)
+                ]
+            }
+    }
+
+    private func subscriptionRows() -> [[String: String]] {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        return SubscriptionManager.persistedSubscriptions()
+            .sorted { $0.nextDueDate < $1.nextDueDate }
+            .map { sub in
+                [
+                    "id": sub.id.uuidString,
+                    "name": sub.name,
+                    "amount": String(format: "%.2f", sub.amount),
+                    "currency": sub.currency.rawValue,
+                    "category": sub.category,
+                    "frequency": sub.frequency.rawValue,
+                    "next_due": formatter.string(from: sub.nextDueDate),
+                    "active": sub.isActive ? "true" : "false",
+                    "auto_add": sub.autoAddTransaction ? "true" : "false"
                 ]
             }
     }
@@ -651,6 +685,216 @@ final class AskChatService {
         return true
     }
 
+    // MARK: - Confirmed budget writes (user-initiated only)
+
+    enum BudgetWriteError: LocalizedError {
+        case noWallet
+        case unknownCategory
+        case notFound
+
+        var errorDescription: String? {
+            switch self {
+            case .noWallet: return "Pick a wallet first, then try again."
+            case .unknownCategory: return "That category no longer exists."
+            case .notFound: return "That budget no longer exists."
+            }
+        }
+    }
+
+    /// Budgets are scoped to a parent category — a subcategory id folds up to
+    /// its parent so the budget covers the whole group (as the Budgets page does).
+    func resolveBudgetCategory(_ categoryId: UUID) -> (id: UUID, name: String)? {
+        guard let result = CategoriesManager.shared.findCategoryOrSubcategoryById(categoryId) else { return nil }
+        if let category = result.category { return (category.id, category.name) }
+        if let parent = result.parent { return (parent.id, parent.name) }
+        if let subcategory = result.subcategory { return (subcategory.id, subcategory.name) }
+        return nil
+    }
+
+    /// Creates the budget after the user taps Confirm on a budget draft card.
+    func createBudget(categoryId: UUID, amount: Double, currency: Currency, period: BudgetPeriod, applyToAllPeriods: Bool) throws -> Budget {
+        guard let walletId = AccountManager.shared.selectedSubAccountId ?? UserManager.shared.currentUser.defaultSubAccount?.id else {
+            throw BudgetWriteError.noWallet
+        }
+        guard let category = resolveBudgetCategory(categoryId) else {
+            throw BudgetWriteError.unknownCategory
+        }
+
+        let budget = Budget(
+            walletId: walletId,
+            categoryId: category.id,
+            categoryName: category.name,
+            amount: amount,
+            currency: currency,
+            period: period,
+            applyToAllPeriods: applyToAllPeriods
+        )
+        UserManager.shared.addBudget(budget)
+        AnalyticsManager.shared.track(.budgetCreated, properties: [
+            "category": category.name,
+            "amount": amount,
+            "currency": currency.rawValue,
+            "period": period.rawValue,
+            "apply_to_all_periods": applyToAllPeriods,
+            "source": "ask_chat"
+        ])
+        print("✅ AskChat: budget created — \(category.name) \(amount) \(currency.rawValue)/\(period.rawValue)")
+        return budget
+    }
+
+    /// Applies a confirmed edit to an existing budget. Only the supplied fields change.
+    @discardableResult
+    func updateBudget(id: UUID, amount: Double?, currency: Currency?, period: BudgetPeriod?, isActive: Bool?) throws -> Budget {
+        guard let existing = UserManager.shared.currentUser.budgets.first(where: { $0.id == id }) else {
+            throw BudgetWriteError.notFound
+        }
+        let updated = Budget(
+            id: existing.id,
+            walletId: existing.walletId,
+            categoryId: existing.categoryId,
+            categoryName: existing.categoryName,
+            amount: amount ?? existing.amount,
+            currency: currency ?? existing.currency,
+            period: period ?? existing.period,
+            applyToAllPeriods: existing.applyToAllPeriods,
+            isActive: isActive ?? existing.isActive,
+            createdAt: existing.createdAt
+        )
+        UserManager.shared.updateBudget(updated)
+        print("✅ AskChat: budget updated — \(updated.categoryName) \(updated.amount) \(updated.currency.rawValue)/\(updated.period.rawValue)")
+        return updated
+    }
+
+    /// Deletes a confirmed budget. Returns the removed budget for the receipt line.
+    @discardableResult
+    func deleteBudget(id: UUID) throws -> Budget {
+        guard let existing = UserManager.shared.currentUser.budgets.first(where: { $0.id == id }) else {
+            throw BudgetWriteError.notFound
+        }
+        UserManager.shared.deleteBudget(withId: id)
+        print("🗑️ AskChat: budget deleted — \(existing.categoryName)")
+        return existing
+    }
+
+    // MARK: - Confirmed recurring/subscription writes (user-initiated only)
+
+    enum SubscriptionWriteError: LocalizedError {
+        case notFound
+
+        var errorDescription: String? {
+            switch self {
+            case .notFound: return "That recurring item no longer exists."
+            }
+        }
+    }
+
+    /// Category for a recurring item: a real category if the id resolves, else
+    /// the app's own "Subscriptions" bucket (what AddSubscriptionSheet defaults to).
+    private func resolveSubscriptionCategory(_ categoryId: UUID?) -> (id: UUID?, name: String) {
+        guard let categoryId, let result = CategoriesManager.shared.findCategoryOrSubcategoryById(categoryId) else {
+            return (nil, "Subscriptions")
+        }
+        if let subcategory = result.subcategory { return (categoryId, subcategory.name) }
+        if let category = result.category { return (categoryId, category.name) }
+        return (nil, "Subscriptions")
+    }
+
+    /// Creates the recurring item after the user taps Confirm. Free-tier capacity
+    /// is checked by the caller (it shows the paywall instead).
+    @MainActor
+    @discardableResult
+    func createSubscription(
+        name: String,
+        amount: Double,
+        currency: Currency,
+        categoryId: UUID?,
+        frequency: RecurringFrequency,
+        startDate: Date,
+        autoAdd: Bool,
+        note: String?
+    ) -> Subscription {
+        let category = resolveSubscriptionCategory(categoryId)
+        let subscription = Subscription(
+            name: name,
+            amount: amount,
+            currency: currency,
+            categoryId: category.id,
+            category: category.name,
+            frequency: frequency,
+            // Same convention as AddSubscriptionSheet: the first charge lands on
+            // the start date, so the NEXT one is one interval later.
+            nextDueDate: frequency.nextOccurrence(from: startDate),
+            autoAddTransaction: autoAdd,
+            walletId: AccountManager.shared.selectedSubAccountId ?? AccountManager.shared.currentSubAccount?.id,
+            note: note,
+            createdAt: startDate
+        )
+        SubscriptionManager.shared.addSubscription(subscription)
+        AnalyticsManager.shared.track(.subscriptionCreated, properties: [
+            "name": name,
+            "amount": amount,
+            "currency": currency.rawValue,
+            "frequency": frequency.rawValue,
+            "auto_add": autoAdd,
+            "source": "ask_chat"
+        ])
+        print("✅ AskChat: subscription created — \(name) \(amount) \(currency.rawValue)/\(frequency.rawValue)")
+        return subscription
+    }
+
+    /// Applies a confirmed edit. Only the supplied fields change; changing the
+    /// frequency re-bases the next due date so it can't sit in the old cadence.
+    @MainActor
+    @discardableResult
+    func updateSubscription(
+        id: UUID,
+        name: String?,
+        amount: Double?,
+        currency: Currency?,
+        categoryId: UUID?,
+        frequency: RecurringFrequency?,
+        nextDueDate: Date?,
+        autoAdd: Bool?,
+        isActive: Bool?,
+        note: String?
+    ) throws -> Subscription {
+        guard var subscription = SubscriptionManager.shared.subscriptions.first(where: { $0.id == id }) else {
+            throw SubscriptionWriteError.notFound
+        }
+
+        if let name { subscription.name = name }
+        if let amount { subscription.amount = amount }
+        if let currency { subscription.currency = currency }
+        if let categoryId {
+            let category = resolveSubscriptionCategory(categoryId)
+            subscription.categoryId = category.id
+            subscription.category = category.name
+        }
+        if let frequency, frequency != subscription.frequency {
+            subscription.frequency = frequency
+            subscription.nextDueDate = frequency.nextOccurrence(from: subscription.lastGeneratedDate ?? Date())
+        }
+        if let nextDueDate { subscription.nextDueDate = nextDueDate }
+        if let autoAdd { subscription.autoAddTransaction = autoAdd }
+        if let isActive { subscription.isActive = isActive }
+        if let note { subscription.note = note }
+
+        SubscriptionManager.shared.updateSubscription(subscription)
+        print("✅ AskChat: subscription updated — \(subscription.name) \(subscription.amount) \(subscription.frequency.rawValue)")
+        return subscription
+    }
+
+    /// Deletes a confirmed recurring item. Returns it for the receipt line.
+    @MainActor
+    @discardableResult
+    func deleteSubscription(id: UUID) throws -> Subscription {
+        guard let subscription = SubscriptionManager.shared.subscriptions.first(where: { $0.id == id }) else {
+            throw SubscriptionWriteError.notFound
+        }
+        SubscriptionManager.shared.deleteSubscription(subscription)
+        return subscription
+    }
+
     // MARK: - System prompt
 
     private var systemPrompt: String {
@@ -667,6 +911,8 @@ final class AskChatService {
 
         3. {"type": "transaction_draft", "amount": 12.5, "currency": "\(currency)", "merchant": "...", "date": "yyyy-MM-dd", "note": "...", "suggested_categories": [{"id": "...", "name": "...", "confidence": 0.9}]} — when the user asks to add/log a transaction (e.g. "add $12 lunch at Chipotle yesterday"). RULES: amount is required — if it's missing or ambiguous, reply with a short text question instead of guessing; date defaults to today, resolve words like "yesterday"; note only if the user said something worth keeping; call get_categories first and suggest the best 1-3 matches from the REAL list (use their exact ids and names — never make up categories). You never create the transaction yourself — the app asks the user to confirm.
 
+        3b. {"type": "transaction_draft_batch", "title": "Grocery run", "transactions": [{...}, {...}]} — when the user asks to log SEVERAL transactions in one go (e.g. "add 300 vegetables, 150 milk and 90 bread"). Each entry follows the transaction_draft schema above (2-10 of them, each needs its own amount and suggested_categories). The app renders one card with a row per transaction, each addable on its own plus an Add all button. Use a single transaction_draft when there's only one.
+
         5. {"type": "transaction", "transaction_ids": ["...", "..."]} — when the user asks to see 1 to 3 specific transactions (e.g. "show my last grab ride"). Call get_recent_transactions first and use the exact "id" values from the tool result. The app renders the transaction cards itself. For 4 or more transactions use a table instead — never this type.
 
         4. {"type": "transaction_update", "transaction_id": "...", "amount": 150, "currency": "...", "merchant": "...", "date": "yyyy-MM-dd", "note": "...", "category_id": "..."} — when the user asks to change/edit existing transactions (e.g. "change that Jollibee lunch to 150"). For the SAME change applied to several transactions (e.g. "move all my Grab rides to Transportation"), use "transaction_ids": ["...", "..."] (max 10) instead of transaction_id. RULES: call get_recent_transactions first and use the exact "id" values from the tool result — never invent ids; include ONLY the fields being changed, omit everything else; if a category change is requested, also call get_categories and use its exact id; if it's unclear which transactions the user means, ask a short text question instead of guessing. Different changes to different transactions = separate turns. The app shows the change and asks the user to confirm — you never apply it yourself. Never include the "id" column when showing tables.
@@ -679,6 +925,18 @@ final class AskChatService {
 
         9. {"type": "category_draft", "name": "Fast Food", "emoji": "🍔", "parent": "Dining"?, "category_type": "expense"} — when the user asks for category ideas, wants to organize their spending, or a transaction clearly fits no existing category. RULES: call get_categories first and only suggest something that does NOT already exist; "parent" must be an EXACT existing category name (omit for a top-level category); one suggestion per message; pick a fitting emoji. The app asks the user to confirm and handles the Pro paywall — you never create it yourself.
 
+        10. {"type": "budget_draft", "category_id": "...", "category_name": "Food", "amount": 5000, "currency": "\(currency)", "period": "monthly", "apply_to_all_periods": true} — when the user asks to set/create a budget (e.g. "budget 5000 a month for food"). RULES: call get_categories first and use an exact id from it; call get_budgets too and, if that category already has a budget, propose a budget_update instead of a second budget; period is one of daily, weekly, monthly, quarterly, yearly (default monthly); if the amount or the category is unclear, ask a short text question instead of guessing. The app asks the user to confirm — you never create it yourself.
+
+        11. {"type": "budget_update", "budget_id": "...", "amount": 6000, "currency": "...", "period": "monthly", "is_active": true} — when the user asks to change an existing budget (e.g. "raise my food budget to 6000", "pause my shopping budget"). For the SAME change across several budgets use "budget_ids": ["...", "..."] (max 10). RULES: call get_budgets first and use its exact "id" values — never invent ids; include ONLY the fields being changed; is_active false pauses a budget instead of deleting it. The app asks the user to confirm.
+
+        12. {"type": "budget_delete", "budget_ids": ["...", "..."]} — when the user asks to remove/delete budgets (max 10). RULES: call get_budgets first and use exact "id" values; if it's unclear which budget they mean, ask a short text question. The app asks the user to confirm — you never delete anything yourself. Prefer budget_update with "is_active": false when the user says pause or stop rather than delete.
+
+        13. {"type": "subscription_draft", "name": "Netflix", "amount": 549, "currency": "\(currency)", "category_id": "...", "frequency": "monthly", "start_date": "yyyy-MM-dd", "auto_add": true, "note": "..."} — when the user asks to track something recurring (e.g. "add my Netflix, 549 monthly", "I pay 2000 rent every month"). RULES: call get_subscriptions first and, if that item already exists, propose a subscription_update instead of a duplicate; call get_categories and use an exact id (omit category_id and it files under Subscriptions); frequency is daily, weekly, monthly, quarterly or yearly (default monthly); start_date defaults to today; auto_add true means each due date creates the transaction for them. If the amount or how often is unclear, ask a short text question. The app asks the user to confirm and handles the free-plan limit.
+
+        14. {"type": "subscription_update", "subscription_id": "...", "amount": 649, "name": "...", "frequency": "...", "next_due_date": "yyyy-MM-dd", "category_id": "...", "auto_add": true, "is_active": true, "note": "..."} — when the user asks to change a recurring item ("Netflix went up to 649", "move my rent to the 5th", "stop auto adding my gym"). For the SAME change across several use "subscription_ids": ["...", "..."] (max 10). RULES: call get_subscriptions first and use its exact "id" values — never invent ids; include ONLY the fields being changed; is_active false pauses it, which is what "pause", "stop tracking" or "cancel for now" should map to.
+
+        15. {"type": "subscription_delete", "subscription_ids": ["...", "..."]} — when the user asks to remove recurring items for good (max 10). RULES: call get_subscriptions first and use exact "id" values; prefer subscription_update with "is_active": false unless they clearly want it gone. The app asks the user to confirm.
+
         For currency questions ("how much is 4600 PHP in USD?"), call convert_currency and answer with a text message using its result — never estimate exchange rates yourself.
 
         Table, chart, and stat messages may include "followups": ["...", "..."] — 2-3 short suggested next questions the user might tap (e.g. "Top 5 only", "Compare to last month"). Text replies may use simple markdown (**bold**, *italic*); no headings or code blocks.
@@ -688,6 +946,10 @@ final class AskChatService {
         CRITICAL: Output ONE JSON object and nothing else — no prose or explanation before or after it, and never repeat the same answer as both prose and a JSON object. When you ask a question, put ALL of your wording inside the "text" field of a single {"type": "text", "text": "...", "choices": ["...", "..."]} object; do not write the question as prose and then also emit JSON.
 
         CRITICAL: The conversation history may contain parenthetical app records like (App rendered a transaction confirmation card for 100 PHP Coffee, awaiting the user's Confirm.). These describe UI the app ALREADY showed — they are NOT a reply format and NOT an example for you to follow. NEVER copy, echo, or paraphrase them, and never write a bracketed or parenthetical draft marker yourself. To propose a transaction you MUST emit a fresh {"type": "transaction_draft", ...} JSON object with real values.
+
+        CRITICAL: Never show a raw id ("id", "budget_id", "category_id") as a table column — ids are for targeting, not for reading.
+
+        CRITICAL: History may contain PENDING card records like (App is showing a PENDING transaction card, not saved yet: 100 PHP Coffee.). Those propose something the user has NOT approved — nothing was written. If the user then asks to change one ("make it 150", "that's food not coffee", "drop the milk one"), emit a FRESH card of the same type carrying the FULL corrected proposal — every field the pending card had, not just the changed one, INCLUDING suggested_categories (call get_categories again if you need the ids). A revision that drops the category loses it. The app replaces the pending card with your new one. Never answer such a request with text alone claiming it was updated, and never treat a pending card as saved data.
 
         CRITICAL: History may also contain app confirmation lines like "✅ Added 100 PHP to Coffee.", "🗑️ Deleted 2 transactions.", or "✅ Added 🍔 Fast Food as a new category." — these are the APP's record of an action the user ALREADY approved by tapping Confirm on a card. You never complete actions yourself. NEVER write a "✅ Added...", "🗑️ Deleted...", or similar completion line — doing so falsely tells the user something was saved when nothing was. To act, emit the matching draft/update/delete JSON and let the app confirm and record it.
         """
