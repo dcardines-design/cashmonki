@@ -85,6 +85,18 @@ enum AnalyticsEvent: String {
     case subscriptionCancelled = "subscription_cancelled"
     case trialStarted = "trial_started"
 
+    // Ask (AI chat)
+    case askMessageSent = "ask_message_sent"
+    case askReplyReceived = "ask_reply_received"
+    case askReplyFailed = "ask_reply_failed"
+    case askReplyUnrenderable = "ask_reply_unrenderable"
+    case askLimitReached = "ask_limit_reached"
+    case askCardShown = "ask_card_shown"
+    case askCardConfirmed = "ask_card_confirmed"
+    case askCardCancelled = "ask_card_cancelled"
+    case askCardSuperseded = "ask_card_superseded"
+    case askBatchRowsAdded = "ask_batch_rows_added"
+
     // Settings
     case settingsOpened = "settings_opened"
     case languageChanged = "language_changed"
@@ -145,6 +157,38 @@ class PostHogManager: ObservableObject {
     @Published var isSessionReplayEnabled: Bool = true
 
     // MARK: - Initialization
+
+    // MARK: - Build environment
+
+    /// Where this build came from: "debug" (Xcode/simulator), "testflight" (sandbox
+    /// receipt) or "app_store". Registered as a super property so every event
+    /// carries it and dashboards can exclude beta traffic.
+    static var buildEnvironment: String {
+        #if DEBUG
+        return "debug"
+        #elseif targetEnvironment(simulator)
+        return "debug"
+        #else
+        // TestFlight installs ship a "sandboxReceipt"; App Store installs a "receipt".
+        if Bundle.main.appStoreReceiptURL?.lastPathComponent == "sandboxReceipt" {
+            return "testflight"
+        }
+        return "app_store"
+        #endif
+    }
+
+    /// True only for real App Store installs.
+    static var isProductionInstall: Bool { buildEnvironment == "app_store" }
+
+    /// Stamps every event with the build environment so dashboards can exclude
+    /// TestFlight/debug traffic. Called right after PostHogSDK.setup().
+    func registerBuildEnvironment() {
+        PostHogSDK.shared.register([
+            "app_environment": Self.buildEnvironment,
+            "is_production_install": Self.isProductionInstall
+        ])
+        print("📊 PostHog: app_environment=\(Self.buildEnvironment)")
+    }
 
     private init() {
         // Re-register internal flag on init if device was previously marked
@@ -375,7 +419,12 @@ class PostHogManager: ObservableObject {
 
     @Published var isSessionReplayEnabled: Bool = false
 
+    static var buildEnvironment: String { "unavailable" }
+    static var isProductionInstall: Bool { false }
+
     private init() {}
+
+    func registerBuildEnvironment() {}
 
     func configure() {
         print("❌ PostHog: SDK not available - add PostHog package via SPM")

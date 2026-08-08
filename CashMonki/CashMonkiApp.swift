@@ -539,12 +539,14 @@ struct CashMonkiApp: App {
 
         PostHogSDK.shared.setup(config)
 
-        // Capture test event and flush immediately
+        // Super property on every event: "app_store" / "testflight" / "debug".
+        // Dashboards filter on this so beta traffic never lands in live numbers.
+        PostHogManager.shared.registerBuildEnvironment()
+
         PostHogSDK.shared.capture("app_launched")
-        PostHogSDK.shared.capture("test_event")
         PostHogSDK.shared.flush()
 
-        print("✅ CashMonkiApp: PostHog initialized and test events sent!")
+        print("✅ CashMonkiApp: PostHog initialized (\(PostHogManager.buildEnvironment))")
     }
 
     // MARK: - Facebook SDK Initialization
