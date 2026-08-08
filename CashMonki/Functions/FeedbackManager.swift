@@ -2,9 +2,9 @@
 //  FeedbackManager.swift
 //  CashMonki
 //
-//  In-memory store for the Feedback board. Seeds mock data matching the design
-//  and exposes all mutations (add / upvote / comment / reply / edit / delete /
-//  approve / set-status). Swap the storage layer for Firestore when auth returns.
+//  Store for the Feedback board, backed by the Firestore `feedback_items`
+//  collection. Exposes all mutations (add / upvote / comment / reply / edit /
+//  delete / approve / set-status), each written through to the remote doc.
 //
 
 import SwiftUI
@@ -32,7 +32,8 @@ final class FeedbackManager: ObservableObject {
 
     private init() {
         self.isAdminMode = UserDefaults.standard.bool(forKey: Self.adminModeKey)
-        seedMockData()
+        // No local seeding: mock rows rendered for the second before the first
+        // Firestore snapshot arrived, then vanished. Firestore is the only source.
         // Firebase may not be configured yet at first singleton touch.
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
             self?.startSync()
@@ -216,9 +217,8 @@ final class FeedbackManager: ObservableObject {
     }
     #endif
 
-    /// Attaches the live listener. Mock seeds stay on screen until the first
-    /// snapshot arrives; an empty remote collection gets seeded once so the
-    /// board isn't blank on first cloud run.
+    /// Attaches the live listener. The board starts empty and only ever shows
+    /// what Firestore sends — an empty collection means an empty board.
     func startSync() {
         #if canImport(FirebaseFirestore)
         guard !isSyncing, let db else {
@@ -302,59 +302,6 @@ final class FeedbackManager: ObservableObject {
         }
     }
 
-    // MARK: - Mock seed data
-
-    private func seedMockData() {
-        let now = Date()
-        func hoursAgo(_ h: Int) -> Date { now.addingTimeInterval(TimeInterval(-h * 3600)) }
-
-        items = [
-            FeedbackItem(
-                title: "I want this feature",
-                detail: "This is a subtext of description of the feature and it cuts into two lines only...",
-                authorEmail: "dcardines03@example.com",
-                authorIsCreator: true,
-                createdAt: hoursAgo(12),
-                upvoters: ["liam@example.com", "mia@example.com", "noah@example.com"],
-                approved: true,
-                status: .pending,
-                comments: []
-            ),
-            FeedbackItem(
-                title: "I want this feature",
-                detail: "This is a subtext of description of the feature and it cuts into two lines only...",
-                authorEmail: "dcardines03@example.com",
-                authorIsCreator: true,
-                createdAt: hoursAgo(12),
-                upvoters: [],
-                approved: true,
-                status: .done,
-                comments: []
-            ),
-            FeedbackItem(
-                title: "I want this feature",
-                detail: "This is a subtext of description of the feature and it cuts into two lines only...",
-                authorEmail: "carlsdungeon_cralwer@example.com",
-                authorIsCreator: false,
-                createdAt: hoursAgo(12),
-                upvoters: [],
-                approved: true,
-                status: .inProgress,
-                comments: []
-            ),
-            FeedbackItem(
-                title: "I want this feature",
-                detail: "This is a subtext of description of the feature and it cuts into two lines only...",
-                authorEmail: "carlsdungeon_cralwer@example.com",
-                authorIsCreator: false,
-                createdAt: hoursAgo(12),
-                upvoters: ["liam@example.com", "mia@example.com", "noah@example.com", "ava@example.com"],
-                approved: false, // shows in admin "New" tab
-                status: .pending,
-                comments: []
-            ),
-        ]
-    }
 }
 
 // MARK: - Relative time formatting ("12h ago")
