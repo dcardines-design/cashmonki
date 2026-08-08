@@ -5,6 +5,29 @@ All notable changes to CashMonki will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.7.1] - 2026-08-08
+
+### Fixed
+- **Placeholder posts flashed on the feedback board.** `FeedbackManager` seeded four mock items in
+  its initialiser, so opening the board rendered fake posts until the first Firestore snapshot
+  replaced them a second later. The seed was not behind `#if DEBUG`, so App Store users saw them
+  too. Firestore is now the only source; an empty collection means an empty board.
+
+### Internal
+- **Ask is instrumented.** Ten events cover the flow: message sent (typed vs starter chip), reply
+  received with latency and reply type, reply failed, unrenderable reply, daily limit reached, card
+  shown, confirmed, cancelled, superseded by a revision, and batch rows added.
+- **Feedback board is instrumented.** Submitted, upvoted, commented, deleted, approved,
+  status changed.
+- **Events that were declared but never fired now fire** — wallet switched/edited, budget edited,
+  currency changed, language changed, settings opened, transaction viewed, roast attached, trial
+  started, subscription cancelled, sync failed, and onboarding skipped on all eight Skip buttons
+  (seven of which called the same handler as Continue, making skips invisible).
+- **Every event carries `app_environment`** (`app_store` / `testflight` / `debug`) plus
+  `is_production_install`, so TestFlight activity no longer lands in production numbers.
+- Analytics payloads carry shape only — counts, lengths, timings and flags. No user content.
+- Removed a `test_event` capture that fired on every launch.
+
 ## [3.7.0] - 2026-08-07
 
 ### Added
