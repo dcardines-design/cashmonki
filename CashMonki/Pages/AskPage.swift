@@ -39,6 +39,31 @@ struct AskDisplayMessage: Identifiable, Codable {
         case subscriptionUpdate(AskSubscriptionUpdate)
         case subscriptionDelete(AskSubscriptionDelete)
 
+        /// Stable snake_case name for analytics, so card funnels can be split by
+        /// the kind of proposal without leaking any transaction content.
+        var analyticsName: String {
+            switch self {
+            case .text: return "text"
+            case .systemNote: return "system_note"
+            case .table: return "table"
+            case .draft: return "transaction_draft"
+            case .update: return "transaction_update"
+            case .single: return "transaction_single"
+            case .deleteRequest: return "transaction_delete"
+            case .chart: return "chart"
+            case .stat: return "stat"
+            case .question: return "question"
+            case .categoryDraft: return "category_draft"
+            case .draftBatch: return "transaction_draft_batch"
+            case .budgetDraft: return "budget_draft"
+            case .budgetUpdate: return "budget_update"
+            case .budgetDelete: return "budget_delete"
+            case .subscriptionDraft: return "subscription_draft"
+            case .subscriptionUpdate: return "subscription_update"
+            case .subscriptionDelete: return "subscription_delete"
+            }
+        }
+
         /// Proposals the user hasn't acted on yet. A new one supersedes any
         /// older pending card (see AskChatManager.appendPending).
         var isPending: Bool {
@@ -301,19 +326,38 @@ final class AskChatManager: ObservableObject {
     /// Presents the paywall when a free user hits the daily message limit.
     @Published var showLimitPaywall = false
 
-    func send(_ text: String) {
+    /// Where the message came from, for the Ask funnel: typed vs a starter chip.
+    enum SendSource: String { case typed, starterChip = "starter_chip" }
+
+    /// Start of the in-flight turn, so the reply event can report latency.
+    private var turnStartedAt: Date? = nil
+
+    func send(_ text: String, source: SendSource = .typed) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, !isThinking else { return }
 
         guard DailyUsageManager.shared.canSendChatMessage() else {
             messages.append(AskDisplayMessage(isUser: false, content: .text(Self.limitMessageText)))
             showLimitPaywall = true
+            AnalyticsManager.shared.track(.askLimitReached, properties: [
+                "source": source.rawValue,
+                "turns_in_thread": messages.filter { $0.isUser }.count
+            ])
             return
         }
         DailyUsageManager.shared.recordChatMessage()
 
+        // Message length only — never the text itself, which is financial data.
+        AnalyticsManager.shared.track(.askMessageSent, properties: [
+            "source": source.rawValue,
+            "character_count": trimmed.count,
+            "word_count": trimmed.split(separator: " ").count,
+            "turn_index": messages.filter { $0.isUser }.count
+        ])
+
         messages.append(AskDisplayMessage(isUser: true, content: .text(trimmed)))
         isThinking = true
+        turnStartedAt = Date()
 
         persist()
 
@@ -339,6 +383,10 @@ final class AskChatManager: ObservableObject {
                     self.pendingFinalText = nil
                     self.removeStreamingMessage()
                     self.messages.append(AskDisplayMessage(isUser: false, content: .text("⚠️ \(error.localizedDescription)")))
+                    AnalyticsManager.shared.track(.askReplyFailed, properties: [
+                        "error_message": error.localizedDescription,
+                        "latency_ms": self.elapsedTurnMilliseconds()
+                    ])
                     self.persist()
                 }
             }
@@ -416,9 +464,20 @@ final class AskChatManager: ObservableObject {
         streamingMessageID = nil
     }
 
+    /// Milliseconds since the user's message went out, or 0 if no turn is in flight.
+    private func elapsedTurnMilliseconds() -> Int {
+        guard let start = turnStartedAt else { return 0 }
+        turnStartedAt = nil
+        return Int(Date().timeIntervalSince(start) * 1000)
+    }
+
     private func finish(with reply: AskStructuredMessage) {
         isThinking = false
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        AnalyticsManager.shared.track(.askReplyReceived, properties: [
+            "reply_type": reply.analyticsName,
+            "latency_ms": elapsedTurnMilliseconds()
+        ])
         switch reply {
         case .text(let text):
             // House style: no em dashes in assistant replies.
@@ -504,7 +563,16 @@ final class AskChatManager: ObservableObject {
             // A partly-added batch keeps its remaining rows live; nothing else does.
             if case .draftBatch = message.content, addedBatchRows[message.id]?.isEmpty == false { continue }
             supersededCards.insert(message.id)
+            // A revision retiring an untouched card — the user changed their mind
+            // mid-proposal rather than abandoning Ask.
+            AnalyticsManager.shared.track(.askCardSuperseded, properties: [
+                "card_type": message.content.analyticsName,
+                "replaced_by": content.analyticsName
+            ])
         }
+        AnalyticsManager.shared.track(.askCardShown, properties: [
+            "card_type": content.analyticsName
+        ])
         messages.append(AskDisplayMessage(isUser: false, content: content))
     }
 
@@ -539,6 +607,17 @@ final class AskChatManager: ObservableObject {
         }
     }
 
+    /// One end of the Ask funnel: a proposal card the user acted on. `confirmed`
+    /// false means they dismissed it without a write. Card type is resolved from
+    /// the message so callers stay one-liners.
+    func trackCardResolved(_ messageID: UUID, confirmed: Bool, extra: [String: Any] = [:]) {
+        var properties: [String: Any] = [
+            "card_type": messages.first { $0.id == messageID }?.content.analyticsName ?? "unknown"
+        ]
+        properties.merge(extra) { _, new in new }
+        AnalyticsManager.shared.track(confirmed ? .askCardConfirmed : .askCardCancelled, properties: properties)
+    }
+
     /// Writes the transaction with whatever the user confirmed. Only called
     /// from the draft card's Confirm button — never by the model.
     func confirmDraft(messageID: UUID, amount: Double, currency: Currency, merchant: String?, date: Date, note: String?, categoryId: UUID?, categoryName: String) {
@@ -556,6 +635,7 @@ final class AskChatManager: ObservableObject {
         )
         draftErrors[messageID] = nil
         confirmedDrafts.insert(messageID)
+        trackCardResolved(messageID, confirmed: true)
         let formatted = AskFormat.currency(amount, code: currency.rawValue)
         messages.append(AskDisplayMessage(isUser: false, content: .systemNote("✅ Added \(formatted)\(categoryName.isEmpty ? "" : " to \(categoryName)").")))
         persist()
@@ -563,6 +643,7 @@ final class AskChatManager: ObservableObject {
 
     func cancelDraft(messageID: UUID) {
         confirmedDrafts.insert(messageID) // collapses the card; no write
+        trackCardResolved(messageID, confirmed: false)
         messages.append(AskDisplayMessage(isUser: false, content: .text("Okay, I won't add it.")))
         persist()
     }
@@ -597,6 +678,7 @@ final class AskChatManager: ObservableObject {
         if updatedCount > 0 {
             draftErrors[messageID] = nil
             confirmedDrafts.insert(messageID) // card itself shows the updated state
+            trackCardResolved(messageID, confirmed: true)
         } else {
             draftErrors[messageID] = "Those transactions no longer exist."
         }
@@ -616,6 +698,7 @@ final class AskChatManager: ObservableObject {
         if deleted > 0 {
             draftErrors[messageID] = nil
             confirmedDrafts.insert(messageID)
+            trackCardResolved(messageID, confirmed: true)
             messages.append(AskDisplayMessage(isUser: false, content: .systemNote(deleted > 1 ? "🗑️ Deleted \(deleted) transactions." : "🗑️ Transaction deleted.")))
         } else {
             draftErrors[messageID] = "Those transactions no longer exist."
@@ -625,6 +708,7 @@ final class AskChatManager: ObservableObject {
 
     func cancelDelete(messageID: UUID) {
         confirmedDrafts.insert(messageID)
+        trackCardResolved(messageID, confirmed: false)
         messages.append(AskDisplayMessage(isUser: false, content: .text("Okay, nothing deleted.")))
         persist()
     }
@@ -646,6 +730,7 @@ final class AskChatManager: ObservableObject {
         if success {
             draftErrors[messageID] = nil
             confirmedDrafts.insert(messageID)
+            trackCardResolved(messageID, confirmed: true)
             let label = draft.parent.map { "subcategory under \($0)" } ?? "category"
             messages.append(AskDisplayMessage(isUser: false, content: .systemNote("✅ Added \(draft.emoji ?? "") \(draft.name) as a new \(label).")))
         } else {
@@ -656,12 +741,14 @@ final class AskChatManager: ObservableObject {
 
     func cancelCategoryDraft(messageID: UUID) {
         confirmedDrafts.insert(messageID)
+        trackCardResolved(messageID, confirmed: false)
         messages.append(AskDisplayMessage(isUser: false, content: .text("Okay, no new category.")))
         persist()
     }
 
     func cancelUpdate(messageID: UUID) {
         confirmedDrafts.insert(messageID)
+        trackCardResolved(messageID, confirmed: false)
         messages.append(AskDisplayMessage(isUser: false, content: .text("Okay, no changes made.")))
         persist()
     }
@@ -669,6 +756,7 @@ final class AskChatManager: ObservableObject {
     /// Retires a pending card with a short reply. Shared by the budget cards.
     func cancelPending(messageID: UUID, note: String) {
         confirmedDrafts.insert(messageID)
+        trackCardResolved(messageID, confirmed: false)
         messages.append(AskDisplayMessage(isUser: false, content: .text(note)))
         persist()
     }
@@ -699,8 +787,16 @@ final class AskChatManager: ObservableObject {
 
         guard !addedNames.isEmpty else { return }
         draftErrors[messageID] = nil
+        // "Add all" vs picking rows one at a time is the interesting split here.
+        AnalyticsManager.shared.track(.askBatchRowsAdded, properties: [
+            "rows_added": addedNames.count,
+            "rows_total": batch.transactions.count,
+            "rows_done": addedBatchRows[messageID]?.count ?? addedNames.count,
+            "added_all_at_once": addedNames.count == batch.transactions.count
+        ])
         if addedBatchRows[messageID]?.count == batch.transactions.count {
             confirmedDrafts.insert(messageID)
+            trackCardResolved(messageID, confirmed: true)
         }
         let note = addedNames.count == 1
             ? "✅ Added \(addedNames[0])."
@@ -716,6 +812,7 @@ final class AskChatManager: ObservableObject {
         draftErrors[messageID] = nil
         if addedBatchRows[messageID]?.count == rowCount {
             confirmedDrafts.insert(messageID)
+            trackCardResolved(messageID, confirmed: true)
         }
         messages.append(AskDisplayMessage(isUser: false, content: .systemNote(receipt)))
         persist()
@@ -738,6 +835,7 @@ final class AskChatManager: ObservableObject {
             )
             draftErrors[messageID] = nil
             confirmedDrafts.insert(messageID)
+            trackCardResolved(messageID, confirmed: true)
             let formatted = AskFormat.currency(budget.amount, code: budget.currency.rawValue)
             messages.append(AskDisplayMessage(isUser: false, content: .systemNote("✅ Set a \(budget.period.displayName.lowercased()) budget of \(formatted) for \(budget.categoryName).")))
             persist()
@@ -772,6 +870,7 @@ final class AskChatManager: ObservableObject {
         }
         draftErrors[messageID] = nil
         confirmedDrafts.insert(messageID)
+        trackCardResolved(messageID, confirmed: true)
         let receipt: String
         if updated.count > 1 {
             receipt = "✅ Updated \(updated.count) budgets."
@@ -798,6 +897,7 @@ final class AskChatManager: ObservableObject {
         }
         draftErrors[messageID] = nil
         confirmedDrafts.insert(messageID)
+        trackCardResolved(messageID, confirmed: true)
         messages.append(AskDisplayMessage(isUser: false, content: .systemNote(
             deleted.count > 1 ? "🗑️ Deleted \(deleted.count) budgets." : "🗑️ Deleted the \(first.categoryName) budget."
         )))
@@ -824,6 +924,7 @@ final class AskChatManager: ObservableObject {
         )
         draftErrors[messageID] = nil
         confirmedDrafts.insert(messageID)
+        trackCardResolved(messageID, confirmed: true)
         let formatted = AskFormat.currency(subscription.amount, code: subscription.currency.rawValue)
         messages.append(AskDisplayMessage(isUser: false, content: .systemNote(
             "✅ Tracking \(subscription.name) at \(formatted) \(subscription.frequency.displayName.lowercased())."
@@ -867,6 +968,7 @@ final class AskChatManager: ObservableObject {
         }
         draftErrors[messageID] = nil
         confirmedDrafts.insert(messageID)
+        trackCardResolved(messageID, confirmed: true)
         let receipt: String
         if updated.count > 1 {
             receipt = "✅ Updated \(updated.count) recurring items."
@@ -895,6 +997,7 @@ final class AskChatManager: ObservableObject {
         }
         draftErrors[messageID] = nil
         confirmedDrafts.insert(messageID)
+        trackCardResolved(messageID, confirmed: true)
         messages.append(AskDisplayMessage(isUser: false, content: .systemNote(
             deleted.count > 1 ? "🗑️ Deleted \(deleted.count) recurring items." : "🗑️ Deleted \(first.name)."
         )))
@@ -1246,7 +1349,7 @@ struct AskPage: View {
         // Rounded-square secondary button: white, border, hard offset shadow.
         AppButton(
             title: text,
-            action: { chat.send(String(text.dropFirst(2))) }, // strip the emoji prefix
+            action: { chat.send(String(text.dropFirst(2)), source: .starterChip) }, // strip the emoji prefix
             hierarchy: .secondary,
             size: .tripleExtraSmall
         )
@@ -1747,6 +1850,7 @@ private struct AskDraftCard: View {
                 UserManager.shared.addTransaction(newTxn)
                 chat.draftErrors[messageID] = nil
                 chat.confirmedDrafts.insert(messageID)
+                chat.trackCardResolved(messageID, confirmed: true, extra: ["via": "edit_sheet"])
                 chat.messages.append(AskDisplayMessage(isUser: false, content: .systemNote("✅ Added \(AskFormat.currencyWithSymbol(abs(newTxn.amount)))\(newTxn.category.isEmpty ? "" : " to \(newTxn.category)").")))
             }
             .presentationDetents([.fraction(0.98)])

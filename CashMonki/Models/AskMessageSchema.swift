@@ -31,6 +31,29 @@ enum AskStructuredMessage {
     case subscriptionDraft(AskSubscriptionDraft)
     case subscriptionUpdate(AskSubscriptionUpdate)
     case subscriptionDelete(AskSubscriptionDelete)
+
+    /// Stable snake_case name for analytics — the shape of the reply, never its content.
+    var analyticsName: String {
+        switch self {
+        case .text: return "text"
+        case .question: return "question"
+        case .table: return "table"
+        case .transactionDraft: return "transaction_draft"
+        case .transactionDraftBatch: return "transaction_draft_batch"
+        case .transactionUpdate: return "transaction_update"
+        case .transaction: return "transaction_single"
+        case .transactionDelete: return "transaction_delete"
+        case .chart: return "chart"
+        case .stat: return "stat"
+        case .categoryDraft: return "category_draft"
+        case .budgetDraft: return "budget_draft"
+        case .budgetUpdate: return "budget_update"
+        case .budgetDelete: return "budget_delete"
+        case .subscriptionDraft: return "subscription_draft"
+        case .subscriptionUpdate: return "subscription_update"
+        case .subscriptionDelete: return "subscription_delete"
+        }
+    }
 }
 
 // MARK: - Recurring / subscription drafts
@@ -504,7 +527,21 @@ enum AskMessageDecoder {
     /// hides whatever the model was actually trying to say.
     private static func malformed(_ raw: String) -> AskStructuredMessage {
         print("🔴 AskMessageDecoder: unrenderable reply — \(raw.prefix(500))")
+        // Counted, never contented: the envelope type and size are enough to
+        // spot a regression without shipping the user's financial data.
+        AnalyticsManager.shared.track(.askReplyUnrenderable, properties: [
+            "envelope_type": envelopeType(of: raw) ?? "unknown",
+            "raw_length": raw.count
+        ])
         return .text("I couldn't put that answer together. Try asking again.")
+    }
+
+    /// Best-effort read of the `"type"` field, for grouping decode failures.
+    private static func envelopeType(of raw: String) -> String? {
+        guard let data = raw.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return nil }
+        return object["type"] as? String
     }
 
     /// Pulls the first balanced `{…}` block out of mixed prose+JSON content.
