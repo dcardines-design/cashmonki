@@ -82,29 +82,53 @@ final class FeedbackManager: ObservableObject {
             status: .pending
         )
         items.insert(item, at: 0)
+        // Lengths only — the post's wording is the user's, and it syncs to
+        // Firestore anyway where it can be read properly.
+        AnalyticsManager.shared.track(.feedbackSubmitted, properties: [
+            "is_creator": item.authorIsCreator,
+            "auto_approved": item.approved,
+            "title_length": item.title.count,
+            "detail_length": item.detail.count
+        ])
         saveRemote(item)
     }
 
     func toggleUpvote(itemID: UUID) {
         guard let idx = items.firstIndex(where: { $0.id == itemID }) else { return }
         let me = currentUserEmail
-        if items[idx].upvoters.contains(me) {
-            items[idx].upvoters.removeAll { $0 == me }
-        } else {
+        let adding = !items[idx].upvoters.contains(me)
+        if adding {
             items[idx].upvoters.append(me)
+        } else {
+            items[idx].upvoters.removeAll { $0 == me }
         }
+        AnalyticsManager.shared.track(.feedbackUpvoted, properties: [
+            "added": adding,
+            "upvote_count": items[idx].upvoters.count,
+            "is_own_post": items[idx].authorEmail.lowercased() == me
+        ])
         saveRemote(items[idx])
     }
 
     func approve(itemID: UUID) {
         guard let idx = items.firstIndex(where: { $0.id == itemID }) else { return }
         items[idx].approved = true
+        AnalyticsManager.shared.track(.feedbackApproved, properties: [
+            "upvote_count": items[idx].upvoters.count,
+            "comment_count": items[idx].comments.count
+        ])
         saveRemote(items[idx])
     }
 
     func setStatus(_ status: FeedbackStatus, itemID: UUID) {
         guard let idx = items.firstIndex(where: { $0.id == itemID }) else { return }
+        let previous = items[idx].status
         items[idx].status = status
+        AnalyticsManager.shared.track(.feedbackStatusChanged, properties: [
+            "from_status": previous.rawValue,
+            "to_status": status.rawValue,
+            "upvote_count": items[idx].upvoters.count
+        ])
         saveRemote(items[idx])
     }
 
@@ -116,6 +140,17 @@ final class FeedbackManager: ObservableObject {
     }
 
     func deleteFeedback(itemID: UUID) {
+        // Read the post before it goes: an admin clearing someone else's post is
+        // moderation, an author removing their own is a change of mind.
+        if let item = items.first(where: { $0.id == itemID }) {
+            AnalyticsManager.shared.track(.feedbackDeleted, properties: [
+                "by_admin": isAdmin,
+                "was_own_post": item.authorEmail.lowercased() == currentUserEmail,
+                "was_approved": item.approved,
+                "upvote_count": item.upvoters.count,
+                "comment_count": item.comments.count
+            ])
+        }
         items.removeAll { $0.id == itemID }
         deleteRemote(itemID)
     }
@@ -130,6 +165,12 @@ final class FeedbackManager: ObservableObject {
             text: text.trimmingCharacters(in: .whitespacesAndNewlines)
         )
         items[idx].comments.append(comment)
+        AnalyticsManager.shared.track(.feedbackCommented, properties: [
+            "is_reply": false,
+            "is_creator": comment.authorIsCreator,
+            "on_own_post": items[idx].authorEmail.lowercased() == currentUserEmail,
+            "text_length": comment.text.count
+        ])
         saveRemote(items[idx])
     }
 
@@ -169,6 +210,13 @@ final class FeedbackManager: ObservableObject {
             replyToHandle: replyTo
         )
         items[idx].comments[cIdx].replies.append(reply)
+        AnalyticsManager.shared.track(.feedbackCommented, properties: [
+            "is_reply": true,
+            "is_creator": reply.authorIsCreator,
+            "on_own_post": items[idx].authorEmail.lowercased() == currentUserEmail,
+            "text_length": reply.text.count,
+            "tagged_someone": reply.replyToHandle != nil
+        ])
         saveRemote(items[idx])
     }
 

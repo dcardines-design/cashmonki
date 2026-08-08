@@ -18,8 +18,8 @@ import PostHog
 enum AnalyticsEvent: String {
     // App Lifecycle
     case appLaunched = "app_launched"
-    case appBecameActive = "app_became_active"
-    case appResignedActive = "app_resigned_active"
+    // No became-active / resigned-active cases: PostHog's built-in
+    // Application Opened / Application Backgrounded already cover them.
 
     // Onboarding
     case onboardingStarted = "onboarding_started"
@@ -77,7 +77,8 @@ enum AnalyticsEvent: String {
 
     // Currency
     case currencyChanged = "currency_changed"
-    case currencyConversionUsed = "currency_conversion_used"
+    // No currency_conversion_used: conversion runs on every row render, so an
+    // event there would be volume noise, not a signal.
 
     // Subscription
     case paywallViewed = "paywall_viewed"
@@ -96,6 +97,14 @@ enum AnalyticsEvent: String {
     case askCardCancelled = "ask_card_cancelled"
     case askCardSuperseded = "ask_card_superseded"
     case askBatchRowsAdded = "ask_batch_rows_added"
+
+    // Feedback board
+    case feedbackSubmitted = "feedback_submitted"
+    case feedbackUpvoted = "feedback_upvoted"
+    case feedbackCommented = "feedback_commented"
+    case feedbackDeleted = "feedback_deleted"
+    case feedbackApproved = "feedback_approved"
+    case feedbackStatusChanged = "feedback_status_changed"
 
     // Settings
     case settingsOpened = "settings_opened"
