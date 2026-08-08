@@ -127,7 +127,10 @@ struct IdealOutcomeOnboardingView: View {
             Spacer()
 
             // Skip Button (top-right)
-            Button(action: { handleContinue() }) {
+            Button(action: {
+                AnalyticsManager.shared.track(.onboardingSkipped, properties: ["step": "ideal_outcome"])
+                handleContinue()
+            }) {
                 Text("Skip")
                     .font(
                         Font.custom("Overused Grotesk", size: 16)

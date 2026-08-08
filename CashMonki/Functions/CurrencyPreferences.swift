@@ -59,6 +59,14 @@ final class CurrencyPreferences: ObservableObject {
         print("🔍 CURRENCY DEBUG: 📝 CurrencyPreferences.setPrimaryCurrency called")
         print("🔍 CURRENCY DEBUG: Old primary: \(primaryCurrency.rawValue)")
         print("🔍 CURRENCY DEBUG: New primary: \(currency.rawValue)")
+        // Only a real change counts — this is also called on init/sync with the same value.
+        if primaryCurrency != currency {
+            AnalyticsManager.shared.track(.currencyChanged, properties: [
+                "from_currency": primaryCurrency.rawValue,
+                "to_currency": currency.rawValue,
+                "slot": "primary"
+            ])
+        }
         primaryCurrency = currency
         saveToStorage()
         

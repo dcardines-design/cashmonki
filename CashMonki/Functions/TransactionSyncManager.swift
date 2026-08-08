@@ -25,7 +25,17 @@ class TransactionSyncManager: ObservableObject {
     // MARK: - Published Properties
     @Published var isSyncing = false
     @Published var lastSyncDate: Date?
-    @Published var syncError: String?
+    // Every sync failure path funnels through this property, so reporting here
+    // covers pull, push, per-transaction write, delete and the realtime listener.
+    @Published var syncError: String? {
+        didSet {
+            guard let syncError, syncError != oldValue else { return }
+            AnalyticsManager.shared.track(.syncFailed, properties: [
+                "error_message": syncError,
+                "pending_changes": pendingChangesCount
+            ])
+        }
+    }
     @Published var pendingChangesCount = 0
     
     // MARK: - Private Properties

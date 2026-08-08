@@ -762,6 +762,9 @@ struct SettingsPage: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(AppColors.surfacePrimary)
         .onAppear {
+            AnalyticsManager.shared.track(.settingsOpened, properties: [
+                "is_pro": revenueCatManager.isProUser
+            ])
             print("⚙️ SETTINGS: ========== SETTINGS PAGE APPEARED ==========")
             print("⚙️ SETTINGS: Checking RevenueCat offerings state...")
             print("⚙️ SETTINGS: Current offerings count: \(revenueCatManager.offerings?.all.count ?? 0)")

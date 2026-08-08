@@ -46,6 +46,13 @@ struct LanguagePickerSheet: View {
                             language,
                             isSelected: selectedLanguage == language,
                             onTap: {
+                                if selectedLanguage != language {
+                                    AnalyticsManager.shared.track(.languageChanged, properties: [
+                                        "from_language": selectedLanguage,
+                                        "to_language": language,
+                                        "found_via_search": !searchText.isEmpty
+                                    ])
+                                }
                                 selectedLanguage = language
                                 searchText = ""
                                 isPresented = false

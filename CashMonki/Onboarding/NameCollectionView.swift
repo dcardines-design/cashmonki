@@ -147,7 +147,10 @@ struct NameCollectionView: View {
             Spacer()
 
             // Skip Button (top-right)
-            Button(action: { handleSkip() }) {
+            Button(action: {
+                AnalyticsManager.shared.track(.onboardingSkipped, properties: ["step": "name"])
+                handleSkip()
+            }) {
                 Text("Skip")
                     .font(
                         Font.custom("Overused Grotesk", size: 16)

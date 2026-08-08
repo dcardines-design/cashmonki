@@ -387,6 +387,12 @@ struct ReceiptDetailSheet: View {
         .ignoresSafeArea(.container, edges: .bottom)
         .onAppear {
             print("🔄 ReceiptDetailSheet: onAppear called")
+            AnalyticsManager.shared.track(.transactionViewed, properties: [
+                "category": transactionState.transaction.category,
+                "is_income": transactionState.transaction.amount > 0,
+                "has_receipt_image": transactionState.transaction.hasReceiptImage,
+                "has_note": !(transactionState.transaction.note ?? "").isEmpty
+            ])
             // Refresh transaction data when view appears to ensure it's up to date
             refreshTransactionFromUserManager()
             // Load receipt image if available

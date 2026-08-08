@@ -171,9 +171,34 @@ class RevenueCatManager: NSObject, ObservableObject {
     }
 
     private func updateSubscriptionStatus(_ info: CustomerInfo) {
-        let hasEntitlement = info.entitlements[entitlementID]?.isActive == true
+        let entitlement = info.entitlements[entitlementID]
+        let hasEntitlement = entitlement?.isActive == true
+        let wasActive = isSubscriptionActive
         isSubscriptionActive = hasEntitlement
+
+        // Entitlement just turned on: a free trial and a paid start are different funnels.
+        if hasEntitlement, !wasActive, let entitlement, entitlement.periodType == .trial {
+            AnalyticsManager.shared.track(.trialStarted, properties: [
+                "product_id": entitlement.productIdentifier,
+                "store": "\(entitlement.store)"
+            ])
+        }
+
+        // Still entitled but auto-renew is off — cancelled, running out the paid period.
+        if hasEntitlement, let entitlement, entitlement.willRenew == false, !hasReportedCancellation {
+            hasReportedCancellation = true
+            AnalyticsManager.shared.track(.subscriptionCancelled, properties: [
+                "product_id": entitlement.productIdentifier,
+                "period_type": "\(entitlement.periodType)",
+                "expires_at": entitlement.expirationDate?.timeIntervalSince1970 ?? 0
+            ])
+        }
+        // Renewal turned back on: let a future cancellation report again.
+        if entitlement?.willRenew == true { hasReportedCancellation = false }
     }
+
+    /// Guards against re-reporting the same cancellation on every customer-info refresh.
+    private var hasReportedCancellation = false
 
     // MARK: - Offerings
 

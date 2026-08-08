@@ -200,6 +200,14 @@ class AccountManager: ObservableObject {
     
     func selectAccount(_ subAccount: SubAccount) {
         print("🎯 AccountManager.selectAccount: Selecting '\(subAccount.name)' with ID: \(subAccount.id.uuidString)")
+        // Only count a real switch — reselecting the current wallet isn't one.
+        if selectedSubAccountId != subAccount.id {
+            AnalyticsManager.shared.track(.walletSwitched, properties: [
+                "wallet_type": subAccount.type.rawValue,
+                "currency": subAccount.currency.rawValue,
+                "wallet_count": userManager.currentUser.subAccounts.count
+            ])
+        }
         selectedSubAccountId = subAccount.id
         showingAllAccounts = false
         print("🎯 AccountManager.selectAccount: selectedSubAccountId now set to: \(selectedSubAccountId?.uuidString ?? "nil")")
@@ -361,6 +369,12 @@ class AccountManager: ObservableObject {
         )
         
         userManager.modifyAccount(accountData)
+        AnalyticsManager.shared.track(.walletEdited, properties: [
+            "wallet_type": account.type.rawValue,
+            "currency": account.currency.rawValue,
+            "is_default": account.isDefault,
+            "shows_balance": account.showBalance
+        ])
         // Sync to Firebase
         userManager.syncToFirebase { success in
             print(success ? "✅ Account update synced to Firebase" : "❌ Failed to sync account update to Firebase")

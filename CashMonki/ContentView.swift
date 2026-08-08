@@ -167,6 +167,9 @@ struct ContentView: View {
             print("🔍 ContentView: Scene phase changed to: \(newPhase)")
             print("🔍 ContentView: Authentication status: \(AuthenticationManager.shared.isAuthenticated)")
 
+            // No lifecycle event here: PostHog's captureApplicationLifecycleEvents
+            // already emits Application Opened / Backgrounded for this exact thing.
+
             // Use smart resume logic when app becomes active
             if newPhase == .active {
                 print("🔍 ContentView: Scene became active - using smart resume")
@@ -417,6 +420,12 @@ struct ContentView: View {
                 get: { roastSheetMessage != nil },
                 set: { if !$0 { roastSheetMessage = nil } }
             ), roastMessage: roast.message)
+                // Triggered counts the attempt; attached counts the roast a user actually saw.
+                .onAppear {
+                    AnalyticsManager.shared.track(.roastMessageAttached, properties: [
+                        "message_length": roast.message.count
+                    ])
+                }
                 // Start at 75%, can expand to 98%
                 .presentationDetents([.fraction(0.75), .fraction(0.98)], selection: .constant(.fraction(0.75)))
                 .presentationDragIndicator(.hidden)

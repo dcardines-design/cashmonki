@@ -1668,9 +1668,18 @@ class UserManager: ObservableObject {
             return
         }
 
+        let previousAmount = currentUser.budgets[index].amount
+
         var updatedBudget = budget
         updatedBudget.updatedAt = Date()
         currentUser.budgets[index] = updatedBudget
+
+        AnalyticsManager.shared.track(.budgetEdited, properties: [
+            "category": budget.categoryName,
+            "amount": budget.amount,
+            "previous_amount": previousAmount,
+            "amount_changed": previousAmount != budget.amount
+        ])
 
         saveCurrentUserLocally()
         objectWillChange.send()
