@@ -38,6 +38,8 @@ struct HomePage: View {
     @State internal var rangeSelectionIndex: Int = Self.loadCachedRangeSelectionIndex()
     @State internal var chartFilter: ChartFilter = Self.loadCachedChartFilter()
     @State internal var chartType: ChartType = Self.loadCachedChartType()
+    /// Privacy toggle: when true, every amount on the home chart renders as bullets
+    @AppStorage("home_amounts_hidden") internal var amountsHidden: Bool = false
     @State internal var isAddPresented: Bool = false
     @State internal var isCustomPhotoPickerPresented: Bool = false
     @State internal var isDirectPhotoPickerPresented: Bool = false

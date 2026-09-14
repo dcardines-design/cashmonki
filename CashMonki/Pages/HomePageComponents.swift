@@ -17,17 +17,39 @@ extension HomePage {
     
     internal var totalSpentSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(sectionTitle)
-                .font(AppFonts.overusedGroteskMedium(size: 18))
-                .foregroundStyle(AppColors.foregroundSecondary)
+            HStack(spacing: 8) {
+                Text(sectionTitle)
+                    .font(AppFonts.overusedGroteskMedium(size: 18))
+                    .foregroundStyle(AppColors.foregroundSecondary)
+
+                Button {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        amountsHidden.toggle()
+                    }
+                } label: {
+                    AppIcon(
+                        assetName: amountsHidden ? "eye-off" : "eye",
+                        fallbackSystemName: amountsHidden ? "eye.slash" : "eye"
+                    )
+                    .frame(width: 20, height: 20)
+                    .foregroundStyle(AppColors.foregroundSecondary)
+                    // Widen the tap target without changing the visual size
+                    .padding(6)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(PlainButtonStyle())
+                .accessibilityLabel(amountsHidden ? "Show amounts" : "Hide amounts")
+
+                Spacer(minLength: 0)
+            }
 
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 // Amount with decimal in tertiary color
                 HStack(alignment: .firstTextBaseline, spacing: 0) {
-                    Text(currencyWholeNumber(cachedCurrentPeriodTotal))
+                    Text(maskAmount(currencyWholeNumber(cachedCurrentPeriodTotal), dots: 6))
                         .font(AppFonts.overusedGroteskSemiBold(size: 40))
 
-                    Text(currencyDecimalPart(cachedCurrentPeriodTotal))
+                    Text(amountsHidden ? "" : currencyDecimalPart(cachedCurrentPeriodTotal))
                         .font(AppFonts.overusedGroteskSemiBold(size: 40))
                         .foregroundColor(AppColors.foregroundTertiary)
                 }

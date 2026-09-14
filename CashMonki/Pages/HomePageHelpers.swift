@@ -741,6 +741,18 @@ extension HomePage {
         return "\(primaryCurrency.symbol)\(formatted)"
     }
 
+    // MARK: - Amount Privacy
+
+    /// Replaces the digits of an already-formatted amount with bullets when the
+    /// privacy toggle is on. Any leading sign / currency symbol is kept so the
+    /// string still reads as money (e.g. "-₱1,234.56" → "-₱•••••").
+    /// Returns the input untouched when amounts are visible.
+    func maskAmount(_ formatted: String, dots: Int = 5) -> String {
+        guard amountsHidden else { return formatted }
+        let prefix = formatted.prefix { !$0.isNumber }
+        return prefix + String(repeating: "•", count: dots)
+    }
+
     /// Returns the whole number part with currency symbol (e.g., "₱7,347")
     func currencyWholeNumber(_ value: Double) -> String {
         let nf = NumberFormatter()

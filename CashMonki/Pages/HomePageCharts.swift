@@ -326,7 +326,7 @@ extension HomePage {
                             .animation(.spring(response: 0.4, dampingFraction: 0.9, blendDuration: 0.1), value: previousValue)
 
                         // Amount text on the bar
-                        Text(currencyPrefs.formatPrimaryAmount(previousValue))
+                        Text(maskAmount(currencyPrefs.formatPrimaryAmount(previousValue)))
                             .font(AppFonts.overusedGroteskMedium(size: 14))
                             .foregroundStyle(.white)
                             .animation(.easeInOut(duration: 0.3).delay(0.05), value: previousValue)
@@ -357,7 +357,7 @@ extension HomePage {
                             .animation(.spring(response: 0.4, dampingFraction: 0.9, blendDuration: 0.1).delay(0.05), value: currentValue)
 
                         // Amount text on the bar
-                        Text(currencyPrefs.formatPrimaryAmount(currentValue))
+                        Text(maskAmount(currencyPrefs.formatPrimaryAmount(currentValue)))
                             .font(AppFonts.overusedGroteskMedium(size: 14))
                             .foregroundStyle(.white)
                             .animation(.easeInOut(duration: 0.3).delay(0.1), value: currentValue)
@@ -537,7 +537,7 @@ extension HomePage {
                     if let dragValue = selectedDragValue, let dragDate = selectedDragDate {
                         // Show hovered data point with specific date
                         HStack(alignment: .top, spacing: 4) {
-                            Text(formatExactAmount(dragValue))
+                            Text(maskAmount(formatExactAmount(dragValue)))
                                 .font(Font.custom("Overused Grotesk", size: 12).weight(.medium))
                                 .multilineTextAlignment(.center)
                                 .foregroundColor(AppColors.foregroundPrimary)
@@ -552,7 +552,7 @@ extension HomePage {
                         // Fallback to discrete data point selection
                         let selectedData = currentPeriodData[selectedIndex]
                         HStack(alignment: .top, spacing: 4) {
-                            Text(formatExactAmount(selectedData.amount))
+                            Text(maskAmount(formatExactAmount(selectedData.amount)))
                                 .font(Font.custom("Overused Grotesk", size: 12).weight(.medium))
                                 .multilineTextAlignment(.center)
                                 .foregroundColor(AppColors.foregroundPrimary)
@@ -565,7 +565,7 @@ extension HomePage {
                     } else {
                         // Show current period label (Today, This Week, etc.)
                         HStack(alignment: .top, spacing: 4) {
-                            Text(getCurrentFilteredTotal())
+                            Text(maskAmount(getCurrentFilteredTotal()))
                                 .font(Font.custom("Overused Grotesk", size: 12).weight(.medium))
                                 .multilineTextAlignment(.center)
                                 .foregroundColor(AppColors.foregroundPrimary)
@@ -604,7 +604,7 @@ extension HomePage {
                         let equivalentPreviousPeriodDate = previousPeriodStartDate.addingTimeInterval(dragDate.timeIntervalSince(periodStartDate))
                         
                         HStack(alignment: .top, spacing: 4) {
-                            Text(formatExactAmount(previousValue))
+                            Text(maskAmount(formatExactAmount(previousValue)))
                                 .font(Font.custom("Overused Grotesk", size: 12).weight(.medium))
                                 .multilineTextAlignment(.center)
                                 .foregroundColor(AppColors.foregroundPrimary)
@@ -631,7 +631,7 @@ extension HomePage {
                         let equivalentPreviousPeriodDate = previousPeriodStartDate.addingTimeInterval(selectedData.date.timeIntervalSince(periodStartDate))
                         
                         HStack(alignment: .top, spacing: 4) {
-                            Text(formatExactAmount(previousValue))
+                            Text(maskAmount(formatExactAmount(previousValue)))
                                 .font(Font.custom("Overused Grotesk", size: 12).weight(.medium))
                                 .multilineTextAlignment(.center)
                                 .foregroundColor(AppColors.foregroundPrimary)
@@ -645,7 +645,7 @@ extension HomePage {
                         // Default state - show previous period total
                         let previousTotal = previousPeriodData.last?.amount ?? 0
                         HStack(alignment: .top, spacing: 4) {
-                            Text(formatExactAmount(previousTotal))
+                            Text(maskAmount(formatExactAmount(previousTotal)))
                                 .font(Font.custom("Overused Grotesk", size: 12).weight(.medium))
                                 .multilineTextAlignment(.center)
                                 .foregroundColor(AppColors.foregroundPrimary)
@@ -716,28 +716,28 @@ extension HomePage {
                     VStack {
                         HStack {
                             Spacer()
-                            Text(formatLineChartValue(yLabel1))
+                            Text(maskAmount(formatLineChartValue(yLabel1), dots: 4))
                                 .font(AppFonts.overusedGroteskMedium(size: 12))
                                 .foregroundColor(AppColors.foregroundSecondary)
                         }
                         Spacer()
                         HStack {
                             Spacer()
-                            Text(formatLineChartValue(yLabel2))
+                            Text(maskAmount(formatLineChartValue(yLabel2), dots: 4))
                                 .font(AppFonts.overusedGroteskMedium(size: 12))
                                 .foregroundColor(AppColors.foregroundSecondary)
                         }
                         Spacer()
                         HStack {
                             Spacer()
-                            Text(formatLineChartValue(yLabel3))
+                            Text(maskAmount(formatLineChartValue(yLabel3), dots: 4))
                                 .font(AppFonts.overusedGroteskMedium(size: 12))
                                 .foregroundColor(AppColors.foregroundSecondary)
                         }
                         Spacer()
                         HStack {
                             Spacer()
-                            Text(formatLineChartValue(yLabel4))
+                            Text(maskAmount(formatLineChartValue(yLabel4), dots: 4))
                                 .font(AppFonts.overusedGroteskMedium(size: 12))
                                 .foregroundColor(AppColors.foregroundSecondary)
                         }
