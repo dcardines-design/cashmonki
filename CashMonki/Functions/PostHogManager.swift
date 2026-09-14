@@ -13,6 +13,10 @@ import UIKit
 import PostHog
 #endif
 
+#if canImport(AdServices)
+import AdServices
+#endif
+
 // MARK: - Analytics Events
 
 enum AnalyticsEvent: String {
@@ -197,6 +201,94 @@ class PostHogManager: ObservableObject {
             "is_production_install": Self.isProductionInstall
         ])
         print("📊 PostHog: app_environment=\(Self.buildEnvironment)")
+    }
+
+    // MARK: - Acquisition attribution
+
+    private let installDateKey = "attribution_install_date"
+    private let installVersionKey = "attribution_install_version"
+    private let searchAdsKey = "attribution_search_ads_payload"
+
+    /// Stamps every event with where this install came from, so marketing spend can be
+    /// tied to activation and revenue. Without this, campaign performance is unmeasurable.
+    /// Call once, right after registerBuildEnvironment().
+    func registerAttribution() {
+        let defaults = UserDefaults.standard
+        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown"
+
+        // First launch on this device defines the install cohort. Persisted so the
+        // values stay stable for the lifetime of the install.
+        if defaults.string(forKey: installDateKey) == nil {
+            defaults.set(ISO8601DateFormatter().string(from: Date()), forKey: installDateKey)
+            defaults.set(version, forKey: installVersionKey)
+        }
+
+        PostHogSDK.shared.register([
+            "install_date": defaults.string(forKey: installDateKey) ?? "",
+            "install_version": defaults.string(forKey: installVersionKey) ?? version,
+            "current_version": version
+        ])
+
+        if let cached = defaults.dictionary(forKey: searchAdsKey) {
+            PostHogSDK.shared.register(cached)
+        } else {
+            fetchSearchAdsAttribution()
+        }
+    }
+
+    /// Resolves the Apple Search Ads attribution token into campaign/ad-group/keyword ids.
+    /// Apple's endpoint 404s for a short window after install, so this retries a few times.
+    private func fetchSearchAdsAttribution(attempt: Int = 0) {
+        #if canImport(AdServices)
+        guard #available(iOS 14.3, *) else { return }
+        guard attempt < 3 else {
+            print("📊 PostHog: Search Ads attribution gave up after \(attempt) attempts")
+            return
+        }
+
+        let token: String
+        do {
+            token = try AAAttribution.attributionToken()
+        } catch {
+            print("📊 PostHog: no Search Ads attribution token (\(error.localizedDescription))")
+            return
+        }
+
+        var request = URLRequest(url: URL(string: "https://api-adservices.apple.com/api/v1/")!)
+        request.httpMethod = "POST"
+        request.setValue("text/plain", forHTTPHeaderField: "Content-Type")
+        request.httpBody = Data(token.utf8)
+
+        URLSession.shared.dataTask(with: request) { [weak self] data, response, _ in
+            guard let self else { return }
+            let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+
+            // 404 means Apple has not finished processing the token yet.
+            guard status == 200, let data,
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                let delay = Double(attempt + 1) * 5.0
+                DispatchQueue.global().asyncAfter(deadline: .now() + delay) {
+                    self.fetchSearchAdsAttribution(attempt: attempt + 1)
+                }
+                return
+            }
+
+            var props: [String: Any] = ["acquisition_source": "apple_search_ads"]
+            if let attributed = json["attribution"] as? Bool, attributed == false {
+                props["acquisition_source"] = "organic"
+            }
+            for key in ["campaignId", "adGroupId", "keywordId", "countryOrRegion", "clickDate", "conversionType"] {
+                if let value = json[key] {
+                    props["asa_\(key)"] = value
+                }
+            }
+
+            UserDefaults.standard.set(props, forKey: self.searchAdsKey)
+            PostHogSDK.shared.register(props)
+            PostHogSDK.shared.capture("attribution_resolved", properties: props)
+            print("📊 PostHog: attribution resolved — \(props["acquisition_source"] ?? "unknown")")
+        }.resume()
+        #endif
     }
 
     private init() {
@@ -434,6 +526,7 @@ class PostHogManager: ObservableObject {
     private init() {}
 
     func registerBuildEnvironment() {}
+    func registerAttribution() {}
 
     func configure() {
         print("❌ PostHog: SDK not available - add PostHog package via SPM")

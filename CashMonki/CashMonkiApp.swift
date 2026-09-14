@@ -543,6 +543,10 @@ struct CashMonkiApp: App {
         // Dashboards filter on this so beta traffic never lands in live numbers.
         PostHogManager.shared.registerBuildEnvironment()
 
+        // Install cohort + Apple Search Ads campaign ids, so marketing spend can be
+        // tied to activation and revenue.
+        PostHogManager.shared.registerAttribution()
+
         PostHogSDK.shared.capture("app_launched")
         PostHogSDK.shared.flush()
 
