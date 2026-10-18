@@ -744,30 +744,57 @@ class CurrencyRateManager: ObservableObject {
     
     // MARK: - Mock Exchange Rates (Replace with real API)
     
+    /// Approximate units of each currency per 1 USD. Used only when live rates are
+    /// unavailable. Every Currency case must appear here - a missing entry leaves the
+    /// amount unconverted, which reads as a plainly wrong number to the user.
+    private static let fallbackRatesPerUSD: [Currency: Double] = [
+        .usd: 1.0,
+        .php: 56.0,
+        .eur: 0.92,
+        .gbp: 0.79,
+        .jpy: 145.68,
+        .cad: 1.36,
+        .aud: 1.52,
+        .brl: 5.05,
+        .sgd: 1.34,
+        .zar: 18.50,
+        .cny: 7.24,
+        .inr: 83.30,
+        .krw: 1340.0,
+        .mxn: 17.10,
+        .chf: 0.88,
+        .nok: 10.70,
+        .sek: 10.50,
+        .dkk: 6.86,
+        .hkd: 7.82,
+        .nzd: 1.64,
+        .thb: 35.80,
+        .myr: 4.70,
+        .idr: 15700.0,
+        .vnd: 24500.0,
+        .rub: 92.0,
+        .pln: 4.00,
+        .czk: 23.20,
+        .huf: 360.0,
+        .try_: 32.0,
+        .aed: 3.67,
+    ]
+
     private func getMockExchangeRate(from: Currency, to: Currency) -> Double {
         print("🔍 CURRENCY DEBUG: 🎭 getMockExchangeRate called")
         print("🔍 CURRENCY DEBUG: From: \(from.rawValue) → To: \(to.rawValue)")
-        
-        let rate: Double
-        switch (from, to) {
-        case (.usd, .php): rate = 56.0
-        case (.php, .usd): rate = 1.0/56.0
-        case (.eur, .php): rate = 61.0
-        case (.php, .eur): rate = 1.0/61.0
-        case (.usd, .eur): rate = 0.92
-        case (.eur, .usd): rate = 1.09
-        case (.gbp, .php): rate = 71.0
-        case (.php, .gbp): rate = 1.0/71.0
-        case (.usd, .gbp): rate = 0.79
-        case (.gbp, .usd): rate = 1.27
-        // Add YEN conversions that were missing!
-        case (.php, .jpy): rate = 2.6014 // 1 PHP = 2.6014 JPY
-        case (.jpy, .php): rate = 1.0/2.6014 // 1 JPY = 0.3844 PHP
-        case (.usd, .jpy): rate = 145.68 // 1 USD = 145.68 JPY
-        case (.jpy, .usd): rate = 1.0/145.68 // 1 JPY = 0.00686 USD
-        default: rate = 1.0
+
+        if from == to { return 1.0 }
+
+        // Cross-rate via USD so every currency pair is covered.
+        guard let fromPerUSD = Self.fallbackRatesPerUSD[from],
+              let toPerUSD = Self.fallbackRatesPerUSD[to],
+              fromPerUSD > 0 else {
+            print("⚠️ CURRENCY: No fallback rate for \(from.rawValue)→\(to.rawValue) - leaving amount unconverted")
+            return 1.0
         }
-        
+
+        let rate = toPerUSD / fromPerUSD
         print("🔍 CURRENCY DEBUG: Mock rate found: \(rate)")
         return rate
     }

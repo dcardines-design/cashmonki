@@ -39,7 +39,10 @@ struct AddTransactionSheet: View {
         self._isPresented = isPresented
         self.primaryCurrency = primaryCurrency
         self.onSave = onSave
-        self._selectedCurrency = State(initialValue: prefillCurrency ?? primaryCurrency)
+        // Read the live preference rather than the value passed down: callers hold it in
+        // @State set at launch, so it goes stale the moment the user changes currency in
+        // Settings, and the sheet would open on the old currency.
+        self._selectedCurrency = State(initialValue: prefillCurrency ?? CurrencyPreferences.shared.primaryCurrency)
         self._amountText = State(initialValue: prefillAmount ?? "")
         self._merchantName = State(initialValue: prefillMerchant ?? "")
         self._note = State(initialValue: prefillNote ?? "")

@@ -13,13 +13,26 @@ import Combine
 final class CurrencyPreferences: ObservableObject {
     static let shared = CurrencyPreferences()
     
-    @Published var primaryCurrency: Currency = .php // Default fallback, will be overridden by loadFromStorage() or onboarding
+    /// Starting currency before the user picks one. Taken from the device region so a
+    /// US install starts on USD instead of PHP. Overridden by loadFromStorage() or onboarding.
+    static var deviceDefaultCurrency: Currency {
+        guard let code = Locale.current.currency?.identifier,
+              let currency = Currency(rawValue: code.uppercased()) else {
+            return .php
+        }
+        return currency
+    }
+
+    @Published var primaryCurrency: Currency = CurrencyPreferences.deviceDefaultCurrency
     @Published var secondaryCurrency: Currency? = nil
-    
+
     private let userDefaults = UserDefaults.standard
     private let primaryCurrencyKey = "userPrimaryCurrency"
     private let secondaryCurrencyKey = "userSecondaryCurrency"
-    
+    /// True once the user has actually chosen a primary currency. Until then the value
+    /// above is only a guess and must never be written to storage as if it were a choice.
+    private let hasChosenPrimaryKey = "hasSetPrimaryCurrency"
+
     private init() {
         loadFromStorage()
         print("💰 CurrencyPreferences: Initialized with primary: \(primaryCurrency.rawValue), secondary: \(secondaryCurrency?.rawValue ?? "none")")
@@ -68,8 +81,10 @@ final class CurrencyPreferences: ObservableObject {
             ])
         }
         primaryCurrency = currency
+        // An explicit call means the user (or onboarding) picked this - safe to persist.
+        userDefaults.set(true, forKey: hasChosenPrimaryKey)
         saveToStorage()
-        
+
         // Also sync with UserManager if available
         syncWithUserManager()
         print("🔍 CURRENCY DEBUG: ✅ Primary currency updated and saved")
@@ -127,8 +142,13 @@ final class CurrencyPreferences: ObservableObject {
     }
     
     private func saveToStorage() {
-        userDefaults.set(primaryCurrency.rawValue, forKey: primaryCurrencyKey)
-        
+        // Never persist a currency the user hasn't chosen. Writing the guessed default
+        // here made it look like a deliberate choice, so later code "preserved" it and
+        // the user was stuck on it - the cause of amounts showing in the wrong currency.
+        if userDefaults.bool(forKey: hasChosenPrimaryKey) {
+            userDefaults.set(primaryCurrency.rawValue, forKey: primaryCurrencyKey)
+        }
+
         if let secondary = secondaryCurrency {
             userDefaults.set(secondary.rawValue, forKey: secondaryCurrencyKey)
         } else {
@@ -168,8 +188,8 @@ final class CurrencyPreferences: ObservableObject {
     func resetToDefault() {
         print("🔄 CurrencyPreferences: Resetting to fresh state - new user will select currency during onboarding")
         
-        // Reset to initial default (PHP - technical default to prevent crashes)
-        primaryCurrency = .php
+        // Back to the device-region guess until the next user picks one.
+        primaryCurrency = CurrencyPreferences.deviceDefaultCurrency
         secondaryCurrency = nil
         
         // CRITICAL: Clear ALL stored preferences and flags
