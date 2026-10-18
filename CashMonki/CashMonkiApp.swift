@@ -539,6 +539,10 @@ struct CashMonkiApp: App {
 
         PostHogSDK.shared.setup(config)
 
+        // Several apps share one PostHog project, so stamp every event with the
+        // app name. Insights and web analytics filter on `app`.
+        PostHogSDK.shared.register(["app": "cashmonki"])
+
         // Super property on every event: "app_store" / "testflight" / "debug".
         // Dashboards filter on this so beta traffic never lands in live numbers.
         PostHogManager.shared.registerBuildEnvironment()
