@@ -115,7 +115,7 @@ final class AskChatService {
         var toolRounds: [AskToolRound] = []
 
         for _ in 0..<maxToolLoops {
-            let response = try await streamCompletion(messages: messages, onDelta: onDelta, onStreamReset: onStreamReset)
+            let response = try await streamWithRetry(messages: messages, onDelta: onDelta, onStreamReset: onStreamReset)
 
             if !response.toolCalls.isEmpty {
                 messages.append(response.rawAssistantMessage)
@@ -228,6 +228,33 @@ final class AskChatService {
         let content: String
         let toolCalls: [ToolCall]
         let rawAssistantMessage: [String: Any]
+    }
+
+    /// A dropped connection is usually transient - retry it once before surfacing an error,
+    /// withdrawing any partial text first so the reply doesn't arrive twice.
+    private func streamWithRetry(
+        messages: [[String: Any]],
+        onDelta: @escaping @Sendable (String) -> Void,
+        onStreamReset: @escaping @Sendable () -> Void
+    ) async throws -> CompletionResponse {
+        do {
+            return try await streamCompletion(messages: messages, onDelta: onDelta, onStreamReset: onStreamReset)
+        } catch let error as URLError where Self.isTransient(error) {
+            print("🔁 AskChat: \(error.code.rawValue) - retrying once")
+            onStreamReset()
+            try? await Task.sleep(nanoseconds: 800_000_000)
+            return try await streamCompletion(messages: messages, onDelta: onDelta, onStreamReset: onStreamReset)
+        }
+    }
+
+    private static func isTransient(_ error: URLError) -> Bool {
+        switch error.code {
+        case .networkConnectionLost, .timedOut, .cannotConnectToHost,
+             .cannotFindHost, .dnsLookupFailed, .notConnectedToInternet:
+            return true
+        default:
+            return false
+        }
     }
 
     private func streamCompletion(

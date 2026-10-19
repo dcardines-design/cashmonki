@@ -22,6 +22,9 @@ struct AskDisplayMessage: Identifiable, Codable {
         /// completed app action in history, so the model can't echo it to fake
         /// a save. Never used for model replies.
         case systemNote(String)
+        /// A turn that failed to reach the assistant. Keeps the user's text so the bubble can
+        /// offer Try again instead of leaving them to retype it.
+        case failed(message: String, userText: String)
         case table(AskTableMessage)
         case draft(AskTransactionDraft)
         case update(AskTransactionUpdate)
@@ -44,6 +47,7 @@ struct AskDisplayMessage: Identifiable, Codable {
         var analyticsName: String {
             switch self {
             case .text: return "text"
+            case .failed: return "failed"
             case .systemNote: return "system_note"
             case .table: return "table"
             case .draft: return "transaction_draft"
@@ -72,7 +76,7 @@ struct AskDisplayMessage: Identifiable, Codable {
                  .budgetDraft, .budgetUpdate, .budgetDelete,
                  .subscriptionDraft, .subscriptionUpdate, .subscriptionDelete:
                 return true
-            case .text, .systemNote, .table, .single, .chart, .stat, .question:
+            case .text, .failed, .systemNote, .table, .single, .chart, .stat, .question:
                 return false
             }
         }
@@ -99,6 +103,10 @@ struct AskDisplayMessage: Identifiable, Codable {
     var historyText: String {
         switch content {
         case .text(let text): return text
+        case .failed(_, let userText):
+            // The assistant never saw this turn; show it as the user's question so a retry
+            // doesn't look like a repeat.
+            return userText
         case .systemNote(let text): return "(App completed and recorded an action the user approved: \"\(text)\". You did not do this — never repeat or claim it.)"
         case .table(let table):
             // Title alone left follow-ups like "top 5 only" with nothing to work from: no
@@ -424,6 +432,22 @@ final class AskChatManager: ObservableObject {
     /// lands (streamed text settles later than structured cards, so both paths call attach).
     private var pendingToolRounds: [AskToolRound] = []
 
+    /// Re-sends a turn that never reached the assistant, dropping the failed bubble first so
+    /// the thread doesn't accumulate dead ends.
+    func retry(messageID: UUID) {
+        guard let index = messages.firstIndex(where: { $0.id == messageID }),
+              case .failed(_, let userText) = messages[index].content else { return }
+        messages.remove(at: index)
+        // Remove the user's turn too - send() re-appends it.
+        if let userIndex = messages.lastIndex(where: { $0.isUser }),
+           case .text(let existing) = messages[userIndex].content,
+           existing == userText {
+            messages.remove(at: userIndex)
+        }
+        persist()
+        send(userText)
+    }
+
     func send(_ text: String, source: SendSource = .typed) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, !isThinking else { return }
@@ -477,7 +501,10 @@ final class AskChatManager: ObservableObject {
                     self.rawPending = ""
                     self.pendingFinalText = nil
                     self.removeStreamingMessage()
-                    self.messages.append(AskDisplayMessage(isUser: false, content: .text("⚠️ \(error.localizedDescription)")))
+                    self.messages.append(AskDisplayMessage(
+                        isUser: false,
+                        content: .failed(message: error.localizedDescription, userText: trimmed)
+                    ))
                     AnalyticsManager.shared.track(.askReplyFailed, properties: [
                         "error_message": error.localizedDescription,
                         "latency_ms": self.elapsedTurnMilliseconds()
@@ -1624,6 +1651,24 @@ private struct AskMessageView: View {
                     Text(AskFormat.markdown(text))
                         .font(AppFonts.overusedGroteskMedium(size: 16))
                         .foregroundColor(AppColors.foregroundPrimary)
+                }
+            case .failed(let failureMessage, _):
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("⚠️ \(failureMessage)")
+                        .font(AppFonts.overusedGroteskMedium(size: 16))
+                        .foregroundColor(AppColors.foregroundPrimary)
+                    Button {
+                        AskChatManager.shared.retry(messageID: message.id)
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "arrow.clockwise")
+                                .font(.system(size: 13, weight: .semibold))
+                            Text("Try again")
+                                .font(AppFonts.overusedGroteskSemiBold(size: 14))
+                        }
+                        .foregroundColor(AppColors.primary)
+                    }
+                    .buttonStyle(.plain)
                 }
             case .systemNote(let text):
                 // Renders identically to a settled text bubble — the distinction
