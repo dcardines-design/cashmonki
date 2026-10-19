@@ -28,6 +28,12 @@ final class AskChatService {
     /// recent result as a fallback when the model omits `source`.
     private var cachedRows: [String: [[String: String]]] = [:]
     private var lastRows: [[String: String]] = []
+    /// The tool call behind each cached result, so a rendered table/chart/stat can tell a
+    /// later turn what was actually asked for ("period=month"), not just what was shown.
+    private var cachedQueries: [String: AskQueryDescriptor] = [:]
+    /// Insertion order of `cachedRows` keys, used to bound the cache.
+    private var cachedOrder: [String] = []
+    private let maxCachedResults = 20
 
     enum AskChatError: LocalizedError {
         case missingAPIKey
@@ -41,6 +47,30 @@ final class AskChatService {
         }
     }
 
+    /// What one past turn contributes to the next request.
+    struct HistoryTurn {
+        let isUser: Bool
+        let text: String
+        /// Tool rounds recorded when this turn was produced, replayed verbatim when recent.
+        let toolRounds: [AskToolRound]?
+    }
+
+    /// An assistant reply plus the tool exchange that produced it, so the caller can store
+    /// the exchange on the message and replay it next turn.
+    struct Reply {
+        let message: AskStructuredMessage
+        let toolRounds: [AskToolRound]
+    }
+
+    /// How many of the most recent assistant turns get their tool results replayed. Older
+    /// rounds are dropped: in a finance app a stale `get_recent_transactions` result is worse
+    /// than making the model fetch again.
+    private let maxReplayedTurns = 2
+
+    /// Cap on `get_spending_by_category` rows. They are ranked by spend, so this trims the
+    /// tail rather than losing anything meaningful.
+    private let maxCategoryRows = 40
+
     // MARK: - Public entry
 
     /// Sends the conversation and returns the assistant's structured message.
@@ -49,27 +79,60 @@ final class AskChatService {
     /// (another tool round started). Structured JSON is never streamed —
     /// it buffers silently and arrives complete in the return value.
     func send(
-        history: [(isUser: Bool, text: String)],
+        history: [HistoryTurn],
         onDelta: @escaping @Sendable (String) -> Void = { _ in },
         onStreamReset: @escaping @Sendable () -> Void = {}
-    ) async throws -> AskStructuredMessage {
+    ) async throws -> Reply {
         var messages: [[String: Any]] = [["role": "system", "content": systemPrompt]]
-        for turn in history {
+
+        // Replay tool rounds only for the last few assistant turns (see maxReplayedTurns).
+        let replayCutoff = history.enumerated()
+            .filter { !$0.element.isUser && !($0.element.toolRounds?.isEmpty ?? true) }
+            .suffix(maxReplayedTurns)
+            .first?.offset ?? history.count
+
+        for (index, turn) in history.enumerated() {
+            if !turn.isUser, index >= replayCutoff, let rounds = turn.toolRounds, !rounds.isEmpty {
+                for round in rounds {
+                    guard let assistant = round.assistantMessage else { continue }
+                    messages.append(assistant)
+                    for result in round.results {
+                        messages.append([
+                            "role": "tool",
+                            "tool_call_id": result.callID,
+                            "content": result.content
+                        ])
+                    }
+                }
+            }
             messages.append(["role": turn.isUser ? "user" : "assistant", "content": turn.text])
         }
+
+        // Tool calls made during THIS turn. The model often omits `source` on a table or
+        // chart, and falling back to the process-wide `lastRows` could then render the
+        // PREVIOUS question's numbers. Falling back within the turn is safe.
+        var turnCallIDs: [String] = []
+        var toolRounds: [AskToolRound] = []
 
         for _ in 0..<maxToolLoops {
             let response = try await streamCompletion(messages: messages, onDelta: onDelta, onStreamReset: onStreamReset)
 
             if !response.toolCalls.isEmpty {
                 messages.append(response.rawAssistantMessage)
+                var roundResults: [AskToolResult] = []
                 for call in response.toolCalls {
+                    turnCallIDs.append(call.id)
                     let result = executeTool(name: call.name, argumentsJSON: call.arguments, callID: call.id)
                     messages.append([
                         "role": "tool",
                         "tool_call_id": call.id,
                         "content": result
                     ])
+                    roundResults.append(AskToolResult(callID: call.id, content: result))
+                }
+                if let data = try? JSONSerialization.data(withJSONObject: response.rawAssistantMessage),
+                   let json = String(data: data, encoding: .utf8) {
+                    toolRounds.append(AskToolRound(assistantJSON: json, results: roundResults))
                 }
                 continue
             }
@@ -79,30 +142,50 @@ final class AskChatService {
 
             // Inject real rows into table messages from the cached tool data.
             if case .table(var table) = structured {
-                let rows = table.source.flatMap { cachedRows[$0] } ?? lastRows
-                guard !rows.isEmpty else {
-                    return .text("I couldn't fetch the data for that table. Try asking again.")
+                // Only rows from THIS turn's tool call. The old `?? lastRows` fallback could
+                // render a previous question's numbers under a new title.
+                guard let rows = rowsForThisTurn(source: table.source, turnCallIDs: turnCallIDs), !rows.isEmpty else {
+                    return Reply(message: .text("I couldn't fetch the data for that table. Try asking again."), toolRounds: toolRounds)
                 }
                 table.rows = table.limit.map { Array(rows.prefix(max($0, 1))) } ?? rows
+                table.query = queryForThisTurn(source: table.source, turnCallIDs: turnCallIDs)
                 structured = .table(table)
             }
 
             // Stat values are soft-checked against the cached tool rows: a
             // value larger than the data's own total is likely invented.
-            if case .stat(let stat) = structured {
-                let rows = stat.source.flatMap { cachedRows[$0] } ?? lastRows
-                guard !rows.isEmpty else {
-                    return .text("I couldn't fetch the data for that stat. Try asking again.")
+            if case .stat(var stat) = structured {
+                guard let rows = rowsForThisTurn(source: stat.source, turnCallIDs: turnCallIDs), !rows.isEmpty else {
+                    return Reply(message: .text("I couldn't fetch the data for that stat. Try asking again."), toolRounds: toolRounds)
                 }
                 let total = rows.compactMap { Double($0["amount"] ?? $0["value"] ?? "") }.reduce(0) { $0 + abs($1) }
                 if abs(stat.value) > total * 1.05 + 1 {
-                    return .text("I couldn't verify that number against your data. Try asking again.")
+                    return Reply(message: .text("I couldn't verify that number against your data. Try asking again."), toolRounds: toolRounds)
                 }
+                // When the model is clearly reporting the row total, use the total the app
+                // computed instead of the model's arithmetic. Stats that aren't a total (an
+                // average, one category, a count) fall outside the tolerance and are left alone.
+                if total > 0, abs(stat.value) != total, abs(abs(stat.value) - total) / total <= 0.05 {
+                    let sign: Double = stat.value < 0 ? -1 : 1
+                    stat = AskStatMessage(
+                        type: stat.type,
+                        title: stat.title,
+                        value: sign * total,
+                        compare_value: stat.compare_value,
+                        compare_label: stat.compare_label,
+                        good_direction: stat.good_direction,
+                        source: stat.source,
+                        followups: stat.followups,
+                        query: stat.query
+                    )
+                }
+                stat.query = queryForThisTurn(source: stat.source, turnCallIDs: turnCallIDs)
+                structured = .stat(stat)
             }
 
             // Charts likewise: bars are built from tool rows, never model output.
             if case .chart(var chart) = structured {
-                let rows = chart.source.flatMap { cachedRows[$0] } ?? lastRows
+                let rows = rowsForThisTurn(source: chart.source, turnCallIDs: turnCallIDs) ?? []
                 let items: [AskChartItem] = rows.compactMap { row in
                     guard let label = row["category"] ?? row["merchant"] ?? row["label"],
                           let raw = row["amount"] ?? row["value"],
@@ -111,15 +194,31 @@ final class AskChatService {
                     return AskChartItem(label: label, value: abs(value), count: row["count"])
                 }
                 guard !items.isEmpty else {
-                    return .text("I couldn't fetch the data for that chart. Try asking again.")
+                    return Reply(message: .text("I couldn't fetch the data for that chart. Try asking again."), toolRounds: toolRounds)
                 }
                 chart.items = chart.limit.map { Array(items.prefix(max($0, 1))) } ?? items
+                chart.query = queryForThisTurn(source: chart.source, turnCallIDs: turnCallIDs)
                 structured = .chart(chart)
             }
-            return structured
+            return Reply(message: structured, toolRounds: toolRounds)
         }
 
-        throw AskChatError.badResponse("The assistant got stuck fetching data. Try again.")
+        // Loop budget spent. Rather than fail, ask once more with tools withheld so the model
+        // answers from what it already fetched instead of starting another round trip.
+        print("⚠️ AskChat: tool budget (\(maxToolLoops)) exhausted — forcing a final answer")
+        let forced = try await streamCompletion(
+            messages: messages + [[
+                "role": "user",
+                "content": "Answer now using the tool results you already have. Do not call any more tools."
+            ]],
+            onDelta: onDelta,
+            onStreamReset: onStreamReset,
+            allowTools: false
+        )
+        guard !forced.content.isEmpty else {
+            throw AskChatError.badResponse("The assistant got stuck fetching data. Try again.")
+        }
+        return Reply(message: AskMessageDecoder.decode(forced.content), toolRounds: toolRounds)
     }
 
     // MARK: - OpenRouter call (SSE streaming)
@@ -134,7 +233,8 @@ final class AskChatService {
     private func streamCompletion(
         messages: [[String: Any]],
         onDelta: @escaping @Sendable (String) -> Void,
-        onStreamReset: @escaping @Sendable () -> Void
+        onStreamReset: @escaping @Sendable () -> Void,
+        allowTools: Bool = true
     ) async throws -> CompletionResponse {
         var request = URLRequest(url: URL(string: baseURL)!)
         request.httpMethod = "POST"
@@ -142,12 +242,14 @@ final class AskChatService {
         request.setValue(appToken, forHTTPHeaderField: "x-app-token")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
-        let payload: [String: Any] = [
+        var payload: [String: Any] = [
             "model": model,
             "messages": messages,
-            "tools": toolDefinitions,
             "stream": true
         ]
+        if allowTools {
+            payload["tools"] = toolDefinitions
+        }
         request.httpBody = try JSONSerialization.data(withJSONObject: payload)
 
         let (bytes, response) = try await URLSession.shared.bytes(for: request)
@@ -306,6 +408,43 @@ final class AskChatService {
         ]
     }
 
+    /// Rows for a rendered message: the tool call it names, else the most recent call made in
+    /// the same turn. Never an older turn's data.
+    private func rowsForThisTurn(source: String?, turnCallIDs: [String]) -> [[String: String]]? {
+        if let source, let rows = cachedRows[source] { return rows }
+        guard let fallback = turnCallIDs.last else { return nil }
+        return cachedRows[fallback]
+    }
+
+    private func queryForThisTurn(source: String?, turnCallIDs: [String]) -> AskQueryDescriptor? {
+        if let source, let query = cachedQueries[source] { return query }
+        return turnCallIDs.last.flatMap { cachedQueries[$0] }
+    }
+
+    /// Records a tool result plus the call that produced it, bounded to the most recent
+    /// `maxCachedResults` so a long session can't grow this without limit.
+    private func cache(rows: [[String: String]], callID: String, tool: String, argumentsJSON: String) {
+        cachedRows[callID] = rows
+        cachedQueries[callID] = AskQueryDescriptor(tool: tool, arguments: argumentsJSON)
+        lastRows = rows
+        cachedOrder.removeAll { $0 == callID }
+        cachedOrder.append(callID)
+        while cachedOrder.count > maxCachedResults {
+            let stale = cachedOrder.removeFirst()
+            cachedRows[stale] = nil
+            cachedQueries[stale] = nil
+        }
+    }
+
+    /// Drops everything cached for the previous account. Rows are user data - they must not
+    /// survive a user switch.
+    func clearCaches() {
+        cachedRows.removeAll()
+        cachedQueries.removeAll()
+        cachedOrder.removeAll()
+        lastRows = []
+    }
+
     private func executeTool(name: String, argumentsJSON: String, callID: String) -> String {
         let args = (try? JSONSerialization.jsonObject(with: Data(argumentsJSON.utf8)) as? [String: Any]) ?? [:]
         print("🛠️ AskChat: tool \(name) \(args)")
@@ -320,15 +459,13 @@ final class AskChatService {
                 from: args["from"] as? String,
                 to: args["to"] as? String
             )
-            cachedRows[callID] = rows
-            lastRows = rows
+            cache(rows: rows, callID: callID, tool: name, argumentsJSON: argumentsJSON)
             return encodeRows(rows)
 
         case "get_spending_by_category":
             let period = (args["period"] as? String) ?? "month"
             let rows = spendingByCategoryRows(period: period, from: args["from"] as? String, to: args["to"] as? String)
-            cachedRows[callID] = rows
-            lastRows = rows
+            cache(rows: rows, callID: callID, tool: name, argumentsJSON: argumentsJSON)
             return encodeRows(rows)
 
         case "get_categories":
@@ -338,20 +475,17 @@ final class AskChatService {
             let category = args["category"] as? String
             let periods = (args["periods"] as? [[String: Any]]) ?? []
             let rows = comparisonRows(periods: periods, category: category)
-            cachedRows[callID] = rows
-            lastRows = rows
+            cache(rows: rows, callID: callID, tool: name, argumentsJSON: argumentsJSON)
             return encodeRows(rows)
 
         case "get_budgets":
             let rows = budgetRows()
-            cachedRows[callID] = rows
-            lastRows = rows
+            cache(rows: rows, callID: callID, tool: name, argumentsJSON: argumentsJSON)
             return encodeRows(rows)
 
         case "get_subscriptions":
             let rows = subscriptionRows()
-            cachedRows[callID] = rows
-            lastRows = rows
+            cache(rows: rows, callID: callID, tool: name, argumentsJSON: argumentsJSON)
             return encodeRows(rows)
 
         case "convert_currency":
@@ -435,6 +569,9 @@ final class AskChatService {
         return grouped
             .map { (category, agg) in (category, agg.amount, agg.count) }
             .sorted { $0.1 > $1.1 }
+            // Ranked by spend, so a cap keeps the long tail of tiny categories out of the
+            // model's context without hiding anything the user is likely asking about.
+            .prefix(maxCategoryRows)
             .map { ["category": $0.0, "amount": String(format: "%.2f", $0.1), "count": "\($0.2)"] }
     }
 
@@ -907,7 +1044,7 @@ final class AskChatService {
 
         1. {"type": "text", "text": "..."} — normal answers, anything conversational. When you ask the user to DECIDE something (disambiguation, yes/no, picking between options), add "choices": ["...", "..."] with 2-4 short tappable answers.
 
-        2. {"type": "table", "title": "...", "columns": [{"key": "...", "label": "...", "align": "left|right", "format": "currency"?}]} — when showing transactions or spending data. RULES: you MUST call a data tool first (get_recent_transactions or get_spending_by_category); pick column keys from the tool result's row keys; do NOT include rows — the app fills them from the tool result; money columns get "align": "right" and "format": "currency". Never invent, recall, or estimate numbers yourself — no tool result, no table.
+        2. {"type": "table", "title": "...", "columns": [{"key": "...", "label": "...", "align": "left|right", "format": "currency"?}]} — when showing transactions or spending data. RULES: you MUST call a data tool first (get_recent_transactions or get_spending_by_category); pick column keys from the tool result's row keys; do NOT include rows — the app fills them from the tool result; money columns get "align": "right" and "format": "currency"; set "source" to the tool_call_id whose rows you are showing, so the app fills the right data and a later turn can tell what the table was built from. Never invent, recall, or estimate numbers yourself — no tool result, no table.
 
         3. {"type": "transaction_draft", "amount": 12.5, "currency": "\(currency)", "merchant": "...", "date": "yyyy-MM-dd", "note": "...", "suggested_categories": [{"id": "...", "name": "...", "confidence": 0.9}]} — when the user asks to add/log a transaction (e.g. "add $12 lunch at Chipotle yesterday"). RULES: amount is required — if it's missing or ambiguous, reply with a short text question instead of guessing; date defaults to today, resolve words like "yesterday"; note only if the user said something worth keeping; call get_categories first and suggest the best 1-3 matches from the REAL list (use their exact ids and names — never make up categories). You never create the transaction yourself — the app asks the user to confirm.
 
@@ -919,9 +1056,9 @@ final class AskChatService {
 
         6. {"type": "transaction_delete", "transaction_ids": ["...", "..."]} — when the user asks to delete/remove transactions (max 10). RULES: call get_recent_transactions first and use exact "id" values — never invent ids; if it's unclear which transactions the user means, ask a short text question. The app shows the transactions and asks the user to confirm — you never delete anything yourself.
 
-        7. {"type": "chart", "title": "...", "limit": 5?} — when the user asks for a visual/chart/graph of spending, or when a ranked category/merchant comparison reads better as bars than a table. RULES: you MUST call a data tool first (usually get_spending_by_category); do NOT include items or values — the app builds the bars from the tool result. Keep the title short, e.g. "July spending". If the user asks for a top N ("top 5 categories"), set "limit": N — the app keeps the N largest rows. Tables support "limit" the same way. For comparisons across time periods, call compare_spending first — its rows chart as one bar per period (or use a stat for a simple two-period comparison).
+        7. {"type": "chart", "title": "...", "limit": 5?} — when the user asks for a visual/chart/graph of spending, or when a ranked category/merchant comparison reads better as bars than a table. RULES: you MUST call a data tool first (usually get_spending_by_category); do NOT include items or values — the app builds the bars from the tool result; set "source" to the tool_call_id whose rows the bars come from. Keep the title short, e.g. "July spending". If the user asks for a top N ("top 5 categories"), set "limit": N — the app keeps the N largest rows. Tables support "limit" the same way. For comparisons across time periods, call compare_spending first — its rows chart as one bar per period (or use a stat for a simple two-period comparison).
 
-        8. {"type": "stat", "title": "July spending", "value": 22722, "compare_value": 25900?, "compare_label": "June"?, "good_direction": "down"?} — when the user asks for a single headline number ("how much did I spend this month?", "am I overspending?"). RULES: call a data tool first and compute value (and compare_value if comparing periods) strictly from tool results; good_direction is "down" for spending metrics, "up" for income/savings; the app computes and renders the percentage itself.
+        8. {"type": "stat", "title": "July spending", "value": 22722, "compare_value": 25900?, "compare_label": "June"?, "good_direction": "down"?} — when the user asks for a single headline number ("how much did I spend this month?", "am I overspending?"). RULES: call a data tool first and compute value (and compare_value if comparing periods) strictly from tool results; good_direction is "down" for spending metrics, "up" for income/savings; set "source" to the tool_call_id you computed from; the app computes and renders the percentage itself.
 
         9. {"type": "category_draft", "name": "Fast Food", "emoji": "🍔", "parent": "Dining"?, "category_type": "expense"} — when the user asks for category ideas, wants to organize their spending, or a transaction clearly fits no existing category. RULES: call get_categories first and only suggest something that does NOT already exist; "parent" must be an EXACT existing category name (omit for a top-level category); one suggestion per message; pick a fitting emoji. The app asks the user to confirm and handles the Pro paywall — you never create it yourself.
 

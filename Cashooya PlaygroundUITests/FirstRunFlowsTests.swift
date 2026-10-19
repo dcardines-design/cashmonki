@@ -150,5 +150,17 @@ final class FirstRunFlowsTests: XCTestCase {
         // Give the model time to answer.
         sleep(25)
         dump(app, "ASK-RESPONSE")
+
+        // Follow-up that only works if the first answer carried its data into history.
+        if let input = app.textViews.allElementsBoundByIndex.first ?? app.textFields.allElementsBoundByIndex.first {
+            input.tap()
+            input.typeText("top 3 only")
+            print("TYPED FOLLOWUP >>> top 3 only")
+            sleep(2)
+            let send = app.buttons["send-01"]
+            if send.exists { send.tap(); print("TAPPED >>> send-01 (followup)") }
+            sleep(30)
+            dump(app, "ASK-FOLLOWUP")
+        }
     }
 }

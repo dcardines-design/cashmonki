@@ -81,11 +81,15 @@ struct AskDisplayMessage: Identifiable, Codable {
     let id: UUID
     let isUser: Bool
     var content: Content
+    /// Tool calls and results behind this reply, replayed to the model on later turns so it
+    /// sees its own past work as real tool messages instead of prose.
+    var toolRounds: [AskToolRound]? = nil
 
-    init(id: UUID = UUID(), isUser: Bool, content: Content) {
+    init(id: UUID = UUID(), isUser: Bool, content: Content, toolRounds: [AskToolRound]? = nil) {
         self.id = id
         self.isUser = isUser
         self.content = content
+        self.toolRounds = toolRounds
     }
 
     /// App-side record of a past turn, sent back to the model as conversation
@@ -96,17 +100,37 @@ struct AskDisplayMessage: Identifiable, Codable {
         switch content {
         case .text(let text): return text
         case .systemNote(let text): return "(App completed and recorded an action the user approved: \"\(text)\". You did not do this — never repeat or claim it.)"
-        case .table(let table): return "(App rendered a data table titled \"\(table.title)\".)"
+        case .table(let table):
+            // Title alone left follow-ups like "top 5 only" with nothing to work from: no
+            // columns, no rows, no idea what query produced them.
+            return "(App rendered a data table titled \"\(table.title)\"\(Self.describe(table.query)). \(Self.describeTable(table)) Revise it by emitting a fresh full table.)"
         case .draft(let draft):
             return "(App is showing a PENDING transaction card, not saved yet: \(Self.describe(draft)). Revise it by emitting a fresh full transaction_draft.)"
         case .draftBatch(let batch):
             let rows = batch.transactions.map(Self.describe).joined(separator: "; ")
             return "(App is showing a PENDING multi-transaction card, none saved yet: \(rows). Revise it by emitting a fresh full transaction_draft_batch with every row you still want.)"
-        case .update(let update): return "(App is showing a PENDING edit card, not applied yet, for transactions \(update.ids.joined(separator: ", ")).)"
-        case .single(let ref): return "(App rendered transaction cards: \(ref.ids.joined(separator: ", ")).)"
+        case .update(let update):
+            // Carry the proposed values, not just ids: without them a follow-up like
+            // "make it 500" has nothing to anchor to and the model invents the rest.
+            let changes = Self.describe(update)
+            let detail = changes.isEmpty ? "" : ": \(changes)"
+            return "(App is showing a PENDING edit card, not applied yet, for transactions \(update.ids.joined(separator: ", "))\(detail). Revise it by emitting a fresh full transaction_update with every field you still want.)"
+        case .single(let ref):
+            // Ids alone are useless for a follow-up like "change that to 500" - look the
+            // rows up so the model can see what it is being asked to edit.
+            let described = Self.describeTransactions(ids: ref.ids)
+            return "(App rendered transaction cards: \(described).)"
         case .deleteRequest(let delete): return "(App is showing a PENDING delete card, nothing deleted yet, for transactions \(delete.ids.joined(separator: ", ")).)"
-        case .chart(let chart): return "(App rendered a chart titled \"\(chart.title)\".)"
-        case .stat(let stat): return "(App rendered a stat: \(stat.title) = \(stat.value).)"
+        case .chart(let chart):
+            let bars = (chart.items ?? []).map { "\($0.label)=\($0.value)" }
+            let shown = Self.clip(bars)
+            return "(App rendered a chart titled \"\(chart.title)\"\(Self.describe(chart.query)). Bars: \(shown). Revise it by emitting a fresh full chart.)"
+        case .stat(let stat):
+            var text = "(App rendered a stat: \(stat.title) = \(stat.value)"
+            if let compare = stat.compare_value {
+                text += ", compared against \(compare)\(stat.compare_label.map { " (\($0))" } ?? "")"
+            }
+            return text + "\(Self.describe(stat.query)).)"
         case .question(let text, _): return text
         case .categoryDraft(let draft): return "(App is showing a PENDING new-category card, not created yet: \"\(draft.name)\"\(draft.parent.map { " under \($0)" } ?? "").)"
         case .budgetDraft(let draft):
@@ -139,6 +163,68 @@ struct AskDisplayMessage: Identifiable, Codable {
 
     /// Full pending values, so a follow-up like "make it 150" can be answered
     /// with a corrected card instead of a guess.
+    /// Columns and rows of a rendered table, so a follow-up can narrow or re-slice it
+    /// instead of guessing. Capped to keep one turn from flooding the context.
+    private static func describeTable(_ table: AskTableMessage) -> String {
+        let columns = table.columns.map { $0.label }.joined(separator: " | ")
+        let rows = table.rows ?? []
+        let rendered = rows.map { row in
+            table.columns.map { row[$0.key] ?? "" }.joined(separator: " | ")
+        }
+        guard !rendered.isEmpty else { return "Columns: \(columns). No rows." }
+        return "Columns: \(columns). Rows: \(clip(rendered))."
+    }
+
+    /// Joins at most `maxHistoryRows` entries, noting how many were left out.
+    private static func clip(_ entries: [String], maxHistoryRows: Int = 50) -> String {
+        guard entries.count > maxHistoryRows else { return entries.joined(separator: "; ") }
+        let shown = entries.prefix(maxHistoryRows).joined(separator: "; ")
+        return "\(shown) (+\(entries.count - maxHistoryRows) more)"
+    }
+
+    /// " from get_spending_by_category period=month" - the query behind a rendered result,
+    /// which is what makes "same but last month" answerable.
+    private static func describe(_ query: AskQueryDescriptor?) -> String {
+        guard let query else { return "" }
+        return " from \(query.summary)"
+    }
+
+    /// Looks up transactions by id and renders "id = amount currency at merchant on date",
+    /// so a card the app showed earlier still means something to the model next turn.
+    /// Falls back to the bare id when the row is gone.
+    private static func describeTransactions(ids: [String]) -> String {
+        let all = UserManager.shared.currentUser.transactions
+        return ids.map { id -> String in
+            guard let txn = all.first(where: { $0.id.uuidString == id || $0.id.uuidString.lowercased() == id.lowercased() }) else {
+                return id
+            }
+            var parts = ["\(id) = \(abs(txn.amount)) \(txn.primaryCurrency.rawValue)"]
+            if let merchant = txn.merchantName, !merchant.isEmpty { parts.append("at \(merchant)") }
+            parts.append("category \(txn.category)")
+            parts.append("on \(Self.historyDateFormatter.string(from: txn.date))")
+            return parts.joined(separator: " ")
+        }.joined(separator: "; ")
+    }
+
+    private static let historyDateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter
+    }()
+
+    /// The fields an edit card is actually proposing. Only set fields are listed, so the
+    /// model can tell "change the amount" from "change amount and merchant".
+    private static func describe(_ update: AskTransactionUpdate) -> String {
+        var parts: [String] = []
+        if let amount = update.amount { parts.append("amount \(amount)\(update.currency.map { " \($0)" } ?? "")") }
+        else if let currency = update.currency { parts.append("currency \(currency)") }
+        if let merchant = update.merchant, !merchant.isEmpty { parts.append("merchant \(merchant)") }
+        if let date = update.date { parts.append("date \(date)") }
+        if let note = update.note, !note.isEmpty { parts.append("note \"\(note)\"") }
+        if update.category_id != nil { parts.append("a new category") }
+        return parts.joined(separator: ", ")
+    }
+
     private static func describe(_ draft: AskTransactionDraft) -> String {
         var parts = ["\(draft.amount) \(draft.currency ?? "")"]
         if let merchant = draft.merchant, !merchant.isEmpty { parts.append("at \(merchant)") }
@@ -278,6 +364,8 @@ final class AskChatManager: ObservableObject {
     /// cloud copy (returning user on a fresh install). Called on login/logout via notification.
     func reloadForCurrentUser() {
         let uid = Self.currentUID()
+        // Tool results are user data - drop the previous account's rows before loading.
+        AskChatService.shared.clearCaches()
         let local = Self.loadPersisted()
         messages = (local?.messages ?? []).filter { !Self.isLimitNotice($0) }
         confirmedDrafts = Set(local?.confirmed ?? [])
@@ -332,6 +420,10 @@ final class AskChatManager: ObservableObject {
     /// Start of the in-flight turn, so the reply event can report latency.
     private var turnStartedAt: Date? = nil
 
+    /// Tool rounds from the reply being settled, stamped onto the assistant message once it
+    /// lands (streamed text settles later than structured cards, so both paths call attach).
+    private var pendingToolRounds: [AskToolRound] = []
+
     func send(_ text: String, source: SendSource = .typed) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, !isThinking else { return }
@@ -361,8 +453,11 @@ final class AskChatManager: ObservableObject {
 
         persist()
 
-        // Cap context: only the last 20 messages go to the model.
-        let history = visibleMessages.suffix(20).map { (isUser: $0.isUser, text: $0.historyText) }
+        // Cap context: only the last 20 messages go to the model. Tool rounds ride along;
+        // the service decides how many of the most recent ones to replay.
+        let history = visibleMessages.suffix(20).map {
+            AskChatService.HistoryTurn(isUser: $0.isUser, text: $0.historyText, toolRounds: $0.toolRounds)
+        }
         Task {
             do {
                 let reply = try await AskChatService.shared.send(
@@ -446,7 +541,16 @@ final class AskChatManager: ObservableObject {
             messages.append(AskDisplayMessage(isUser: false, content: .text(cleaned)))
         }
         streamingMessageID = nil
+        attachPendingToolRounds()
         persist()
+    }
+
+    /// Stamps the tool exchange onto the assistant message that just landed.
+    private func attachPendingToolRounds() {
+        defer { pendingToolRounds = [] }
+        guard !pendingToolRounds.isEmpty,
+              let index = messages.lastIndex(where: { !$0.isUser }) else { return }
+        messages[index].toolRounds = pendingToolRounds
     }
 
     private func handleStreamReset() {
@@ -471,7 +575,9 @@ final class AskChatManager: ObservableObject {
         return Int(Date().timeIntervalSince(start) * 1000)
     }
 
-    private func finish(with reply: AskStructuredMessage) {
+    private func finish(with result: AskChatService.Reply) {
+        let reply = result.message
+        pendingToolRounds = result.toolRounds
         isThinking = false
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
         AnalyticsManager.shared.track(.askReplyReceived, properties: [
@@ -543,6 +649,7 @@ final class AskChatManager: ObservableObject {
             appendPending(.subscriptionDelete(delete))
         }
         streamingMessageID = nil
+        attachPendingToolRounds()
         persist()
     }
 

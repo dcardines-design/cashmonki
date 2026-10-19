@@ -186,6 +186,53 @@ struct AskCategoryDraft: Codable {
     let category_type: String?
 }
 
+// MARK: - Tool-call replay
+
+/// One result returned to the model for a tool call it made.
+struct AskToolResult: Codable {
+    let callID: String
+    let content: String
+}
+
+/// One round of the tool loop: the assistant message that requested calls, plus each
+/// result. Stored on the turn so a later request can replay the exchange as real
+/// `assistant`/`tool` messages instead of prose, which is what the model expects and
+/// what stops it re-running tools it already ran.
+struct AskToolRound: Codable {
+    /// `rawAssistantMessage` re-encoded as JSON, since it isn't Codable itself.
+    let assistantJSON: String
+    let results: [AskToolResult]
+
+    /// Back to the wire format. Returns nil if the stored JSON no longer parses.
+    var assistantMessage: [String: Any]? {
+        guard let data = assistantJSON.data(using: .utf8) else { return nil }
+        return try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+    }
+}
+
+// MARK: - Query provenance
+
+/// The tool call that produced a table, chart or stat. Injected client-side so a later turn
+/// can see what was actually asked for - without it "same but last month" has no period to
+/// shift, and the model has to guess the original query.
+struct AskQueryDescriptor: Codable {
+    let tool: String
+    /// Raw JSON arguments as the model sent them.
+    let arguments: String
+
+    /// Compact one-line form for conversation history, e.g.
+    /// `get_spending_by_category period=month, limit=5`.
+    var summary: String {
+        guard let data = arguments.data(using: .utf8),
+              let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              !parsed.isEmpty else {
+            return tool
+        }
+        let pairs = parsed.keys.sorted().map { key in "\(key)=\(parsed[key] ?? "")" }
+        return "\(tool) \(pairs.joined(separator: ", "))"
+    }
+}
+
 // MARK: - Stat card (hero number + trend)
 
 struct AskStatMessage: Codable {
@@ -201,6 +248,9 @@ struct AskStatMessage: Codable {
     let source: String?
     /// 2-3 suggested next questions, shown as chips under the card.
     let followups: [String]?
+
+    /// Injected client-side from the tool call behind `source`; not sent by the model.
+    var query: AskQueryDescriptor? = nil
 }
 
 // MARK: - Chart (horizontal bars)
@@ -226,7 +276,10 @@ struct AskChartMessage: Codable {
     /// Injected client-side; not part of the model's JSON.
     var items: [AskChartItem]? = nil
 
-    private enum CodingKeys: String, CodingKey { case type, title, source, limit, items, followups }
+    /// Injected client-side from the tool call behind `source`; not sent by the model.
+    var query: AskQueryDescriptor? = nil
+
+    private enum CodingKeys: String, CodingKey { case type, title, source, limit, items, followups, query }
 }
 
 /// Proposed deletion of 1-10 existing transactions. Ids must come from tool
@@ -285,6 +338,9 @@ struct AskTableMessage: Codable {
     var rows: [[String: String]]?
     /// Tool-call id the rows come from; nil = most recent tool result.
     let source: String?
+
+    /// Injected client-side from the tool call behind `source`; not sent by the model.
+    var query: AskQueryDescriptor? = nil
 }
 
 // MARK: - Transaction draft
