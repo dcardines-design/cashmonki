@@ -451,7 +451,7 @@ extension HomePage {
                     let prevStart = cal.date(byAdding: .day, value: -1, to: periodStartDate) ?? periodStartDate
                     let prevEnd = cal.date(byAdding: .day, value: -1, to: periodEndDate) ?? periodEndDate
                     let prevTransactions = transactions.filter { txn in
-                        txn.date >= prevStart && txn.date <= prevEnd
+                        txn.date >= prevStart && txn.date < prevEnd // prevEnd is the current period's start
                     }.sorted { $0.date < $1.date }
                     let mapped = mapPreviousPeriodToCurrentTimeline(
                         previousTransactions: prevTransactions,
@@ -466,7 +466,7 @@ extension HomePage {
                     let prevStart = cal.date(byAdding: .weekOfYear, value: -1, to: periodStartDate) ?? periodStartDate
                     let prevEnd = cal.date(byAdding: .weekOfYear, value: -1, to: periodEndDate) ?? periodEndDate
                     let prevTransactions = transactions.filter { txn in
-                        txn.date >= prevStart && txn.date <= prevEnd
+                        txn.date >= prevStart && txn.date < prevEnd // prevEnd is the current period's start
                     }.sorted { $0.date < $1.date }
                     let mapped = mapPreviousPeriodToCurrentTimeline(
                         previousTransactions: prevTransactions,
@@ -481,7 +481,7 @@ extension HomePage {
                     let prevStart = cal.date(byAdding: .month, value: -1, to: periodStartDate) ?? periodStartDate
                     let prevEnd = cal.date(byAdding: .month, value: -1, to: periodEndDate) ?? periodEndDate
                     let prevTransactions = transactions.filter { txn in
-                        txn.date >= prevStart && txn.date <= prevEnd
+                        txn.date >= prevStart && txn.date < prevEnd // prevEnd is the current period's start
                     }.sorted { $0.date < $1.date }
                     let mapped = mapPreviousPeriodToCurrentTimeline(
                         previousTransactions: prevTransactions,

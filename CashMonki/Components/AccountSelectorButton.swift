@@ -155,8 +155,9 @@ struct AccountSelectorButton: View {
         formatter.maximumFractionDigits = 2
         formatter.groupingSeparator = ","
 
-        let formattedAmount = formatter.string(from: NSNumber(value: displayBalance)) ?? "\(displayBalance)"
-        return "\(primaryCurrency.symbol)\(formattedAmount)"
+        let formattedAmount = formatter.string(from: NSNumber(value: abs(displayBalance))) ?? "\(abs(displayBalance))"
+        let sign = displayBalance < 0 ? "-" : ""
+        return "\(sign)\(primaryCurrency.symbol)\(formattedAmount)"
     }
 }
 
@@ -418,8 +419,9 @@ struct AccountOptionRow: View {
         formatter.maximumFractionDigits = 2
         formatter.groupingSeparator = ","
 
-        let formattedAmount = formatter.string(from: NSNumber(value: displayBalance)) ?? "\(displayBalance)"
-        return "\(primaryCurrency.symbol)\(formattedAmount)"
+        let formattedAmount = formatter.string(from: NSNumber(value: abs(displayBalance))) ?? "\(abs(displayBalance))"
+        let sign = displayBalance < 0 ? "-" : ""
+        return "\(sign)\(primaryCurrency.symbol)\(formattedAmount)"
     }
 
     var body: some View {

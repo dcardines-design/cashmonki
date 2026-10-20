@@ -52,17 +52,17 @@ final class CurrencyPreferences: ObservableObject {
     
     /// Format amount with primary currency symbol
     func formatPrimaryAmount(_ amount: Double) -> String {
-        return "\(primarySymbol)\(formatCurrency(amount))"
+        return formatSigned(amount, symbol: primarySymbol)
     }
     
     /// Format amount with secondary currency symbol
     func formatSecondaryAmount(_ amount: Double) -> String {
-        return "\(secondarySymbol)\(formatCurrency(amount))"
+        return formatSigned(amount, symbol: secondarySymbol)
     }
     
     /// Format amount with specified currency
     func formatAmount(_ amount: Double, currency: Currency) -> String {
-        return "\(currency.symbol)\(formatCurrency(amount))"
+        return formatSigned(amount, symbol: currency.symbol)
     }
     
     // MARK: - Currency Updates
@@ -165,6 +165,12 @@ final class CurrencyPreferences: ObservableObject {
     
     // MARK: - Helper Functions
     
+    /// Symbol + amount with the minus sign leading the symbol ("-$15", not "$-15")
+    private func formatSigned(_ amount: Double, symbol: String) -> String {
+        let sign = amount < 0 ? "-" : ""
+        return "\(sign)\(symbol)\(formatCurrency(abs(amount)))"
+    }
+
     /// Format currency amount with smart decimal handling
     private func formatCurrency(_ value: Double) -> String {
         let formatter = NumberFormatter()

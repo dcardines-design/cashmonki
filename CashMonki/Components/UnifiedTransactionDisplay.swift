@@ -383,8 +383,9 @@ struct UnifiedTransactionDisplay: View {
         formatter.minimumFractionDigits = 0
         formatter.maximumFractionDigits = 2
         formatter.groupingSeparator = ","
-        let formattedAmount = formatter.string(from: NSNumber(value: amount)) ?? String(format: "%.0f", amount)
-        return "\(currency.symbol)\(formattedAmount)"
+        let formattedAmount = formatter.string(from: NSNumber(value: abs(amount))) ?? String(format: "%.0f", abs(amount))
+        let sign = amount < 0 ? "-" : ""
+        return "\(sign)\(currency.symbol)\(formattedAmount)"
     }
     
     private func formatDate(_ date: Date) -> String {

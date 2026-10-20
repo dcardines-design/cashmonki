@@ -23,6 +23,9 @@ final class AskChatService {
     private let appToken = "c0790e4ae381bb707d5fd21a7a7c6f0c37ec0aa1988aa129"
     private let model = "anthropic/claude-sonnet-4.5"
     private let maxToolLoops = 4
+    /// Output cap per request. Without it OpenRouter reserves the model max
+    /// (64k) and returns 402 whenever the balance can't cover that.
+    private let maxTokens = 2000
 
     /// Rows from tool calls this session, keyed by tool_call_id, plus the most
     /// recent result as a fallback when the model omits `source`.
@@ -272,7 +275,8 @@ final class AskChatService {
         var payload: [String: Any] = [
             "model": model,
             "messages": messages,
-            "stream": true
+            "stream": true,
+            "max_tokens": maxTokens
         ]
         if allowTools {
             payload["tools"] = toolDefinitions

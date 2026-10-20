@@ -791,7 +791,7 @@ struct ReceiptsPage: View {
 
                         // Amount and percentage
                         HStack(spacing: 4) {
-                            Text("+\(currencyPrefs.formatPrimaryAmount(allOthersAmount))")
+                            Text(currencyPrefs.formatPrimaryAmount(allOthersAmount))
                                 .font(AppFonts.overusedGroteskMedium(size: 16))
                                 .foregroundStyle(AppColors.foregroundSecondary)
 

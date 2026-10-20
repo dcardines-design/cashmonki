@@ -592,16 +592,16 @@ extension HomePage {
             // Round millions to nearest 5 or 10
             let millionValue = absValue / 1000000
             let roundedMillion = roundToNearestFiveOrTen(millionValue)
-            return "\(symbol)\(sign)\(Int(roundedMillion))M"
+            return "\(sign)\(symbol)\(Int(roundedMillion))M"
         } else if absValue >= 1000 {
             // Round thousands to nearest 5 or 10
             let thousandValue = absValue / 1000
             let roundedThousand = roundToNearestFiveOrTen(thousandValue)
-            return "\(symbol)\(sign)\(Int(roundedThousand))k"
+            return "\(sign)\(symbol)\(Int(roundedThousand))k"
         } else {
             // Round smaller values to nearest 5 or 10
             let rounded = roundToNearestFiveOrTen(absValue)
-            return "\(symbol)\(sign)\(Int(rounded))"
+            return "\(sign)\(symbol)\(Int(rounded))"
         }
     }
     
@@ -736,9 +736,10 @@ extension HomePage {
         nf.groupingSeparator = ","
         nf.minimumFractionDigits = 0
         nf.maximumFractionDigits = 2
-        let formatted = nf.string(from: NSNumber(value: value)) ?? "0"
+        let formatted = nf.string(from: NSNumber(value: abs(value))) ?? "0"
         let primaryCurrency = CurrencyPreferences.shared.primaryCurrency
-        return "\(primaryCurrency.symbol)\(formatted)"
+        let sign = value < 0 ? "-" : ""
+        return "\(sign)\(primaryCurrency.symbol)\(formatted)"
     }
 
     // MARK: - Amount Privacy
@@ -760,15 +761,16 @@ extension HomePage {
         nf.groupingSeparator = ","
         nf.minimumFractionDigits = 0
         nf.maximumFractionDigits = 2
-        let formatted = nf.string(from: NSNumber(value: value)) ?? "0"
+        let formatted = nf.string(from: NSNumber(value: abs(value))) ?? "0"
         let primaryCurrency = CurrencyPreferences.shared.primaryCurrency
+        let sign = value < 0 ? "-" : ""
 
         // Split at decimal point and return just the whole number part with symbol
         if let dotIndex = formatted.firstIndex(of: ".") {
             let wholeNumber = String(formatted[..<dotIndex])
-            return "\(primaryCurrency.symbol)\(wholeNumber)"
+            return "\(sign)\(primaryCurrency.symbol)\(wholeNumber)"
         }
-        return "\(primaryCurrency.symbol)\(formatted)"
+        return "\(sign)\(primaryCurrency.symbol)\(formatted)"
     }
 
     /// Returns just the decimal part if exists (e.g., ".93"), or empty string if no decimals

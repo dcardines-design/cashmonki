@@ -131,8 +131,9 @@ struct EditWalletSheet: View {
         formatter.minimumFractionDigits = 0
         formatter.maximumFractionDigits = 2
         formatter.groupingSeparator = ","
-        let formattedAmount = formatter.string(from: NSNumber(value: balance)) ?? "\(balance)"
-        return "\(currencyPrefs.primaryCurrency.symbol)\(formattedAmount)"
+        let formattedAmount = formatter.string(from: NSNumber(value: abs(balance))) ?? "\(abs(balance))"
+        let sign = balance < 0 ? "-" : ""
+        return "\(sign)\(currencyPrefs.primaryCurrency.symbol)\(formattedAmount)"
     }
     
     var body: some View {

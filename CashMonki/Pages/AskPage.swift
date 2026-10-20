@@ -787,11 +787,7 @@ final class AskChatManager: ObservableObject {
         let currency = update.currency.flatMap { code in
             Currency.allCases.first { $0.rawValue.uppercased() == code.uppercased() }
         }
-        let date: Date? = update.date.flatMap {
-            let formatter = DateFormatter()
-            formatter.dateFormat = "yyyy-MM-dd"
-            return formatter.date(from: $0)
-        }
+        let date: Date? = update.date.flatMap { AskFormat.transactionDate(from: $0) }
 
         var updatedCount = 0
         for id in update.ids {
@@ -1176,9 +1172,7 @@ extension AskTransactionDraft {
 
     var resolvedDate: Date {
         guard let date else { return Date() }
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd"
-        return formatter.date(from: date) ?? Date()
+        return AskFormat.transactionDate(from: date) ?? Date()
     }
 }
 
@@ -1228,6 +1222,23 @@ extension AskSubscriptionDraft {
 // MARK: - Formatting helpers
 
 enum AskFormat {
+    /// Transaction date from the model's "yyyy-MM-dd" (or date-time) string.
+    /// An explicit time is kept. A bare date gets the current time when it's
+    /// today and noon local time otherwise, so it never lands on 12am.
+    static func transactionDate(from string: String) -> Date? {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        for format in ["yyyy-MM-dd'T'HH:mm:ss", "yyyy-MM-dd'T'HH:mm", "yyyy-MM-dd HH:mm:ss", "yyyy-MM-dd HH:mm"] {
+            formatter.dateFormat = format
+            if let date = formatter.date(from: string) { return date }
+        }
+        formatter.dateFormat = "yyyy-MM-dd"
+        guard let day = formatter.date(from: string) else { return nil }
+        let calendar = Calendar.current
+        if calendar.isDateInToday(day) { return Date() }
+        return calendar.date(bySettingHour: 12, minute: 0, second: 0, of: day) ?? day
+    }
+
     /// Smart currency formatting per app rules: hide .00, show .01, group thousands.
     static func currency(_ value: Double, code: String? = nil) -> String {
         let formatter = NumberFormatter()
@@ -1242,7 +1253,7 @@ enum AskFormat {
 
     /// Currency with the user's primary symbol ("₱1,300") for chart/table cells.
     static func currencyWithSymbol(_ value: Double) -> String {
-        CurrencyPreferences.shared.primaryCurrency.symbol + currency(value)
+        (value < 0 ? "-" : "") + CurrencyPreferences.shared.primaryCurrency.symbol + currency(abs(value))
     }
 
     /// Inline markdown (**bold**, *italic*) with plain-text fallback.
@@ -2109,9 +2120,7 @@ private struct AskDraftCard: View {
         note = draft.note ?? ""
         currencyCode = draft.currency ?? CurrencyPreferences.shared.primaryCurrency.rawValue
         if let dateString = draft.date {
-            let formatter = DateFormatter()
-            formatter.dateFormat = "yyyy-MM-dd"
-            date = formatter.date(from: dateString) ?? Date()
+            date = AskFormat.transactionDate(from: dateString) ?? Date()
         }
         if let top = validSuggestions.first {
             selectedCategoryID = top.id
