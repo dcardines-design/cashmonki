@@ -62,6 +62,7 @@ struct HomePage: View {
     @State internal var selectedTransactionForDetail: Txn?
     @State internal var showingUsageLimitModal: Bool = false
     @State internal var showingCustomPaywall: Bool = false
+    @State internal var paywallMode: PaywallMode = .default
     @State internal var showingCameraPermissionAlert: Bool = false
     @State internal var showingAddSubscription: Bool = false
     @State internal var showingFeedbackBoard: Bool = false
@@ -364,7 +365,7 @@ struct HomePage: View {
                 .presentationDragIndicator(.hidden)
             }
             .fullScreenCover(isPresented: $showingCustomPaywall) {
-                CustomPaywallSheet(isPresented: $showingCustomPaywall)
+                TieredPaywallSheet(isPresented: $showingCustomPaywall, mode: paywallMode)
             }
             .slideInSheet(isPresented: $showingFeedbackBoard) {
                 FeedbackInboxSheet(isPresented: $showingFeedbackBoard)

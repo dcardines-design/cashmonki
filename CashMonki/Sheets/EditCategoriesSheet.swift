@@ -392,7 +392,7 @@ struct EditCategoriesSheet: View {
             .presentationDragIndicator(.hidden)
         }
         .fullScreenCover(isPresented: $showingCustomPaywall) {
-            CustomPaywallSheet(isPresented: $showingCustomPaywall)
+            TieredPaywallSheet(isPresented: $showingCustomPaywall)
         }
         .sheet(
             isPresented: Binding(

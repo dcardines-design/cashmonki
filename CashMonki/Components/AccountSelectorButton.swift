@@ -371,7 +371,7 @@ struct AccountPickerSheet: View {
             */
         }
         .fullScreenCover(isPresented: $showingCustomPaywall) {
-            CustomPaywallSheet(isPresented: $showingCustomPaywall)
+            TieredPaywallSheet(isPresented: $showingCustomPaywall)
         }
     }
     

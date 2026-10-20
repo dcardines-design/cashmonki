@@ -266,12 +266,23 @@ final class AskChatManager: ObservableObject {
 
     /// Shown (ephemerally) when a free user hits the daily message limit. Never persisted —
     /// it reflects live daily state, so a stale copy must not survive into the next day's reset.
-    static let limitMessageText = "You've used today's free messages. Upgrade to Pro for unlimited Ask, or come back tomorrow."
+    /// Counts reset at local midnight (DailyUsageManager).
+    static func limitMessageText(for tier: PlanTier) -> String {
+        tier == .plus
+            ? "You've used today's \(tier.dailyAskLimit) Ask messages. They reset at midnight, or upgrade to Pro for \(PlanTier.proDailyAskLimit) a day."
+            : "You've used today's free messages. They reset at midnight, or upgrade for more Ask messages."
+    }
+    /// Notice text from older builds, still filtered out of persisted chats.
+    private static let legacyLimitMessageText = "You've used today's free messages. Upgrade to Pro for unlimited Ask, or come back tomorrow."
     /// Pro's daily cap is fair use: there's nothing to upgrade to, so no paywall.
-    static let fairUseLimitMessageText = "You've reached today's Ask limit. It resets tomorrow."
+    static let fairUseLimitMessageText = "You've reached today's Ask limit. It resets at midnight."
+    private static let legacyFairUseLimitMessageText = "You've reached today's Ask limit. It resets tomorrow."
 
     private static func isLimitNotice(_ m: AskDisplayMessage) -> Bool {
-        if case .text(let t) = m.content { return t == limitMessageText || t == fairUseLimitMessageText }
+        if case .text(let t) = m.content {
+            return t == legacyLimitMessageText || t == legacyFairUseLimitMessageText || t == fairUseLimitMessageText
+                || PlanTier.allCases.contains { t == limitMessageText(for: $0) }
+        }
         return false
     }
 
@@ -423,6 +434,8 @@ final class AskChatManager: ObservableObject {
 
     /// Presents the paywall when a free user hits the daily message limit.
     @Published var showLimitPaywall = false
+    /// Why the paywall is opening (limit hit vs a gated feature).
+    @Published var paywallMode: PaywallMode = .default
 
     /// Where the message came from, for the Ask funnel: typed vs a starter chip.
     enum SendSource: String { case typed, starterChip = "starter_chip" }
@@ -459,7 +472,8 @@ final class AskChatManager: ObservableObject {
             if tier == .pro {
                 messages.append(AskDisplayMessage(isUser: false, content: .text(Self.fairUseLimitMessageText)))
             } else {
-                messages.append(AskDisplayMessage(isUser: false, content: .text(Self.limitMessageText)))
+                messages.append(AskDisplayMessage(isUser: false, content: .text(Self.limitMessageText(for: tier))))
+                paywallMode = .limitHit(.ask)
                 showLimitPaywall = true
             }
             AnalyticsManager.shared.track(.askLimitReached, properties: [
@@ -855,6 +869,7 @@ final class AskChatManager: ObservableObject {
     /// are a paid (Plus/Pro) feature — free users get the paywall instead.
     func confirmCategoryDraft(messageID: UUID, draft: AskCategoryDraft) {
         guard RevenueCatManager.shared.planTier.allowsCustomCategories else {
+            paywallMode = .default
             showLimitPaywall = true
             return
         }
@@ -1047,6 +1062,7 @@ final class AskChatManager: ObservableObject {
     func confirmSubscriptionDraft(messageID: UUID, draft: AskSubscriptionDraft) {
         // Free accounts are capped at 2 recurring items — same gate the Add sheet uses.
         guard SubscriptionManager.shared.canAddMoreSubscriptions else {
+            paywallMode = .default
             showLimitPaywall = true
             return
         }
@@ -1473,7 +1489,7 @@ struct AskPage: View {
         }
         .background(AppColors.backgroundWhite)
         .fullScreenCover(isPresented: $chat.showLimitPaywall) {
-            CustomPaywallSheet(isPresented: $chat.showLimitPaywall)
+            TieredPaywallSheet(isPresented: $chat.showLimitPaywall, mode: chat.paywallMode)
         }
         .sheet(item: $chat.detailTransaction) { transaction in
             ReceiptDetailSheet(

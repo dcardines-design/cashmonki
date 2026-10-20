@@ -233,7 +233,7 @@ struct ContentView: View {
             .environmentObject(toastManager)
         }
         .fullScreenCover(isPresented: $showingTrialEndedPaywall) {
-            CustomPaywallSheet(isPresented: $showingTrialEndedPaywall)
+            TieredPaywallSheet(isPresented: $showingTrialEndedPaywall)
                 .environmentObject(toastManager)
         }
         .sheet(isPresented: $showingReceiptConfirmation) {

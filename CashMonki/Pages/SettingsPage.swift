@@ -320,7 +320,8 @@ struct SettingsPage: View {
                 Button("Cancel", role: .cancel) { }
             }
             .fullScreenCover(isPresented: $showingCustomPaywall) {
-                CustomPaywallSheet(isPresented: $showingCustomPaywall)
+                TieredPaywallSheet(isPresented: $showingCustomPaywall,
+                                   mode: revenueCatManager.planTier == .plus ? .upgrade : .default)
                     .environmentObject(toastManager)
             }
             .fullScreenCover(isPresented: $showingManageBilling) {
@@ -1434,12 +1435,23 @@ struct SettingsPage: View {
                 .clipShape(RoundedRectangle(cornerRadius: 5))
             }
 
-                // Get Cashmonki Pro button / Manage Billing for paid (Plus/Pro) users
-                AppButton.secondary(revenueCatManager.hasPaidSubscription ? "Manage Billing" : "Get Cashmonki Pro ⭐", size: .extraSmall) {
-                    if revenueCatManager.hasPaidSubscription {
-                        showingManageBilling = true // Show manage billing for pro users
-                    } else {
-                        showingCustomPaywall = true // Show paywall for free users
+                // Free: Upgrade · Plus: Upgrade to Pro (+ manage billing) · Pro: Manage Billing
+                switch revenueCatManager.planTier {
+                case .pro:
+                    AppButton.secondary("Manage Billing", size: .extraSmall) {
+                        showingManageBilling = true
+                    }
+                case .plus:
+                    AppButton.secondary("Upgrade to Pro", size: .extraSmall) {
+                        showingCustomPaywall = true
+                    }
+                    AppButton.text("Manage Billing", size: .tripleExtraSmall) {
+                        showingManageBilling = true
+                    }
+                    .frame(maxWidth: .infinity)
+                case .free:
+                    AppButton.secondary("Upgrade", size: .extraSmall) {
+                        showingCustomPaywall = true
                     }
                 }
             }

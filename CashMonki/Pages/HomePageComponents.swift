@@ -268,6 +268,7 @@ extension HomePage {
                     // Check daily usage limit before proceeding
                     guard dailyUsageManager.canUseReceiptAnalysis() else {
                         print("📊 HomePage: Upload blocked - daily limit reached")
+                        paywallMode = .limitHit(.scan)
                         showingCustomPaywall = true
                         return
                     }
@@ -289,6 +290,7 @@ extension HomePage {
                     // Check daily usage limit before proceeding
                     guard dailyUsageManager.canUseReceiptAnalysis() else {
                         print("📊 HomePage: Scan blocked - daily limit reached")
+                        paywallMode = .limitHit(.scan)
                         showingCustomPaywall = true
                         return
                     }
@@ -453,6 +455,7 @@ extension HomePage {
                         showingAddSubscription = true
                     } else {
                         // Show paywall for free users who have reached the limit
+                        paywallMode = .default
                         showingCustomPaywall = true
                     }
                 }
