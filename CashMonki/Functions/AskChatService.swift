@@ -25,7 +25,7 @@ final class AskChatService {
     private let maxToolLoops = 4
     /// Output cap per request. Without it OpenRouter reserves the model max
     /// (64k) and returns 402 whenever the balance can't cover that.
-    private let maxTokens = 2000
+    private let maxTokens = 4096
 
     /// Rows from tool calls this session, keyed by tool_call_id, plus the most
     /// recent result as a fallback when the model omits `source`.
