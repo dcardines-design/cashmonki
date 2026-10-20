@@ -433,4 +433,76 @@ final class DemoRecordingUITests: XCTestCase {
         tapButton(app, "bar-chart-01"); pause(1.5)
         saveScreen("home-3m-bar", app)
     }
+
+    // MARK: - Verification: tier limits (no recording)
+
+    /// Types `text` and taps send until `expect` appears. While a reply is still streaming the
+    /// app keeps the text in the composer and ignores the tap, so retrying is safe.
+    @MainActor
+    private func sendAsk(_ app: XCUIApplication, _ text: String, expect: XCUIElement, timeout: Double = 90) -> Bool {
+        let input = app.textFields.firstMatch
+        XCTAssertTrue(input.waitForExistence(timeout: 5))
+        input.tap()
+        app.typeText(text)
+        let done = app.keyboards.buttons["Done"].firstMatch
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            tapButton(app, "send-01")
+            if expect.waitForExistence(timeout: 3) { dismissKeyboard(app, done); return true }
+        }
+        return false
+    }
+
+    /// Free tier (`-forceTier free`): Ask shows 3 messages left, counts down, and the
+    /// 4th message shows the limit notice + paywall instead of reaching the AI.
+    @MainActor
+    func testVerifyFreeTierAskLimit() throws {
+        let app = XCUIApplication()
+        app.launchArguments += ["-forceTier", "free"]
+        onboardGuest(app, currencyCode: "USD")
+        tapButton(app, "Ask"); pause(1.5)
+
+        XCTAssertTrue(app.staticTexts["3 messages left today"].waitForExistence(timeout: 5), "Free tier should start with 3 Ask messages")
+        saveScreen("tier-free-start", app)
+
+        let expected = ["2 messages left today", "1 message left today", "No messages left today"]
+        for (i, question) in ["what did I spend today?", "what did I spend this week?", "what did I spend this month?"].enumerated() {
+            XCTAssertTrue(sendAsk(app, question, expect: app.staticTexts[expected[i]]), "Expected '\(expected[i])'")
+        }
+        saveScreen("tier-free-used", app)
+
+        // 4th message: blocked locally (once the 3rd reply finishes), paywall appears
+        let notice = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH \"You've used today's free messages\"")).firstMatch
+        let paywallClose = app.buttons["Close"].firstMatch
+        XCTAssertTrue(sendAsk(app, "what did I spend yesterday?", expect: paywallClose), "Paywall should appear on the 4th message")
+        saveScreen("tier-free-paywall", app)
+        paywallClose.tap(); pause(0.8)
+        let skip = app.buttons["Skip"].firstMatch
+        if skip.waitForExistence(timeout: 2) { skip.tap(); pause(1.0) }
+        XCTAssertTrue(notice.waitForExistence(timeout: 5), "Limit notice should be in the chat")
+        saveScreen("tier-free-notice", app)
+    }
+
+    /// Plus tier (`-forceTier plus`): Ask starts at 10 messages left (no messages sent).
+    @MainActor
+    func testVerifyPlusTierAskCounter() throws {
+        let app = XCUIApplication()
+        app.launchArguments += ["-forceTier", "plus"]
+        onboardGuest(app, currencyCode: "USD")
+        tapButton(app, "Ask"); pause(1.5)
+        XCTAssertTrue(app.staticTexts["10 messages left today"].waitForExistence(timeout: 5), "Plus tier should start with 10 Ask messages")
+        saveScreen("tier-plus-start", app)
+    }
+
+    /// Pro tier (`-forceTier pro`): no Ask counter until close to the fair-use cap.
+    @MainActor
+    func testVerifyProTierAskCounter() throws {
+        let app = XCUIApplication()
+        app.launchArguments += ["-forceTier", "pro"]
+        onboardGuest(app, currencyCode: "USD")
+        tapButton(app, "Ask"); pause(1.5)
+        let counter = app.staticTexts.matching(NSPredicate(format: "label ENDSWITH 'left today'")).firstMatch
+        XCTAssertFalse(counter.waitForExistence(timeout: 3), "Pro should not show an Ask counter")
+        saveScreen("tier-pro-start", app)
+    }
 }
