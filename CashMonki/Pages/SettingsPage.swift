@@ -763,7 +763,8 @@ struct SettingsPage: View {
         .background(AppColors.surfacePrimary)
         .onAppear {
             AnalyticsManager.shared.track(.settingsOpened, properties: [
-                "is_pro": revenueCatManager.isProUser
+                "is_pro": revenueCatManager.isProUser,
+                "subscription_tier": revenueCatManager.planTier.rawValue
             ])
             print("⚙️ SETTINGS: ========== SETTINGS PAGE APPEARED ==========")
             print("⚙️ SETTINGS: Checking RevenueCat offerings state...")
@@ -1316,10 +1317,10 @@ struct SettingsPage: View {
                     
                     Spacer()
                     
-                    Text(revenueCatManager.isProUser ? "Unlimited" : "\(max(0, 3 - usedScansToday))/3 left today")
+                    Text(scanLimit == nil ? "Unlimited" : "\(max(0, (scanLimit ?? 0) - usedScansToday))/\(scanLimit ?? 0) left today")
                         .font(Font.custom("Overused Grotesk", size: 16).weight(.medium))
                         .foregroundColor(AppColors.foregroundSecondary)
-                        .animation(.easeInOut(duration: 0.3), value: revenueCatManager.isProUser)
+                        .animation(.easeInOut(duration: 0.3), value: revenueCatManager.planTier)
                 }
                 
                 ZStack(alignment: .leading) {
@@ -1330,11 +1331,11 @@ struct SettingsPage: View {
                     
                     // Fill bar
                     Rectangle()
-                        .fill(revenueCatManager.isProUser ? AppColors.successForeground : Color(red: 0x4C/255.0, green: 0x3B/255.0, blue: 0xF5/255.0))
+                        .fill(scanLimit == nil ? AppColors.successForeground : Color(red: 0x4C/255.0, green: 0x3B/255.0, blue: 0xF5/255.0))
                         .frame(width: .infinity, height: 10)
-                        .scaleEffect(x: revenueCatManager.isProUser ? 1.0 : Double(usedScansToday)/3.0, anchor: .leading)
-                        .opacity(revenueCatManager.isProUser ? 0.9 : 1.0)
-                        .animation(.easeInOut(duration: 0.5), value: revenueCatManager.isProUser)
+                        .scaleEffect(x: scanLimit == nil ? 1.0 : Double(usedScansToday)/Double(max(1, scanLimit ?? 1)), anchor: .leading)
+                        .opacity(scanLimit == nil ? 0.9 : 1.0)
+                        .animation(.easeInOut(duration: 0.5), value: revenueCatManager.planTier)
                 }
                 .clipShape(RoundedRectangle(cornerRadius: 5))
             }
@@ -1348,7 +1349,7 @@ struct SettingsPage: View {
                     
                     Spacer()
                     
-                    Text(revenueCatManager.isProUser ? "Go bananas" : "No Custom Categories")
+                    Text(revenueCatManager.planTier.allowsCustomCategories ? "Go bananas" : "No Custom Categories")
                         .font(Font.custom("Overused Grotesk", size: 16).weight(.medium))
                         .foregroundColor(AppColors.foregroundSecondary)
                 }
@@ -1362,11 +1363,11 @@ struct SettingsPage: View {
                     
                     // Fill bar - only filled for pro users
                     Rectangle()
-                        .fill(revenueCatManager.isProUser ? AppColors.successForeground : AppColors.surfacePrimary)
+                        .fill(revenueCatManager.planTier.allowsCustomCategories ? AppColors.successForeground : AppColors.surfacePrimary)
                         .frame(width: .infinity, height: 10)
-                        .scaleEffect(x: revenueCatManager.isProUser ? 1.0 : 0.0, anchor: .leading)
-                        .opacity(revenueCatManager.isProUser ? 0.9 : 1.0)
-                        .animation(.easeInOut(duration: 0.5), value: revenueCatManager.isProUser)
+                        .scaleEffect(x: revenueCatManager.planTier.allowsCustomCategories ? 1.0 : 0.0, anchor: .leading)
+                        .opacity(revenueCatManager.planTier.allowsCustomCategories ? 0.9 : 1.0)
+                        .animation(.easeInOut(duration: 0.5), value: revenueCatManager.planTier)
                 }
                 .clipShape(RoundedRectangle(cornerRadius: 5))
             }
@@ -1380,7 +1381,7 @@ struct SettingsPage: View {
                     
                     Spacer()
                     
-                    Text(revenueCatManager.isProUser ? "Let loose" : "\(max(0, 2 - currentWalletCount))/2 wallets left")
+                    Text(revenueCatManager.hasPaidSubscription ? "Let loose" : "\(max(0, PlanTier.freeWalletLimit - currentWalletCount))/\(PlanTier.freeWalletLimit) wallets left")
                         .font(Font.custom("Overused Grotesk", size: 16).weight(.medium))
                         .foregroundColor(AppColors.foregroundSecondary)
                 }
@@ -1393,11 +1394,11 @@ struct SettingsPage: View {
                     
                     // Fill bar
                     Rectangle()
-                        .fill(revenueCatManager.isProUser ? AppColors.successForeground : Color(red: 0x4C/255.0, green: 0x3B/255.0, blue: 0xF5/255.0))
+                        .fill(revenueCatManager.hasPaidSubscription ? AppColors.successForeground : Color(red: 0x4C/255.0, green: 0x3B/255.0, blue: 0xF5/255.0))
                         .frame(width: .infinity, height: 10)
-                        .scaleEffect(x: revenueCatManager.isProUser ? 1.0 : Double(currentWalletCount)/2.0, anchor: .leading)
-                        .opacity(revenueCatManager.isProUser ? 0.9 : 1.0)
-                        .animation(.easeInOut(duration: 0.5), value: revenueCatManager.isProUser)
+                        .scaleEffect(x: revenueCatManager.hasPaidSubscription ? 1.0 : Double(currentWalletCount)/Double(PlanTier.freeWalletLimit), anchor: .leading)
+                        .opacity(revenueCatManager.hasPaidSubscription ? 0.9 : 1.0)
+                        .animation(.easeInOut(duration: 0.5), value: revenueCatManager.planTier)
                 }
                 .clipShape(RoundedRectangle(cornerRadius: 5))
             }
@@ -1411,7 +1412,7 @@ struct SettingsPage: View {
 
                     Spacer()
 
-                    Text(revenueCatManager.isProUser ? "Track away" : "\(SubscriptionManager.shared.subscriptions.count)/2 subscriptions")
+                    Text(revenueCatManager.hasPaidSubscription ? "Track away" : "\(SubscriptionManager.shared.subscriptions.count)/\(PlanTier.freeRecurringLimit) subscriptions")
                         .font(Font.custom("Overused Grotesk", size: 16).weight(.medium))
                         .foregroundColor(AppColors.foregroundSecondary)
                 }
@@ -1424,18 +1425,18 @@ struct SettingsPage: View {
 
                     // Fill bar
                     Rectangle()
-                        .fill(revenueCatManager.isProUser ? AppColors.successForeground : Color(red: 0x4C/255.0, green: 0x3B/255.0, blue: 0xF5/255.0))
+                        .fill(revenueCatManager.hasPaidSubscription ? AppColors.successForeground : Color(red: 0x4C/255.0, green: 0x3B/255.0, blue: 0xF5/255.0))
                         .frame(width: .infinity, height: 10)
-                        .scaleEffect(x: revenueCatManager.isProUser ? 1.0 : Double(SubscriptionManager.shared.subscriptions.count)/2.0, anchor: .leading)
-                        .opacity(revenueCatManager.isProUser ? 0.9 : 1.0)
-                        .animation(.easeInOut(duration: 0.5), value: revenueCatManager.isProUser)
+                        .scaleEffect(x: revenueCatManager.hasPaidSubscription ? 1.0 : Double(SubscriptionManager.shared.subscriptions.count)/Double(PlanTier.freeRecurringLimit), anchor: .leading)
+                        .opacity(revenueCatManager.hasPaidSubscription ? 0.9 : 1.0)
+                        .animation(.easeInOut(duration: 0.5), value: revenueCatManager.planTier)
                 }
                 .clipShape(RoundedRectangle(cornerRadius: 5))
             }
 
-                // Get Cashmonki Pro button / Manage Billing for pro users
-                AppButton.secondary(revenueCatManager.isProUser ? "Manage Billing" : "Get Cashmonki Pro ⭐", size: .extraSmall) {
-                    if revenueCatManager.isProUser {
+                // Get Cashmonki Pro button / Manage Billing for paid (Plus/Pro) users
+                AppButton.secondary(revenueCatManager.hasPaidSubscription ? "Manage Billing" : "Get Cashmonki Pro ⭐", size: .extraSmall) {
+                    if revenueCatManager.hasPaidSubscription {
                         showingManageBilling = true // Show manage billing for pro users
                     } else {
                         showingCustomPaywall = true // Show paywall for free users
@@ -1447,7 +1448,7 @@ struct SettingsPage: View {
         .frame(maxWidth: .infinity, alignment: .topLeading)
         .background(.white)
         .opacity(1.0)
-        .animation(.easeInOut(duration: 0.3), value: revenueCatManager.isProUser)
+        .animation(.easeInOut(duration: 0.3), value: revenueCatManager.planTier)
     }
     
     private var primaryCurrencySubtitle: String {
@@ -1468,9 +1469,14 @@ struct SettingsPage: View {
         return todayTransactions.count
     }
     
+    /// Today's receipt-analysis cap for the current tier; nil = unlimited (Pro)
+    private var scanLimit: Int? {
+        revenueCatManager.planTier.dailyScanLimit
+    }
+
     private var usedScansToday: Int {
         // Use DailyUsageManager to get the actual API usage count
-        let maxUsage = 3
+        guard let maxUsage = scanLimit else { return 0 }
         let remaining = dailyUsageManager.getRemainingUsage()
         return maxUsage - remaining
     }

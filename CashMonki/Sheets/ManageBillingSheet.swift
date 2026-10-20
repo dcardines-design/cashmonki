@@ -47,7 +47,7 @@ struct ManageBillingSheet: View {
         }
         #endif
         
-        let hasActiveSubscription = revenueCatManager.isProUser
+        let hasActiveSubscription = revenueCatManager.hasPaidSubscription
         let hasUsedTrialBefore = revenueCatManager.hasUsedTrialBefore
 
         if isTrialActive {
@@ -63,7 +63,7 @@ struct ManageBillingSheet: View {
     
     // MARK: - Subscription Info Helpers
     private var currentSubscription: EntitlementInfo? {
-        return revenueCatManager.customerInfo?.entitlements.active.values.first
+        return revenueCatManager.activeTierEntitlement
     }
     
     private var planTitle: String {

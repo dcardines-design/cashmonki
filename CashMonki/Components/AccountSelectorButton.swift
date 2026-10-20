@@ -172,10 +172,10 @@ struct AccountPickerSheet: View {
     @State private var showingCustomPaywall = false
     @State private var selectedWalletForEdit: SubAccount?
     
-    // Check if user has reached wallet limit (2 for free users)
+    // Check if user has reached wallet limit (2 for free users, unlimited for Plus/Pro)
     private var hasReachedWalletLimit: Bool {
         let currentWalletCount = userManager.currentUser.subAccounts.count
-        let limit = revenueCatManager.isProUser ? Int.max : 2
+        guard let limit = revenueCatManager.planTier.walletLimit else { return false }
         return currentWalletCount >= limit
     }
     

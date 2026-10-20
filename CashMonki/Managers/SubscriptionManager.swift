@@ -17,30 +17,36 @@ class SubscriptionManager: ObservableObject {
     @Published var subscriptions: [Subscription] = []
     @Published var upcomingSubscriptions: [Subscription] = [] // Due in next 7 days
 
-    // MARK: - Free Tier Limits
+    // MARK: - Tier Limits
 
-    /// Maximum number of subscriptions for free users
-    static let maxFreeSubscriptions = 2
+    /// Maximum number of subscriptions for free users (Plus and Pro are unlimited)
+    static let maxFreeSubscriptions = PlanTier.freeRecurringLimit
 
-    /// Check if user can add more subscriptions (Pro users unlimited, free users limited to 2)
+    /// Recurring-item cap for the current tier; nil = unlimited
+    private var recurringLimit: Int? {
+        RevenueCatManager.shared.planTier.recurringLimit
+    }
+
+    /// Check if user can add more subscriptions (Plus/Pro unlimited, free users limited to 2)
     var canAddMoreSubscriptions: Bool {
-        let isProUser = RevenueCatManager.shared.isProUser
+        let tier = RevenueCatManager.shared.planTier
         let currentCount = subscriptions.count
-        let canAdd = isProUser || currentCount < Self.maxFreeSubscriptions
-        print("🔐 SubscriptionManager.canAddMoreSubscriptions: isProUser=\(isProUser), count=\(currentCount), max=\(Self.maxFreeSubscriptions), canAdd=\(canAdd)")
-        if isProUser {
+        guard let limit = recurringLimit else {
+            print("🔐 SubscriptionManager.canAddMoreSubscriptions: tier=\(tier.rawValue), count=\(currentCount), unlimited")
             return true
         }
         // Allow adding if current count is less than max (0 or 1 can add, 2 cannot)
-        return currentCount < Self.maxFreeSubscriptions
+        let canAdd = currentCount < limit
+        print("🔐 SubscriptionManager.canAddMoreSubscriptions: tier=\(tier.rawValue), count=\(currentCount), max=\(limit), canAdd=\(canAdd)")
+        return canAdd
     }
 
     /// Number of remaining free subscription slots
     var remainingFreeSlots: Int {
-        if RevenueCatManager.shared.isProUser {
+        guard let limit = recurringLimit else {
             return Int.max
         }
-        return max(0, Self.maxFreeSubscriptions - subscriptions.count)
+        return max(0, limit - subscriptions.count)
     }
 
     // MARK: - Private Properties

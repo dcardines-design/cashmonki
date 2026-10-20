@@ -183,14 +183,14 @@ struct ContentView: View {
                 // Process subscriptions and schedule reminders when app becomes active
                 SubscriptionManager.shared.onAppActive()
 
-                // Only check for lapsed paywall if user is NOT a pro subscriber
+                // Only check for lapsed paywall if user is NOT a paid (Plus/Pro) subscriber
                 // This prevents re-showing paywall when returning from App Store purchase
-                print("🎫 SCENE ACTIVE: isProUser=\(revenueCatManager.isProUser), hasShownTrialEndedToast=\(hasShownTrialEndedToast)")
-                if !revenueCatManager.isProUser {
+                print("🎫 SCENE ACTIVE: tier=\(revenueCatManager.planTier.rawValue), hasShownTrialEndedToast=\(hasShownTrialEndedToast)")
+                if !revenueCatManager.hasPaidSubscription {
                     print("🎫 SCENE ACTIVE: Triggering paywall check...")
                     checkAndShowLapsedUserPaywall()
                 } else {
-                    print("🎫 SCENE ACTIVE: Skipping - user is Pro")
+                    print("🎫 SCENE ACTIVE: Skipping - user is a paid subscriber")
                 }
 
                 // COMMENTED OUT FOR APP STORE SUBMISSION - TODO: Uncomment later
@@ -206,12 +206,12 @@ struct ContentView: View {
             // When RevenueCat finishes loading customer info, check for lapsed trial
             // Only check on initial load (nil -> non-nil) and only if not already a pro user
             print("🎫 CUSTOMER INFO CHANGED: old=\(oldValue != nil ? "loaded" : "nil"), new=\(newValue != nil ? "loaded" : "nil")")
-            print("🎫 CUSTOMER INFO CHANGED: isProUser=\(revenueCatManager.isProUser), hasShownTrialEndedToast=\(hasShownTrialEndedToast)")
-            if oldValue == nil && newValue != nil && !revenueCatManager.isProUser {
+            print("🎫 CUSTOMER INFO CHANGED: tier=\(revenueCatManager.planTier.rawValue), hasShownTrialEndedToast=\(hasShownTrialEndedToast)")
+            if oldValue == nil && newValue != nil && !revenueCatManager.hasPaidSubscription {
                 print("🎫 CUSTOMER INFO: Triggering paywall check (initial load, not pro)...")
                 checkAndShowLapsedUserPaywall()
-            } else if oldValue == nil && newValue != nil && revenueCatManager.isProUser {
-                print("🎫 CUSTOMER INFO: Skipping - user is now Pro")
+            } else if oldValue == nil && newValue != nil && revenueCatManager.hasPaidSubscription {
+                print("🎫 CUSTOMER INFO: Skipping - user is now a paid subscriber")
             }
         }
         .fullScreenCover(isPresented: $showingOnboarding) {
@@ -501,7 +501,7 @@ struct ContentView: View {
         print("🎫 ======= checkAndShowLapsedUserPaywall CALLED =======")
         print("🎫 CHECK: hasShownTrialEndedToast=\(hasShownTrialEndedToast)")
         print("🎫 CHECK: showingTrialEndedPaywall=\(showingTrialEndedPaywall)")
-        print("🎫 CHECK: isProUser=\(revenueCatManager.isProUser)")
+        print("🎫 CHECK: tier=\(revenueCatManager.planTier.rawValue)")
         print("🎫 CHECK: hasUsedTrialBefore=\(revenueCatManager.hasUsedTrialBefore)")
         print("🎫 CHECK: isPurchaseInProgress=\(revenueCatManager.isPurchaseInProgress)")
 
@@ -523,9 +523,9 @@ struct ContentView: View {
             return
         }
 
-        // CRITICAL: Check isProUser immediately - don't show paywall to subscribers
-        guard !revenueCatManager.isProUser else {
-            print("🎫 ContentView: ❌ Skipping - user is Pro")
+        // CRITICAL: Check paid tier immediately - don't show paywall to subscribers (Plus or Pro)
+        guard !revenueCatManager.hasPaidSubscription else {
+            print("🎫 ContentView: ❌ Skipping - user is a paid subscriber")
             hasShownTrialEndedToast = true // Prevent future checks this session
             return
         }
@@ -540,7 +540,7 @@ struct ContentView: View {
             await MainActor.run {
                 print("🎫 ASYNC CHECK: hasShownTrialEndedToast=\(hasShownTrialEndedToast)")
                 print("🎫 ASYNC CHECK: showingTrialEndedPaywall=\(showingTrialEndedPaywall)")
-                print("🎫 ASYNC CHECK: isProUser=\(revenueCatManager.isProUser)")
+                print("🎫 ASYNC CHECK: tier=\(revenueCatManager.planTier.rawValue)")
                 print("🎫 ASYNC CHECK: isPurchaseInProgress=\(revenueCatManager.isPurchaseInProgress)")
 
                 // Double-check guards after delay (state may have changed)
@@ -556,8 +556,8 @@ struct ContentView: View {
                     print("🎫 ASYNC: ❌ Skipping - purchase in progress")
                     return
                 }
-                guard !revenueCatManager.isProUser else {
-                    print("🎫 ASYNC: ❌ Skipping - user became Pro")
+                guard !revenueCatManager.hasPaidSubscription else {
+                    print("🎫 ASYNC: ❌ Skipping - user became a paid subscriber")
                     hasShownTrialEndedToast = true
                     return
                 }

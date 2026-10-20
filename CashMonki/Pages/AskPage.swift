@@ -267,9 +267,11 @@ final class AskChatManager: ObservableObject {
     /// Shown (ephemerally) when a free user hits the daily message limit. Never persisted —
     /// it reflects live daily state, so a stale copy must not survive into the next day's reset.
     static let limitMessageText = "You've used today's free messages. Upgrade to Pro for unlimited Ask, or come back tomorrow."
+    /// Pro's daily cap is fair use: there's nothing to upgrade to, so no paywall.
+    static let fairUseLimitMessageText = "You've reached today's Ask limit. It resets tomorrow."
 
     private static func isLimitNotice(_ m: AskDisplayMessage) -> Bool {
-        if case .text(let t) = m.content { return t == limitMessageText }
+        if case .text(let t) = m.content { return t == limitMessageText || t == fairUseLimitMessageText }
         return false
     }
 
@@ -453,10 +455,16 @@ final class AskChatManager: ObservableObject {
         guard !trimmed.isEmpty, !isThinking else { return }
 
         guard DailyUsageManager.shared.canSendChatMessage() else {
-            messages.append(AskDisplayMessage(isUser: false, content: .text(Self.limitMessageText)))
-            showLimitPaywall = true
+            let tier = RevenueCatManager.shared.planTier
+            if tier == .pro {
+                messages.append(AskDisplayMessage(isUser: false, content: .text(Self.fairUseLimitMessageText)))
+            } else {
+                messages.append(AskDisplayMessage(isUser: false, content: .text(Self.limitMessageText)))
+                showLimitPaywall = true
+            }
             AnalyticsManager.shared.track(.askLimitReached, properties: [
                 "source": source.rawValue,
+                "subscription_tier": tier.rawValue,
                 "turns_in_thread": messages.filter { $0.isUser }.count
             ])
             return
@@ -843,10 +851,10 @@ final class AskChatManager: ObservableObject {
         persist()
     }
 
-    /// Creates the suggested category (Confirm tap only). Category creation
-    /// is a Pro feature — free users get the paywall instead.
+    /// Creates the suggested category (Confirm tap only). Custom categories
+    /// are a paid (Plus/Pro) feature — free users get the paywall instead.
     func confirmCategoryDraft(messageID: UUID, draft: AskCategoryDraft) {
-        guard RevenueCatManager.shared.isProUser else {
+        guard RevenueCatManager.shared.planTier.allowsCustomCategories else {
             showLimitPaywall = true
             return
         }

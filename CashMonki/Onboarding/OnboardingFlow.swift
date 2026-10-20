@@ -1152,13 +1152,14 @@ struct OnboardingFlow: View {
     private func finishOnboardingAfterPaywall() {
         print("🏁 OnboardingFlow: ======= FINISHING AFTER PAYWALL =======")
 
-        // Check if user subscribed
-        let isProUser = RevenueCatManager.shared.isProUser
-        print("🏁 OnboardingFlow: User is Pro: \(isProUser)")
+        // Check if user subscribed (any paid tier)
+        let isSubscribed = RevenueCatManager.shared.hasPaidSubscription
+        print("🏁 OnboardingFlow: User is subscribed: \(isSubscribed) (tier: \(RevenueCatManager.shared.planTier.rawValue))")
 
         // Track onboarding completed
         AnalyticsManager.shared.track(.onboardingCompleted, properties: [
-            "subscribed": isProUser,
+            "subscribed": isSubscribed,
+            "subscription_tier": RevenueCatManager.shared.planTier.rawValue,
             "currency": selectedCurrency.rawValue
         ])
 
@@ -1175,7 +1176,7 @@ struct OnboardingFlow: View {
         }
 
         // Show welcome toast after a brief delay (if user didn't subscribe, subscription toast is handled by notification)
-        if !isProUser {
+        if !isSubscribed {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                 let userName = UserManager.shared.currentUser.name.trimmingCharacters(in: .whitespacesAndNewlines)
                 let firstName = userName.components(separatedBy: " ").first ?? ""

@@ -261,7 +261,7 @@ struct EditCategoriesSheet: View {
                 rightIcon: "plus",
                 rightSystemIcon: "plus",
                 onRightTap: {
-                    if revenueCatManager.isProUser {
+                    if revenueCatManager.planTier.allowsCustomCategories {
                     showingAddCategory = true
                 } else {
                     showingCustomPaywall = true
@@ -315,7 +315,7 @@ struct EditCategoriesSheet: View {
                                 parentCategory: group.parent,
                                 children: group.children,
                                 onParentTap: {
-                                    if revenueCatManager.isProUser {
+                                    if revenueCatManager.planTier.allowsCustomCategories {
                                         selectedCategoryForEdit = group.parent
                                         
                                         // Set smart tab default based on category type
@@ -331,7 +331,7 @@ struct EditCategoriesSheet: View {
                                     }
                                 },
                                 onChildTap: { childCategory in
-                                    if revenueCatManager.isProUser {
+                                    if revenueCatManager.planTier.allowsCustomCategories {
                                         selectedCategoryForEdit = childCategory
                                         
                                         // Set smart tab default based on category type

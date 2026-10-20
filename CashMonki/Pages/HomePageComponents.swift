@@ -262,7 +262,7 @@ extension HomePage {
                 fallbackSystemName: (isAnalyzingReceipt && originalTileClicked == .upload) ? "clock.arrow.circlepath" : "square.and.arrow.up",
                 title: (isAnalyzingReceipt && originalTileClicked == .upload) ? "..." : "Upload",
                 isLoading: isAnalyzingReceipt && originalTileClicked == .upload,
-                usageLimitText: RevenueCatManager.shared.isProUser ? nil : dailyUsageManager.getUsageDisplayText()
+                usageLimitText: dailyUsageManager.dailyScanLimit == nil ? nil : dailyUsageManager.getUsageDisplayText()
             ) {
                 if !isAnalyzingReceipt {
                     // Check daily usage limit before proceeding
@@ -283,7 +283,7 @@ extension HomePage {
                 fallbackSystemName: (isAnalyzingReceipt && originalTileClicked == .scan) ? "clock.arrow.circlepath" : "camera",
                 title: (isAnalyzingReceipt && originalTileClicked == .scan) ? "..." : "Scan",
                 isLoading: isAnalyzingReceipt && originalTileClicked == .scan,
-                usageLimitText: RevenueCatManager.shared.isProUser ? nil : dailyUsageManager.getUsageDisplayText()
+                usageLimitText: dailyUsageManager.dailyScanLimit == nil ? nil : dailyUsageManager.getUsageDisplayText()
             ) {
                 if !isAnalyzingReceipt {
                     // Check daily usage limit before proceeding

@@ -8,14 +8,14 @@
 import Foundation
 import Combine
 
-/// Manages daily usage limits for receipt analysis (upload + scan)
-/// Free users get 3 daily analyses, Pro users get unlimited
+/// Manages daily usage limits for receipt analysis (upload + scan) and Ask chat.
+/// Limits come from the user's PlanTier (see PlanTier.swift):
+/// scans Free 3 / Plus 10 / Pro unlimited; Ask Free 3 / Plus 10 / Pro 100 (fair use).
 @MainActor
 class DailyUsageManager: ObservableObject {
     static let shared = DailyUsageManager()
     
     // MARK: - Constants
-    private let maxDailyUsageForFreeUsers = 3
     private let usageCountKey = "dailyReceiptAnalysisCount"
     private let lastResetDateKey = "lastUsageResetDate"
     
@@ -33,35 +33,45 @@ class DailyUsageManager: ObservableObject {
         }
     }
     
-    // MARK: - Ask chat limits (same daily-reset pattern; 10/day free, Pro unlimited)
+    // MARK: - Tier
+
+    private var tier: PlanTier { RevenueCatManager.shared.planTier }
+
+    /// Receipt analyses allowed today for the current tier; nil = unlimited.
+    var dailyScanLimit: Int? { tier.dailyScanLimit }
+
+    // MARK: - Ask chat limits (same daily-reset pattern; per-tier daily cap)
 
     private let chatUsageCountKey = "dailyChatMessageCount"
-    private let maxDailyChatMessagesForFreeUsers = 10
+
+    /// Pro's Ask cap is fair use, so its counter only shows once it's this close.
+    private let proChatCounterThreshold = 10
+
+    /// Ask messages allowed today for the current tier.
+    var dailyChatLimit: Int { tier.dailyAskLimit }
 
     func canSendChatMessage() -> Bool {
         resetUsageIfNewDay()
-        if RevenueCatManager.shared.isProUser { return true }
-        return UserDefaults.standard.integer(forKey: chatUsageCountKey) < maxDailyChatMessagesForFreeUsers
+        return UserDefaults.standard.integer(forKey: chatUsageCountKey) < dailyChatLimit
     }
 
     func recordChatMessage() {
         resetUsageIfNewDay()
-        if RevenueCatManager.shared.isProUser { return }
         let count = UserDefaults.standard.integer(forKey: chatUsageCountKey) + 1
         UserDefaults.standard.set(count, forKey: chatUsageCountKey)
-        print("📊 DailyUsageManager: Chat message \(count)/\(maxDailyChatMessagesForFreeUsers)")
+        print("📊 DailyUsageManager: Chat message \(count)/\(dailyChatLimit) (\(tier.rawValue))")
     }
 
     func getRemainingChatMessages() -> Int {
         resetUsageIfNewDay()
-        if RevenueCatManager.shared.isProUser { return .max }
-        return max(0, maxDailyChatMessagesForFreeUsers - UserDefaults.standard.integer(forKey: chatUsageCountKey))
+        return max(0, dailyChatLimit - UserDefaults.standard.integer(forKey: chatUsageCountKey))
     }
 
-    /// "3 messages left today" footer line; empty for Pro users.
+    /// "3 messages left today" footer line. Free and Plus always see it; Pro only
+    /// near its fair-use cap.
     func getChatUsageDisplayText() -> String {
-        if RevenueCatManager.shared.isProUser { return "" }
         let remaining = getRemainingChatMessages()
+        if tier == .pro && remaining > proChatCounterThreshold { return "" }
         if remaining <= 0 { return "No messages left today" }
         return remaining == 1 ? "1 message left today" : "\(remaining) messages left today"
     }
@@ -72,22 +82,22 @@ class DailyUsageManager: ObservableObject {
     func canUseReceiptAnalysis() -> Bool {
         resetUsageIfNewDay()
         
-        // Pro users get unlimited usage
-        if RevenueCatManager.shared.isProUser {
+        // Unlimited tiers (Pro)
+        guard let limit = dailyScanLimit else {
             return true
         }
         
-        // Free users limited to daily count
+        // Free/Plus limited to the tier's daily count
         let currentUsage = getCurrentDailyUsage()
-        return currentUsage < maxDailyUsageForFreeUsers
+        return currentUsage < limit
     }
     
     /// Record a receipt analysis usage
     func recordReceiptAnalysis(isOnboarding: Bool = false) {
         resetUsageIfNewDay()
         
-        // Don't count usage for Pro users
-        if RevenueCatManager.shared.isProUser {
+        // Don't count usage for unlimited tiers (Pro)
+        guard let limit = dailyScanLimit else {
             return
         }
         
@@ -102,7 +112,7 @@ class DailyUsageManager: ObservableObject {
         
         UserDefaults.standard.set(newUsage, forKey: usageCountKey)
         
-        print("📊 DailyUsageManager: Recorded usage \(newUsage)/\(maxDailyUsageForFreeUsers)")
+        print("📊 DailyUsageManager: Recorded usage \(newUsage)/\(limit) (\(tier.rawValue))")
         updateRemainingUsage()
     }
     
@@ -110,21 +120,21 @@ class DailyUsageManager: ObservableObject {
     func getRemainingUsage() -> Int {
         resetUsageIfNewDay()
         
-        // Pro users have unlimited
-        if RevenueCatManager.shared.isProUser {
+        // Unlimited tiers (Pro)
+        guard let limit = dailyScanLimit else {
             return 999 // Unlimited
         }
         
         let currentUsage = getCurrentDailyUsage()
-        return max(0, maxDailyUsageForFreeUsers - currentUsage)
+        return max(0, limit - currentUsage)
     }
     
     /// Get usage count text for UI display
     func getUsageDisplayText() -> String {
         resetUsageIfNewDay()
         
-        // Don't show limits for Pro users
-        if RevenueCatManager.shared.isProUser {
+        // Don't show limits for unlimited tiers (Pro)
+        if dailyScanLimit == nil {
             return ""
         }
         
@@ -141,7 +151,7 @@ class DailyUsageManager: ObservableObject {
     
     /// Check if usage limit modal should be shown
     func shouldShowLimitModal() -> Bool {
-        return !canUseReceiptAnalysis() && !RevenueCatManager.shared.isProUser
+        return !canUseReceiptAnalysis() && dailyScanLimit != nil
     }
     
     // MARK: - Private Methods

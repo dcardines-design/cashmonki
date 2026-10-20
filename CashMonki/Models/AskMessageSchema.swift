@@ -174,7 +174,7 @@ struct AskBudgetDelete: Codable {
 // MARK: - Category suggestion
 
 /// Proposed new category or subcategory. Created ONLY after the user
-/// confirms — and category creation is a Pro feature, so free users get
+/// confirms — and custom categories are a paid (Plus/Pro) feature, so free users get
 /// the paywall instead.
 struct AskCategoryDraft: Codable {
     let type: String
