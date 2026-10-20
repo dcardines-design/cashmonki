@@ -209,6 +209,15 @@ struct CashMonkiApp: App {
                         .zIndex(1000)
                         .transition(.opacity)
                 }
+
+                #if DEBUG
+                // `-showPaywall default|limitAsk|limitScan|upgrade` opens the tiered paywall directly.
+                if let paywallMode = PaywallMode.debugLaunchMode {
+                    TieredPaywallSheet(isPresented: .constant(true), mode: paywallMode)
+                        .environmentObject(toastManager)
+                        .zIndex(2000)
+                }
+                #endif
             }
             .preferredColorScheme(.light) // Force light mode globally - never change colors for dark mode
                 .onAppear {

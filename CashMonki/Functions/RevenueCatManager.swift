@@ -92,6 +92,31 @@ class RevenueCatManager: NSObject, ObservableObject {
         return tiersOffering?.availablePackages.first { $0.identifier == id.rawValue }
     }
 
+    /// Whether this user would get the package's free trial. Asks StoreKit (via RevenueCat)
+    /// and falls back to purchase history when eligibility can't be determined.
+    func isTrialEligible(for package: Package) async -> Bool {
+        guard let intro = package.storeProduct.introductoryDiscount, intro.paymentMode == .freeTrial else {
+            return false
+        }
+        let status = await Purchases.shared.checkTrialOrIntroDiscountEligibility(product: package.storeProduct)
+        switch status {
+        case .eligible: return true
+        case .ineligible, .noIntroOfferExists: return false
+        default: return !hasUsedTrialBefore
+        }
+    }
+
+    /// The StoreProduct with this identifier from any loaded offering (e.g. the active entitlement's product).
+    func storeProduct(forProductID productID: String) -> StoreProduct? {
+        guard let offerings else { return nil }
+        for offering in offerings.all.values {
+            if let package = offering.availablePackages.first(where: { $0.storeProduct.productIdentifier == productID }) {
+                return package.storeProduct
+            }
+        }
+        return nil
+    }
+
     /// Check if user has used trial before but isn't currently subscribed
     var hasUsedTrialBefore: Bool {
         // Debug override for testing trial-ended UI
