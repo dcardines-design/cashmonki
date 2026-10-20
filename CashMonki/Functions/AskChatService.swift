@@ -396,7 +396,7 @@ final class AskChatService {
             tool("get_spending_by_category",
                  "Fetch the user's spending totals grouped by category (real data, full history available). Use before showing a spending table or chart.",
                  [
-                    "period": ["type": "string", "enum": ["week", "month", "quarter", "year", "all"], "description": "Period to aggregate, default month"],
+                    "period": ["type": "string", "enum": ["week", "month", "quarter", "year", "all"], "description": "Calendar period to date (month = since the 1st of this month), default month. For rolling windows like 'last 30 days' use from/to instead"],
                     "from": ["type": "string", "description": "Custom range start, yyyy-MM-dd (overrides period)"],
                     "to": ["type": "string", "description": "Custom range end, yyyy-MM-dd"]
                  ]),
@@ -575,13 +575,16 @@ final class AskChatService {
         let dayParser = DateFormatter()
         dayParser.dateFormat = "yyyy-MM-dd"
 
+        // Calendar period to date ("month" = the 1st of this month onward), matching Home.
+        // Rolling windows like "last 30 days" go through `from`/`to` instead.
+        let now = Date()
         let cutoff: Date
         switch period.lowercased() {
-        case "week": cutoff = calendar.date(byAdding: .day, value: -7, to: Date())!
-        case "quarter": cutoff = calendar.date(byAdding: .month, value: -3, to: Date())!
-        case "year": cutoff = calendar.date(byAdding: .year, value: -1, to: Date())!
+        case "week": cutoff = calendar.dateInterval(of: .weekOfYear, for: now)?.start ?? now
+        case "quarter": cutoff = HomePage.calendarQuarterStart(for: now, calendar: calendar)
+        case "year": cutoff = calendar.dateInterval(of: .year, for: now)?.start ?? now
         case "all": cutoff = .distantPast
-        default: cutoff = calendar.date(byAdding: .month, value: -1, to: Date())!
+        default: cutoff = calendar.dateInterval(of: .month, for: now)?.start ?? now
         }
         let fromDate = from.flatMap { dayParser.date(from: $0) } ?? cutoff
         let toDate = to.flatMap { dayParser.date(from: $0) }.map { $0.addingTimeInterval(86_399) } ?? .distantFuture

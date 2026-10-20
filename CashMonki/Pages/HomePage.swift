@@ -603,8 +603,10 @@ struct HomePage: View {
                 case .week: return cal.isDate(txn.date, equalTo: now, toGranularity: .weekOfYear)
                 case .month: return cal.isDate(txn.date, equalTo: now, toGranularity: .month)
                 case .quarter:
-                    let quarterStart = cal.date(byAdding: .month, value: -3, to: now) ?? now
-                    return txn.date >= quarterStart
+                    // Calendar quarter, matching the 3M chart (not the last 3 months)
+                    let quarterStart = Self.calendarQuarterStart(for: now, calendar: cal)
+                    let quarterEnd = cal.date(byAdding: .month, value: 3, to: quarterStart) ?? now
+                    return txn.date >= quarterStart && txn.date < quarterEnd
                 }
             }
         case .previous:
@@ -622,8 +624,9 @@ struct HomePage: View {
                 case .week: return cal.isDate(txn.date, equalTo: previousDate, toGranularity: .weekOfYear)
                 case .month: return cal.isDate(txn.date, equalTo: previousDate, toGranularity: .month)
                 case .quarter:
-                    let quarterEnd = cal.date(byAdding: .month, value: -3, to: now) ?? now
-                    let quarterStart = cal.date(byAdding: .month, value: -6, to: now) ?? now
+                    // The calendar quarter before the current one
+                    let quarterEnd = Self.calendarQuarterStart(for: now, calendar: cal)
+                    let quarterStart = cal.date(byAdding: .month, value: -3, to: quarterEnd) ?? now
                     let isAfterStart = txn.date >= quarterStart
                     let isBeforeEnd = txn.date < quarterEnd
                     return isAfterStart && isBeforeEnd
@@ -636,6 +639,13 @@ struct HomePage: View {
     
     internal enum Period {
         case current, previous
+    }
+
+    /// First day of the calendar quarter containing `date` (Jan 1, Apr 1, Jul 1 or Oct 1).
+    static func calendarQuarterStart(for date: Date, calendar cal: Calendar) -> Date {
+        let month = cal.component(.month, from: date)
+        let quarterStartMonth = ((month - 1) / 3) * 3 + 1
+        return cal.date(from: DateComponents(year: cal.component(.year, from: date), month: quarterStartMonth, day: 1)) ?? date
     }
     
     // Apply chart filter (Balance, Income, Expense)
