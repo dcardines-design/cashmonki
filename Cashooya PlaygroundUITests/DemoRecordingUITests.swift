@@ -505,4 +505,55 @@ final class DemoRecordingUITests: XCTestCase {
         XCTAssertFalse(counter.waitForExistence(timeout: 3), "Pro should not show an Ask counter")
         saveScreen("tier-pro-start", app)
     }
+
+    // MARK: - Verification: tiered paywall (no recording)
+
+    /// Launches straight into the tiered paywall (`-showPaywall`), waits for prices, returns the app.
+    @MainActor
+    private func launchPaywall(_ mode: String, tier: String? = nil) -> XCUIApplication {
+        let app = XCUIApplication()
+        app.launchArguments += ["-showPaywall", mode]
+        if let tier { app.launchArguments += ["-forceTier", tier] }
+        app.launch()
+        allowSystemAlerts(1)
+        XCTAssertTrue(app.buttons["Restore Purchases"].waitForExistence(timeout: 10), "Paywall should be on screen")
+        let price = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH '$'")).firstMatch
+        XCTAssertTrue(price.waitForExistence(timeout: 20), "Prices should load (never $0)")
+        XCTAssertFalse(app.staticTexts["$0"].exists && app.staticTexts["$0.00"].exists)
+        pause(1.2)
+        return app
+    }
+
+    /// Free user, default entry: Pro yearly selected; switching to Plus updates the CTA.
+    @MainActor
+    func testVerifyTieredPaywallDefault() throws {
+        let app = launchPaywall("default", tier: "free")
+        XCTAssertTrue(app.staticTexts["Know where\nyour money goes"].exists || app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Know where'")).firstMatch.exists)
+        let trial = app.buttons.matching(NSPredicate(format: "label == 'Start 7-day free trial' OR label == 'Continue with Pro'")).firstMatch
+        XCTAssertTrue(trial.waitForExistence(timeout: 5), "Pro CTA")
+        saveScreen("paywall-pro-yearly", app)
+
+        tapButton(app, "Plus")
+        XCTAssertTrue(app.buttons["Get Cashmonki Plus"].waitForExistence(timeout: 3), "Plus CTA")
+        pause(0.8)
+        saveScreen("paywall-plus", app)
+    }
+
+    /// Opened from the Ask limit: limit headline + midnight reset line.
+    @MainActor
+    func testVerifyTieredPaywallLimitHit() throws {
+        let app = launchPaywall("limitAsk", tier: "free")
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH \"You've used today's\"")).firstMatch.exists, "Limit headline")
+        XCTAssertTrue(app.staticTexts["Resets at midnight"].exists, "Reset line")
+        saveScreen("paywall-limit-ask", app)
+    }
+
+    /// Plus user: upgrade variant, Plus marked current, no trial.
+    @MainActor
+    func testVerifyTieredPaywallUpgrade() throws {
+        let app = launchPaywall("upgrade", tier: "plus")
+        XCTAssertTrue(app.buttons["Upgrade to Pro"].waitForExistence(timeout: 5), "Upgrade CTA")
+        XCTAssertFalse(app.buttons.matching(NSPredicate(format: "label CONTAINS 'free trial'")).firstMatch.exists, "No trial for an upgrade")
+        saveScreen("paywall-upgrade", app)
+    }
 }
