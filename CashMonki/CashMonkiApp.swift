@@ -25,9 +25,6 @@ import FirebaseFirestore
 #if canImport(PostHog)
 import PostHog
 #endif
-#if canImport(FacebookCore)
-import FacebookCore
-#endif
 #if canImport(Mixpanel)
 import Mixpanel
 #endif
@@ -260,9 +257,6 @@ struct CashMonkiApp: App {
 
                     // Initialize Mixpanel analytics
                     initializeMixpanel()
-
-                    // Initialize Facebook SDK
-                    initializeFacebook()
 
                     // Debug: Check if custom fonts are loaded
                     #if DEBUG
@@ -555,29 +549,6 @@ struct CashMonkiApp: App {
         PostHogSDK.shared.flush()
 
         print("✅ CashMonkiApp: PostHog initialized (\(PostHogManager.buildEnvironment))")
-    }
-
-    // MARK: - Facebook SDK Initialization
-
-    private func initializeFacebook() {
-        print("📘 CashMonkiApp: Initializing Facebook SDK...")
-#if canImport(FacebookCore)
-        // Initialize Facebook SDK
-        ApplicationDelegate.shared.application(
-            UIApplication.shared,
-            didFinishLaunchingWithOptions: nil
-        )
-
-        // Enable automatic app event logging
-        Settings.shared.isAutoLogAppEventsEnabled = true
-        Settings.shared.isAdvertiserIDCollectionEnabled = true
-
-        // Log a test event to verify connection
-        AppEvents.shared.logEvent(AppEvents.Name("app_launched_cashmonki"))
-        print("✅ CashMonkiApp: Facebook SDK initialized and test event logged")
-#else
-        print("⚠️ CashMonkiApp: FacebookCore not available - Facebook SDK not installed")
-#endif
     }
 
     // MARK: - Mixpanel Initialization
