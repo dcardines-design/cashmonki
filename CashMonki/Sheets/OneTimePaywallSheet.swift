@@ -65,6 +65,18 @@ struct OneTimePaywallSheet: View {
         }
     }
 
+    /// Regular (non-promo) prices from the current offering, shown struck through.
+    /// Empty until offerings load, rather than a hardcoded amount that may be wrong.
+    private var regularYearlyPrice: String? {
+        revenueCatManager.currentOffering?.availablePackages.first { $0.packageType == .annual }?
+            .storeProduct.localizedPriceString
+    }
+
+    private var regularMonthlyPrice: String? {
+        revenueCatManager.currentOffering?.availablePackages.first { $0.packageType == .monthly }?
+            .storeProduct.localizedPriceString
+    }
+
     // Promo pricing (20% off)
     private var yearlyPromoPrice: String {
         yearlyPackage?.storeProduct.localizedPriceString ?? "$79.99"
@@ -95,31 +107,38 @@ struct OneTimePaywallSheet: View {
 
                             // Value props section
                             VStack(spacing: 24) {
-                                // Unlimited AI Scans
+                                // Ask (Pro: 100 a day, fair use)
+                                featureRow(
+                                    emoji: "💬",
+                                    title: "\(PlanTier.proDailyAskLimit) Ask messages a day",
+                                    description: "Log spending and get answers just by chatting."
+                                )
+
+                                // Unlimited receipt scans (Pro)
                                 featureRow(
                                     emoji: "✨",
-                                    title: "Unlimited AI Scans",
+                                    title: "Unlimited receipt scans",
                                     description: "Snap and let AI handle everything, no typing, no hassle."
                                 )
 
                                 // Unlimited Recurring Transactions
                                 featureRow(
                                     emoji: "🔄",
-                                    title: "Unlimited Subscriptions",
+                                    title: "Unlimited recurring",
                                     description: "Track all your recurring bills and income in one place."
                                 )
 
                                 // Unlimited Custom Categories
                                 featureRow(
                                     emoji: "📊",
-                                    title: "Unlimited Custom Categories",
+                                    title: "Custom categories",
                                     description: "Create categories that actually match your life."
                                 )
 
                                 // Multiple Accounts
                                 featureRow(
                                     emoji: "💼",
-                                    title: "Multiple Accounts",
+                                    title: "Unlimited wallets",
                                     description: "Switch easily between personal and business accounts."
                                 )
 
@@ -193,7 +212,7 @@ struct OneTimePaywallSheet: View {
                                         )
                                         .foregroundColor(AppColors.foregroundPrimary)
 
-                                    Text("$99.99")
+                                    Text(regularYearlyPrice ?? "")
                                         .font(
                                             Font.custom("Overused Grotesk", size: 14)
                                                 .weight(.medium)
@@ -296,7 +315,7 @@ struct OneTimePaywallSheet: View {
                                         )
                                         .foregroundColor(AppColors.foregroundPrimary)
 
-                                    Text("$9.99")
+                                    Text(regularMonthlyPrice ?? "")
                                         .font(
                                             Font.custom("Overused Grotesk", size: 14)
                                                 .weight(.medium)

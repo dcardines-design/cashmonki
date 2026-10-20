@@ -117,7 +117,7 @@ struct PromoPaywallSheet: View {
 
                                 // Text content
                                 VStack(alignment: .leading, spacing: 6) {
-                                    Text("Unlimited AI Scans")
+                                    Text("Unlimited receipt scans")
                                         .font(
                                             Font.custom("Overused Grotesk", size: 18)
                                                 .weight(.semibold)
@@ -157,7 +157,7 @@ struct PromoPaywallSheet: View {
 
                                 // Text content
                                 VStack(alignment: .leading, spacing: 6) {
-                                    Text("Unlimited Subscriptions")
+                                    Text("Unlimited recurring")
                                         .font(
                                             Font.custom("Overused Grotesk", size: 18)
                                                 .weight(.semibold)
@@ -197,7 +197,7 @@ struct PromoPaywallSheet: View {
 
                                 // Text content
                                 VStack(alignment: .leading, spacing: 6) {
-                                    Text("Unlimited Custom Categories")
+                                    Text("Custom categories")
                                         .font(
                                             Font.custom("Overused Grotesk", size: 18)
                                                 .weight(.semibold)
@@ -237,7 +237,7 @@ struct PromoPaywallSheet: View {
 
                                 // Text content
                                 VStack(alignment: .leading, spacing: 6) {
-                                    Text("Multiple Accounts")
+                                    Text("Unlimited wallets")
                                         .font(
                                             Font.custom("Overused Grotesk", size: 18)
                                                 .weight(.semibold)

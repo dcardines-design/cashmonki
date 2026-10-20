@@ -525,7 +525,11 @@ class ToastManager: ObservableObject {
 
     func showSubscriptionSuccess() {
         print("🎯 ToastManager: ======= SUBSCRIPTION SUCCESS TOAST =======")
-        show("Welcome to Cashmonki Pro!", type: .subscriptionSuccess)
+        // Name the plan that was actually bought (tier is updated before this fires).
+        // Always called on the main queue (subscriptionSucceeded observer).
+        let tier = MainActor.assumeIsolated { RevenueCatManager.shared.planTier }
+        let planName = tier == .plus ? "Plus" : "Pro"
+        show("Welcome to Cashmonki \(planName)!", type: .subscriptionSuccess)
         
         // Auto-dismiss after 4 seconds (longer to allow reading)
         DispatchQueue.main.asyncAfter(deadline: .now() + 4.0) {

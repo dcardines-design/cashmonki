@@ -51,7 +51,7 @@ struct UsageLimitModal: View {
                         Text("📊")
                             .font(.system(size: 80))
                         
-                        Text("You've used all 3 daily receipt scans")
+                        Text("You've used all \(revenueCatManager.planTier.dailyScanLimit ?? PlanTier.freeDailyScanLimit) daily receipt scans")
                             .font(AppFonts.overusedGroteskMedium(size: 20))
                             .foregroundColor(AppColors.foregroundPrimary)
                             .multilineTextAlignment(.center)
@@ -60,15 +60,15 @@ struct UsageLimitModal: View {
                     
                     // Benefits of Pro
                     VStack(spacing: 20) {
-                        Text("Upgrade to Pro for")
+                        Text(revenueCatManager.planTier == .plus ? "Upgrade to Pro for" : "Upgrade for")
                             .font(AppFonts.overusedGroteskMedium(size: 18))
                             .foregroundColor(AppColors.foregroundSecondary)
                         
                         VStack(spacing: 16) {
-                            benefitRow(icon: "∞", title: "Unlimited Receipt Scans", subtitle: "Scan as many receipts as you want")
-                            benefitRow(icon: "☁️", title: "Cloud Backup", subtitle: "Your data synced across all devices")
-                            benefitRow(icon: "📊", title: "Advanced Analytics", subtitle: "Detailed spending insights and trends")
-                            benefitRow(icon: "📤", title: "Export Data", subtitle: "Export to CSV, PDF, and more")
+                            benefitRow(icon: "🧾", title: "More receipt scans", subtitle: "\(PlanTier.plusDailyScanLimit) a day on Plus, unlimited on Pro")
+                            benefitRow(icon: "💬", title: "More Ask messages", subtitle: "\(PlanTier.plusDailyAskLimit) a day on Plus, \(PlanTier.proDailyAskLimit) a day on Pro")
+                            benefitRow(icon: "💼", title: "Unlimited wallets & recurring", subtitle: "On both Plus and Pro")
+                            benefitRow(icon: "📁", title: "Custom categories", subtitle: "On both Plus and Pro")
                         }
                     }
                     
@@ -94,7 +94,7 @@ struct UsageLimitModal: View {
             VStack(spacing: 12) {
                 // Upgrade to Pro button
                 AppButton.primary(
-                    "Upgrade to Pro",
+                    revenueCatManager.planTier == .plus ? "Upgrade to Pro" : "See plans",
                     size: .medium
                 ) {
                     onUpgradeToProTapped()

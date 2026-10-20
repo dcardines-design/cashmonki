@@ -81,42 +81,27 @@ struct ManageBillingSheet: View {
         }
         #endif
 
-        // Use RevenueCat entitlement info
-        if let subscription = currentSubscription {
-            let productId = subscription.productIdentifier
-
-            // Check for promo products
-            if productId == "pro_yearly_cashmonki_pro" {
-                return "Pro Annual"
-            } else if productId == "pro_monthly_cashmonki_pro" {
-                return "Pro Monthly"
-            }
-
-            return productId.contains("yearly") ? "Pro Annual" : "Pro Monthly"
+        // Tier from the active entitlement; term from the product
+        if currentSubscription != nil {
+            let tierName = revenueCatManager.planTier == .plus ? "Plus" : "Pro"
+            return "\(tierName) \(isYearlyProduct ? "Annual" : "Monthly")"
         }
 
         return "Free"
     }
 
-    private var planPrice: String {
-        guard let subscription = currentSubscription else { return "Free" }
-        let productId = subscription.productIdentifier
-
-        // Check for promo products first (20% off pricing)
-        if productId == "pro_yearly_cashmonki_pro" {
-            return "$79.99 / year"
-        } else if productId == "pro_monthly_cashmonki_pro" {
-            return "$7.99 / month"
-        }
-
-        // Regular pricing
-        if productId.contains("yearly") {
-            return "$99.99 / year"
-        } else {
-            return "$9.99 / month"
-        }
+    /// The store product behind the active entitlement, when it's in a loaded offering.
+    private var currentProduct: StoreProduct? {
+        guard let productId = currentSubscription?.productIdentifier else { return nil }
+        return revenueCatManager.storeProduct(forProductID: productId)
     }
-    
+
+    private var isYearlyProduct: Bool {
+        if let unit = currentProduct?.subscriptionPeriod?.unit { return unit == .year }
+        let productId = currentSubscription?.productIdentifier.lowercased() ?? ""
+        return productId.contains("yearly") || productId.contains("annual")
+    }
+
     private var priceAmount: String {
         #if DEBUG
         // Use debug state when available
@@ -132,22 +117,12 @@ struct ManageBillingSheet: View {
         }
         #endif
 
-        // Use RevenueCat entitlement info
-        if let subscription = currentSubscription {
-            let productId = subscription.productIdentifier
-
-            // Check for promo products first (20% off pricing)
-            if productId == "pro_yearly_cashmonki_pro" {
-                return "US$79.99"
-            } else if productId == "pro_monthly_cashmonki_pro" {
-                return "US$7.99"
-            }
-
-            // Regular pricing
-            return productId.contains("yearly") ? "US$99.99" : "US$9.99"
+        // Price of the product the user is actually subscribed to (from the store)
+        if currentSubscription != nil {
+            return currentProduct?.localizedPriceString ?? "—"
         }
 
-        return "US$0.00"
+        return "Free"
     }
     
     private var pricePeriod: String {
@@ -166,8 +141,8 @@ struct ManageBillingSheet: View {
         #endif
         
         // Use RevenueCat entitlement info
-        if let subscription = currentSubscription {
-            return subscription.productIdentifier.contains("yearly") ? " / year" : " / month"
+        if currentSubscription != nil, currentProduct != nil {
+            return isYearlyProduct ? " / year" : " / month"
         }
         
         return ""
