@@ -196,6 +196,18 @@ class MixpanelManager: ObservableObject {
         Mixpanel.mainInstance().registerSuperProperties(properties)
     }
 
+    /// Super properties from [String: Any] - converts to MixpanelType automatically
+    func registerAnySuperProperties(_ properties: [String: Any]) {
+        guard isConfigured, let converted = convertToMixpanelProperties(properties) else { return }
+        Mixpanel.mainInstance().registerSuperProperties(converted)
+    }
+
+    /// People properties from [String: Any] - converts to MixpanelType automatically
+    func setAnyUserProperties(_ properties: [String: Any]) {
+        guard isConfigured, let converted = convertToMixpanelProperties(properties) else { return }
+        Mixpanel.mainInstance().people.set(properties: converted)
+    }
+
     // MARK: - Session Management
 
     func reset() {
@@ -294,6 +306,8 @@ class MixpanelManager: ObservableObject {
     func setUserProperties(_ properties: [String: Any]) {}
     func incrementUserProperty(_ property: String, by amount: Double = 1) {}
     func registerSuperProperties(_ properties: [String: Any]) {}
+    func registerAnySuperProperties(_ properties: [String: Any]) {}
+    func setAnyUserProperties(_ properties: [String: Any]) {}
     func reset() {}
     func flush() {}
     func optOut() {}

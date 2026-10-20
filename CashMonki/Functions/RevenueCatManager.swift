@@ -33,6 +33,9 @@ class RevenueCatManager: NSObject, ObservableObject {
 
     @Published var customerInfo: CustomerInfo?
     @Published var offerings: Offerings?
+    /// The user's plan (Free / Plus / Pro). Single source of truth for feature gating.
+    @Published private(set) var planTier: PlanTier = .free
+    /// True for any paid tier (Plus or Pro). Kept in sync with `planTier`.
     @Published var isSubscriptionActive: Bool = false
     @Published var isPurchaseInProgress: Bool = false  // Tracks active purchase flow
 
@@ -44,14 +47,28 @@ class RevenueCatManager: NSObject, ObservableObject {
 
     private var isConfigured: Bool = false
 
-    // Entitlement identifier from RevenueCat dashboard
-    private let entitlementID = "cashmonki-subs"
+    // Entitlement identifiers from RevenueCat dashboard
+    private let entitlementID = PlanTier.proEntitlementID        // Pro
+    private let plusEntitlementID = PlanTier.plusEntitlementID   // Plus
 
     // MARK: - Computed Properties
 
-    /// Check if user has Pro subscription
+    /// Check if user has the Pro tier specifically (`cashmonki-subs`, incl. all existing subscribers)
     var isProUser: Bool {
-        return isSubscriptionActive
+        return planTier == .pro
+    }
+
+    /// Check if user has any paid tier (Plus or Pro)
+    var hasPaidSubscription: Bool {
+        return planTier.isPaid
+    }
+
+    /// The active entitlement backing the current tier (Pro preferred over Plus)
+    var activeTierEntitlement: EntitlementInfo? {
+        guard let entitlements = customerInfo?.entitlements else { return nil }
+        if let pro = entitlements[entitlementID], pro.isActive { return pro }
+        if let plus = entitlements[plusEntitlementID], plus.isActive { return plus }
+        return nil
     }
 
     /// Get current offering for paywall
@@ -64,6 +81,17 @@ class RevenueCatManager: NSObject, ObservableObject {
         return currentOffering
     }
 
+    /// Offering with the Plus/Pro packages (`cashmonki-tiers`); nil until it exists in RevenueCat.
+    /// The legacy paywall keeps using `currentOffering`.
+    var tiersOffering: Offering? {
+        return offerings?.all[TierPackageID.offeringID]
+    }
+
+    /// A Plus/Pro package from the tiers offering; nil if the offering or package is missing.
+    func tierPackage(_ id: TierPackageID) -> Package? {
+        return tiersOffering?.availablePackages.first { $0.identifier == id.rawValue }
+    }
+
     /// Check if user has used trial before but isn't currently subscribed
     var hasUsedTrialBefore: Bool {
         // Debug override for testing trial-ended UI
@@ -74,7 +102,10 @@ class RevenueCatManager: NSObject, ObservableObject {
 
         guard let customerInfo = customerInfo else { return false }
 
-        // If currently subscribed, they're not a "lapsed" user
+        // If currently Pro, they're not a "lapsed" user. A Plus user falls through: they have
+        // purchase history, so the legacy (Pro-only) paywall offers "Continue with Pro" rather
+        // than a free trial they've likely already used. Lapsed-paywall triggers guard on
+        // hasPaidSubscription separately, so Plus users are never treated as lapsed.
         if isProUser { return false }
 
         // Check if user has any previous purchases (indicating they used trial before)
@@ -96,6 +127,12 @@ class RevenueCatManager: NSObject, ObservableObject {
 
     override private init() {
         super.init()
+        // DEBUG `-forceTier` launch argument applies before RevenueCat loads.
+        if let forced = PlanTier.debugForcedTier {
+            planTier = forced
+            isSubscriptionActive = forced.isPaid
+            print("🧪 RevenueCat: Tier forced to \(forced.rawValue) via -forceTier")
+        }
     }
 
     // MARK: - Configuration
@@ -171,15 +208,26 @@ class RevenueCatManager: NSObject, ObservableObject {
     }
 
     private func updateSubscriptionStatus(_ info: CustomerInfo) {
-        let entitlement = info.entitlements[entitlementID]
-        let hasEntitlement = entitlement?.isActive == true
+        let proEntitlement = info.entitlements[entitlementID]
+        let plusEntitlement = info.entitlements[plusEntitlementID]
+        let tier: PlanTier
+        if proEntitlement?.isActive == true {
+            tier = .pro
+        } else if plusEntitlement?.isActive == true {
+            tier = .plus
+        } else {
+            tier = .free
+        }
+        let entitlement = tier == .plus ? plusEntitlement : proEntitlement
+        let hasEntitlement = tier.isPaid
         let wasActive = isSubscriptionActive
-        isSubscriptionActive = hasEntitlement
+        applyTier(tier)
 
         // Entitlement just turned on: a free trial and a paid start are different funnels.
         if hasEntitlement, !wasActive, let entitlement, entitlement.periodType == .trial {
             AnalyticsManager.shared.track(.trialStarted, properties: [
                 "product_id": entitlement.productIdentifier,
+                "tier": tier.rawValue,
                 "store": "\(entitlement.store)"
             ])
         }
@@ -199,6 +247,15 @@ class RevenueCatManager: NSObject, ObservableObject {
 
     /// Guards against re-reporting the same cancellation on every customer-info refresh.
     private var hasReportedCancellation = false
+
+    /// Sets the tier (honouring the DEBUG `-forceTier` override) and keeps
+    /// `isSubscriptionActive` and the analytics tier properties in sync.
+    private func applyTier(_ tier: PlanTier) {
+        let effective = PlanTier.debugForcedTier ?? tier
+        if planTier != effective { planTier = effective }
+        if isSubscriptionActive != effective.isPaid { isSubscriptionActive = effective.isPaid }
+        AnalyticsManager.shared.setSubscriptionTier(effective)
+    }
 
     // MARK: - Offerings
 
@@ -354,19 +411,24 @@ class RevenueCatManager: NSObject, ObservableObject {
     // MARK: - Feature Checks
 
     func hasFeature(_ feature: PremiumFeature) -> Bool {
-        return isSubscriptionActive
+        switch feature {
+        case .customCategories: return planTier.allowsCustomCategories
+        default: return hasPaidSubscription
+        }
     }
 
     // MARK: - Debug Methods (always available for testing)
 
     /// Enable test premium features for debugging
     func enableTestPremium() {
+        planTier = .pro
         isSubscriptionActive = true
         print("🧪 RevenueCat: Test premium enabled")
     }
 
     /// Disable test premium features
     func disableTestPremium() {
+        planTier = .free
         isSubscriptionActive = false
         print("🧪 RevenueCat: Test premium disabled")
     }
@@ -416,7 +478,9 @@ class RevenueCatManager: NSObject, ObservableObject {
     @Published var isSubscriptionActive: Bool = false
     @Published var isPurchaseInProgress: Bool = false
 
+    var planTier: PlanTier { .free }
     var isProUser: Bool { false }
+    var hasPaidSubscription: Bool { false }
     var currentOffering: Any? { nil }
     var targetOffering: Any? { nil }
     var hasUsedTrialBefore: Bool { false }

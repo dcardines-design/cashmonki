@@ -39,6 +39,7 @@ class AnalyticsManager {
 
     /// Identify user across all analytics services
     func identify(userId: String, email: String? = nil, name: String? = nil) {
+        registeredTier = nil  // re-stamp the tier on the identified person
         if let email = email {
             PostHogManager.shared.identifyWithEmail(userId: userId, email: email, name: name)
             MixpanelManager.shared.identifyWithEmail(userId: userId, email: email, name: name)
@@ -50,10 +51,36 @@ class AnalyticsManager {
         print("✅ Analytics: User identified across all services")
     }
 
+    // MARK: - Subscription Tier
+
+    /// Last tier registered with the analytics services; cleared on identify/reset so the
+    /// next RevenueCat update stamps the (new) person again.
+    private var registeredTier: PlanTier?
+
+    /// Registers the plan as a super property (every event) and person property in
+    /// PostHog + Mixpanel: `subscription_tier` (free/plus/pro) alongside `is_pro`.
+    func setSubscriptionTier(_ tier: PlanTier) {
+        guard registeredTier != tier else { return }
+        registeredTier = tier
+
+        let properties: [String: Any] = [
+            "subscription_tier": tier.rawValue,
+            "is_pro": tier == .pro,
+            "is_paid": tier.isPaid
+        ]
+        PostHogManager.shared.registerSuperProperties(properties)
+        PostHogManager.shared.setUserProperties(properties)
+        MixpanelManager.shared.registerAnySuperProperties(properties)
+        MixpanelManager.shared.setAnyUserProperties(properties)
+
+        print("📊 Analytics: subscription_tier=\(tier.rawValue)")
+    }
+
     // MARK: - Session Management
 
     /// Reset sessions across all analytics services (on logout)
     func reset() {
+        registeredTier = nil
         PostHogManager.shared.reset()
         MixpanelManager.shared.reset()
         print("🔄 Analytics: Sessions reset across all services")
