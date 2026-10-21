@@ -411,6 +411,26 @@ final class DemoRecordingUITests: XCTestCase {
         pause(1.0)
     }
 
+    /// The home "hide amounts" eye must survive a force-quit. Runs against an already
+    /// onboarded install so Home is the first screen.
+    @MainActor
+    func testVerifyHideAmountsPersists() throws {
+        let app = XCUIApplication()
+        app.launch()
+        let hide = app.buttons["Hide amounts"], show = app.buttons["Show amounts"]
+        XCTAssertTrue(hide.waitForExistence(timeout: 15) || show.exists, "Home eye button not found")
+        if show.exists { show.tap(); pause(0.5) }   // start from visible
+        XCTAssertTrue(hide.waitForExistence(timeout: 5))
+        hide.tap(); pause(0.5)
+        XCTAssertTrue(show.waitForExistence(timeout: 5), "Toggle did not switch to hidden")
+        saveScreen("hide-before-quit", app)
+
+        app.terminate()                               // same as swiping the app away
+        app.launch()
+        saveScreen("hide-after-relaunch", app)
+        XCTAssertTrue(show.waitForExistence(timeout: 15), "Amounts were visible again after relaunch")
+    }
+
     @MainActor
     func testVerifyCalendarPeriods() throws {
         let app = XCUIApplication()
