@@ -26,6 +26,7 @@ extension HomePage {
                     withAnimation(.easeInOut(duration: 0.2)) {
                         amountsHidden.toggle()
                     }
+                    print("👁️ HideAmounts: toggled to \(amountsHidden), stored = \(UserDefaults.standard.bool(forKey: "home_amounts_hidden"))")
                 } label: {
                     AppIcon(
                         assetName: amountsHidden ? "eye-off" : "eye",

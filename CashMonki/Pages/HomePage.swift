@@ -1017,6 +1017,7 @@ struct HomePage: View {
                     }
                 }
                 .onAppear {
+                    print("👁️ HideAmounts: home appeared, amountsHidden = \(amountsHidden), stored = \(UserDefaults.standard.object(forKey: "home_amounts_hidden") as Any)")
                     lastKnownTransactionCount.wrappedValue = accountManager.filteredTransactions.count
                     updateCachedTotalsIfNeeded()
                     updateRecentTransactions()
