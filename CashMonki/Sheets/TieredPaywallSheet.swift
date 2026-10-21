@@ -360,7 +360,7 @@ struct TieredPaywallSheet: View {
         ]
     }
 
-    private let valueColumnWidth: CGFloat = 76
+    private let valueColumnWidth: CGFloat = 96
     private var planTint: Color { AppColors.accentBackground.opacity(0.05) }
 
     private var featuresTable: some View {
