@@ -60,7 +60,6 @@ struct HomePage: View {
     @State internal var receiptSuccessMessage: String?
     @State internal var showingReceiptDetail: Bool = false
     @State internal var selectedTransactionForDetail: Txn?
-    @State internal var showingUsageLimitModal: Bool = false
     @State internal var showingCustomPaywall: Bool = false
     @State internal var paywallMode: PaywallMode = .default
     @State internal var showingCameraPermissionAlert: Bool = false

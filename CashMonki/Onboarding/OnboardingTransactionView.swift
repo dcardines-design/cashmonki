@@ -42,7 +42,6 @@ struct OnboardingTransactionView: View {
     @State private var showingReceiptConfirmation = false
     @State private var pendingReceiptImage: UIImage?
     @State private var pendingReceiptAnalysis: ReceiptAnalysis?
-    @State private var showingUsageLimitModal = false
     @State private var showingCameraPermissionAlert = false
     
     @ObservedObject private var userManager = UserManager.shared
@@ -319,16 +318,6 @@ struct OnboardingTransactionView: View {
                     }
                 )
             }
-        }
-        .sheet(isPresented: $showingUsageLimitModal) {
-            UsageLimitModal(
-                isPresented: $showingUsageLimitModal,
-                onUpgradeToProTapped: {
-                    // Open RevenueCat paywall or subscription flow
-                    print("📊 OnboardingTransactionView: User wants to upgrade to Pro")
-                    // TODO: Implement RevenueCat subscription flow
-                }
-            )
         }
     }
     
