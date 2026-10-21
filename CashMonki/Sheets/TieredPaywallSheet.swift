@@ -544,6 +544,7 @@ struct TieredPaywallSheet: View {
 
     private var finePrint: String {
         guard let selected = selectedPrice else { return " " }
+        if currentTier == .pro { return "You're on Cashmonki Pro. Change or cancel your plan in Manage Billing." }
         if isUpgrade { return "Starts today. Apple credits unused Plus time. Auto-renews." }
         let period = selected.isYearly ? "year" : "month"
         if showsTrial {
