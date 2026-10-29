@@ -2221,6 +2221,144 @@ class CategoriesManager: ObservableObject {
         return CategoryMergeResult(keptName: keepName, removedCount: mergedIds.count, movedTransactions: refiled.count)
     }
 
+    // MARK: - Reorganize
+
+    enum CategoryReorganizeChange {
+        /// Put a category under `parentId` (a top-level category becomes a subcategory, or a
+        /// subcategory moves to another parent).
+        case nest(categoryId: UUID, parentId: UUID)
+        /// Make a subcategory a top-level category.
+        case unnest(categoryId: UUID)
+        /// Move transactions from one category to another, optionally only one merchant's.
+        case refile(fromId: UUID, toId: UUID, merchant: String?)
+    }
+
+    struct CategoryReorganizeResult {
+        let applied: Int
+        let skipped: Int
+        let movedTransactions: Int
+    }
+
+    /// Applies the changes in order. Every change keeps category ids as they are, so the
+    /// transactions, budgets and recurring items pointing at a moved category stay linked.
+    /// A change that doesn't fit is skipped, not forced: nesting would make two levels, a
+    /// category with a budget would become a subcategory (budgets are parent-scoped), or
+    /// the types differ (re-filing would flip the transactions' sign).
+    @MainActor
+    func reorganizeCategories(_ changes: [CategoryReorganizeChange]) -> CategoryReorganizeResult {
+        let noCategoryIds: Set<UUID> = [
+            UUID(uuidString: "00000000-0000-0000-0000-000000000001")!,
+            UUID(uuidString: "00000000-0000-0000-0000-000000000002")!
+        ]
+        let userManager = UserManager.shared
+        var applied = 0
+        var skipped = 0
+        var categoriesChanged = false
+        var refiled: [UUID: Txn] = [:]
+
+        func liveIndex(_ id: UUID) -> Int? {
+            categories.firstIndex { $0.id == id && !$0.isDeleted }
+        }
+        /// Index of the category holding `id` as an embedded subcategory.
+        func embeddingIndex(_ id: UUID) -> Int? {
+            categories.firstIndex { !$0.isDeleted && $0.subcategories.contains { $0.id == id } }
+        }
+        func type(of id: UUID) -> CategoryType? {
+            if let index = liveIndex(id) { return categories[index].type }
+            if let parent = embeddingIndex(id) { return categories[parent].subcategories.first { $0.id == id }?.type }
+            return nil
+        }
+        func name(of id: UUID) -> String? {
+            if let index = liveIndex(id) { return categories[index].name }
+            if let parent = embeddingIndex(id) { return categories[parent].subcategories.first { $0.id == id }?.name }
+            return nil
+        }
+        func touch(_ index: Int) {
+            categories[index].updatedAt = Date() // cloud merge is last-write-wins per category
+        }
+
+        for change in changes {
+            switch change {
+            case .nest(let id, let parentId):
+                guard id != parentId,
+                      !noCategoryIds.contains(id), !noCategoryIds.contains(parentId),
+                      let parentIndex = liveIndex(parentId),
+                      categories[parentIndex].parentCategoryId == nil,
+                      type(of: id) == categories[parentIndex].type,
+                      !userManager.currentUser.budgets.contains(where: { $0.categoryId == id })
+                else { skipped += 1; continue }
+
+                if let index = liveIndex(id) {
+                    let hasChildren = !categories[index].subcategories.isEmpty
+                        || categories.contains { !$0.isDeleted && $0.parentCategoryId == id }
+                    guard !hasChildren, categories[index].parentCategoryId != parentId else { skipped += 1; continue }
+                    categories[index].parentCategoryId = parentId
+                    touch(index)
+                } else if let fromIndex = embeddingIndex(id), fromIndex != parentIndex,
+                          let sub = categories[fromIndex].subcategories.first(where: { $0.id == id }) {
+                    categories[fromIndex].subcategories.removeAll { $0.id == id }
+                    categories[parentIndex].subcategories.append(SubcategoryData(
+                        id: sub.id, name: sub.name, emoji: sub.emoji, type: sub.type,
+                        parent: categories[parentIndex].name, parentId: parentId
+                    ))
+                    touch(fromIndex)
+                    touch(parentIndex)
+                } else {
+                    skipped += 1
+                    continue
+                }
+                categoriesChanged = true
+                applied += 1
+
+            case .unnest(let id):
+                if let index = liveIndex(id), categories[index].parentCategoryId != nil {
+                    categories[index].parentCategoryId = nil
+                    touch(index)
+                } else if let fromIndex = embeddingIndex(id),
+                          let sub = categories[fromIndex].subcategories.first(where: { $0.id == id }) {
+                    // Same id as the subcategory had, so everything filed under it stays put.
+                    categories[fromIndex].subcategories.removeAll { $0.id == id }
+                    touch(fromIndex)
+                    categories.append(UnifiedCategoryData(id: sub.id, name: sub.name, emoji: sub.emoji, type: sub.type))
+                } else {
+                    skipped += 1
+                    continue
+                }
+                categoriesChanged = true
+                applied += 1
+
+            case .refile(let fromId, let toId, let merchant):
+                guard fromId != toId, !noCategoryIds.contains(toId),
+                      let toName = name(of: toId),
+                      let toType = type(of: toId), type(of: fromId) == toType
+                else { skipped += 1; continue }
+                let needle = merchant?.trimmingCharacters(in: .whitespaces).lowercased()
+                var moved = 0
+                for transaction in userManager.getTransactions() {
+                    let current = refiled[transaction.id] ?? transaction
+                    guard current.categoryId == fromId else { continue }
+                    if let needle, !needle.isEmpty,
+                       !(current.merchantName ?? "").lowercased().contains(needle) { continue }
+                    var updated = current
+                    updated.category = toName
+                    updated.categoryId = toId
+                    refiled[transaction.id] = updated
+                    moved += 1
+                }
+                if moved > 0 { applied += 1 } else { skipped += 1 }
+            }
+        }
+
+        if categoriesChanged {
+            saveCategories()
+            clearCategoryGroupCache()
+        }
+        userManager.updateTransactions(Array(refiled.values))
+        print("✅ reorganizeCategories: applied \(applied), skipped \(skipped), re-filed \(refiled.count) transactions")
+        objectWillChange.send()
+        return CategoryReorganizeResult(applied: applied, skipped: skipped, movedTransactions: refiled.count)
+    }
+
     /// Delete a specific subcategory and convert affected transactions to "No Category"
     func deleteSubcategory(subcategoryName: String, parentCategoryName: String) -> Bool {
         print("🗑️ deleteSubcategory: Starting deletion of subcategory '\(subcategoryName)' under '\(parentCategoryName)'")
