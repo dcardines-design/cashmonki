@@ -19,6 +19,8 @@ struct ReceiptsPage: View {
     @State private var selectedPeriodIndex: Int = 10  // Default to current month (Sep 2025)
     @State private var selectedTransactionType: TransactionTypeFilter = .balance
     @State private var selectedCategoryFilter: String? = nil  // Category filter - nil means show all
+    // Same key as Home's eye toggle, so hiding amounts on either page hides them on both
+    @AppStorage("home_amounts_hidden") private var amountsHidden: Bool = false
 
     // Special constant for "All Others" filter
     private let allOthersFilterKey = "__ALL_OTHERS__"
@@ -274,7 +276,7 @@ struct ReceiptsPage: View {
                             
                             Spacer()
                             
-                            Text(currencyPrefs.formatPrimaryAmount(dailyTotal))
+                            Text(maskedAmount(currencyPrefs.formatPrimaryAmount(dailyTotal), hidden: amountsHidden))
                                 .font(AppFonts.overusedGroteskMedium(size: 16))
                                 .foregroundStyle(AppColors.foregroundSecondary)
                         }
@@ -302,6 +304,7 @@ struct ReceiptsPage: View {
                             if index < section.1.count - 1 { Divider().padding(.leading, 64) }
                         }
                         }
+                        .environment(\.amountsHidden, amountsHidden)
                         .background(AppColors.backgroundWhite)
                         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                     }
@@ -402,11 +405,31 @@ struct ReceiptsPage: View {
             VStack(alignment: .leading, spacing: 16) {
                 HStack(spacing: 16) {
                     VStack(alignment: .leading, spacing: 8) {
-                        Text(titleText)
-                            .font(AppFonts.overusedGroteskMedium(size: 18))
-                            .foregroundStyle(AppColors.foregroundSecondary)
-                        
-                        Text(currencyPrefs.formatPrimaryAmount(monthlyTotal))
+                        HStack(spacing: 8) {
+                            Text(titleText)
+                                .font(AppFonts.overusedGroteskMedium(size: 18))
+                                .foregroundStyle(AppColors.foregroundSecondary)
+
+                            Button {
+                                withAnimation(.easeInOut(duration: 0.2)) {
+                                    amountsHidden.toggle()
+                                }
+                            } label: {
+                                AppIcon(
+                                    assetName: amountsHidden ? "eye-off" : "eye",
+                                    fallbackSystemName: amountsHidden ? "eye.slash" : "eye"
+                                )
+                                .frame(width: 20, height: 20)
+                                .foregroundStyle(AppColors.foregroundSecondary)
+                                // Widen the tap target without changing the visual size
+                                .padding(6)
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(PlainButtonStyle())
+                            .accessibilityLabel(amountsHidden ? "Show amounts" : "Hide amounts")
+                        }
+
+                        Text(maskedAmount(currencyPrefs.formatPrimaryAmount(monthlyTotal), hidden: amountsHidden, dots: 6))
                             .font(AppFonts.overusedGroteskSemiBold(size: 34))
                             .foregroundStyle(AppColors.foregroundPrimary)
                     }
@@ -741,7 +764,7 @@ struct ReceiptsPage: View {
 
                         // Amount and percentage
                         HStack(spacing: 4) {
-                            Text(currencyPrefs.formatPrimaryAmount(categoryData.value))
+                            Text(maskedAmount(currencyPrefs.formatPrimaryAmount(categoryData.value), hidden: amountsHidden))
                                 .font(AppFonts.overusedGroteskMedium(size: 16))
                                 .foregroundStyle(AppColors.foregroundSecondary)
 
@@ -791,7 +814,7 @@ struct ReceiptsPage: View {
 
                         // Amount and percentage
                         HStack(spacing: 4) {
-                            Text(currencyPrefs.formatPrimaryAmount(allOthersAmount))
+                            Text(maskedAmount(currencyPrefs.formatPrimaryAmount(allOthersAmount), hidden: amountsHidden))
                                 .font(AppFonts.overusedGroteskMedium(size: 16))
                                 .foregroundStyle(AppColors.foregroundSecondary)
 

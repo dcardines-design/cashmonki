@@ -7,6 +7,29 @@
 
 import SwiftUI
 
+// MARK: - Amount Privacy
+
+/// Replaces the digits of an already-formatted amount with bullets when `hidden` is on.
+/// Any leading sign / currency symbol is kept so the string still reads as money
+/// (e.g. "-₱1,234.56" → "-₱•••••").
+func maskedAmount(_ formatted: String, hidden: Bool, dots: Int = 5) -> String {
+    guard hidden else { return formatted }
+    let prefix = formatted.prefix { !$0.isNumber }
+    return prefix + String(repeating: "•", count: dots)
+}
+
+private struct AmountsHiddenKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+extension EnvironmentValues {
+    /// Set by pages with the eye toggle so transaction rows mask their amounts too.
+    var amountsHidden: Bool {
+        get { self[AmountsHiddenKey.self] }
+        set { self[AmountsHiddenKey.self] = newValue }
+    }
+}
+
 // MARK: - Unified Transaction Display Component
 struct UnifiedTransactionDisplay: View {
     let transaction: Txn
@@ -16,7 +39,8 @@ struct UnifiedTransactionDisplay: View {
     @ObservedObject private var categoriesManager = CategoriesManager.shared
     @ObservedObject private var userManager = UserManager.shared
     @ObservedObject private var currencyPrefs = CurrencyPreferences.shared
-    
+    @Environment(\.amountsHidden) private var amountsHidden
+
     // MARK: - Display Styles
     enum DisplayStyle {
         case row        // List-style row (current TransactionRow)
@@ -362,17 +386,17 @@ struct UnifiedTransactionDisplay: View {
             convertedAmount = abs(transaction.amount)
         }
 
-        return formatCurrency(convertedAmount, currency: currentPrimaryCurrency)
+        return maskedAmount(formatCurrency(convertedAmount, currency: currentPrimaryCurrency), hidden: amountsHidden)
     }
     
     private var originalAmountText: String {
         // Show user entered amount if available, otherwise show original converted amount
         if let userEnteredAmount = transaction.userEnteredAmount,
            let userEnteredCurrency = transaction.userEnteredCurrency {
-            return formatCurrency(abs(userEnteredAmount), currency: userEnteredCurrency)
+            return maskedAmount(formatCurrency(abs(userEnteredAmount), currency: userEnteredCurrency), hidden: amountsHidden)
         } else if let originalAmount = transaction.originalAmount,
                   let originalCurrency = transaction.originalCurrency {
-            return formatCurrency(originalAmount, currency: originalCurrency)
+            return maskedAmount(formatCurrency(originalAmount, currency: originalCurrency), hidden: amountsHidden)
         }
         return ""
     }
