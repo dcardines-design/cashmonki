@@ -11,6 +11,7 @@
 
 import SwiftUI
 import UIKit
+import PhotosUI
 
 // MARK: - Display model
 
@@ -88,12 +89,24 @@ struct AskDisplayMessage: Identifiable, Codable {
     /// Tool calls and results behind this reply, replayed to the model on later turns so it
     /// sees its own past work as real tool messages instead of prose.
     var toolRounds: [AskToolRound]? = nil
+    /// Photos the user attached (AskImageStore ids). Absent in files written by older builds.
+    var imageIDs: [String]? = nil
 
-    init(id: UUID = UUID(), isUser: Bool, content: Content, toolRounds: [AskToolRound]? = nil) {
+    init(id: UUID = UUID(), isUser: Bool, content: Content, toolRounds: [AskToolRound]? = nil, imageIDs: [String]? = nil) {
         self.id = id
         self.isUser = isUser
         self.content = content
         self.toolRounds = toolRounds
+        self.imageIDs = imageIDs
+    }
+
+    /// What the model reads for a past turn: `historyText`, plus a note when photos were
+    /// attached, since only the turn being sent uploads its photos.
+    var historyTextWithPhotos: String {
+        let count = imageIDs?.count ?? 0
+        guard count > 0 else { return historyText }
+        let note = "(The user attached \(count == 1 ? "a photo" : "\(count) photos") here. Photos are not re-sent on later turns.)"
+        return historyText.isEmpty ? note : "\(historyText) \(note)"
     }
 
     /// App-side record of a past turn, sent back to the model as conversation
@@ -277,10 +290,13 @@ final class AskChatManager: ObservableObject {
     /// Pro's daily cap is fair use: there's nothing to upgrade to, so no paywall.
     static let fairUseLimitMessageText = "You've reached today's Ask limit. It resets at midnight."
     private static let legacyFairUseLimitMessageText = "You've reached today's Ask limit. It resets tomorrow."
+    /// Photos count as receipt scans, so a free or Plus user can run out of those first.
+    static let scanLimitMessageText = "You've used today's photo scans. They reset at midnight, or upgrade for more."
 
     private static func isLimitNotice(_ m: AskDisplayMessage) -> Bool {
         if case .text(let t) = m.content {
             return t == legacyLimitMessageText || t == legacyFairUseLimitMessageText || t == fairUseLimitMessageText
+                || t == scanLimitMessageText
                 || PlanTier.allCases.contains { t == limitMessageText(for: $0) }
         }
         return false
@@ -294,6 +310,9 @@ final class AskChatManager: ObservableObject {
             confirmedDrafts = Set(saved.confirmed)
             supersededCards = Set(saved.superseded ?? [])
             addedBatchRows = Self.decodeBatchRows(saved.batchRows)
+        }
+        DispatchQueue.global(qos: .utility).async {
+            AskImageStore.pruneOrphans(keeping: Self.photoIDsInAllChats())
         }
         // Follow the login the same way app data does: when a user signs in / the session
         // finishes loading, swap to that user's chat (local + cloud), and clear on sign-out.
@@ -376,6 +395,20 @@ final class AskChatManager: ObservableObject {
         }
     }
 
+    /// Photo ids referenced by every account's chat on this device, so pruning for one
+    /// signed-in user never deletes another account's photos.
+    nonisolated private static func photoIDsInAllChats() -> Set<String> {
+        let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let files = (try? FileManager.default.contentsOfDirectory(at: documents, includingPropertiesForKeys: nil)) ?? []
+        var ids = Set<String>()
+        for file in files where file.lastPathComponent.hasPrefix("ask_chat_") && file.pathExtension == "json" {
+            guard let data = try? Data(contentsOf: file),
+                  let chat = try? JSONDecoder().decode(PersistedChat.self, from: data) else { continue }
+            ids.formUnion(chat.messages.flatMap { $0.imageIDs ?? [] })
+        }
+        return ids
+    }
+
     private static func loadPersisted() -> PersistedChat? {
         guard let data = try? Data(contentsOf: chatFileURL(for: currentUID())) else { return nil }
         return try? JSONDecoder().decode(PersistedChat.self, from: data)
@@ -453,19 +486,41 @@ final class AskChatManager: ObservableObject {
         guard let index = messages.firstIndex(where: { $0.id == messageID }),
               case .failed(_, let userText) = messages[index].content else { return }
         messages.remove(at: index)
-        // Remove the user's turn too - send() re-appends it.
+        // Remove the user's turn too - send() re-appends it, photos included.
+        var imageIDs: [String] = []
         if let userIndex = messages.lastIndex(where: { $0.isUser }),
            case .text(let existing) = messages[userIndex].content,
            existing == userText {
+            imageIDs = messages[userIndex].imageIDs ?? []
             messages.remove(at: userIndex)
         }
         persist()
-        send(userText)
+        send(userText, imageIDs: imageIDs, isRetry: true)
     }
 
-    func send(_ text: String, source: SendSource = .typed) {
+    /// Sends a turn, with any attached photos (AskImageStore ids). Returns false when nothing
+    /// was sent (empty, busy, or a daily limit), so the composer can keep what was typed.
+    /// Each photo counts as one receipt scan; a retry doesn't count its photos again.
+    @discardableResult
+    func send(_ text: String, imageIDs: [String] = [], source: SendSource = .typed, isRetry: Bool = false) -> Bool {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, !isThinking else { return }
+        guard !trimmed.isEmpty || !imageIDs.isEmpty, !isThinking else { return false }
+
+        let countsScans = !imageIDs.isEmpty && !isRetry
+        if countsScans && DailyUsageManager.shared.getRemainingUsage() < imageIDs.count {
+            let tier = RevenueCatManager.shared.planTier
+            messages.append(AskDisplayMessage(isUser: false, content: .text(Self.scanLimitMessageText)))
+            paywallMode = .limitHit(.scan)
+            showLimitPaywall = true
+            AnalyticsManager.shared.track(.askLimitReached, properties: [
+                "source": source.rawValue,
+                "subscription_tier": tier.rawValue,
+                "turns_in_thread": messages.filter { $0.isUser }.count,
+                "limit": "scan",
+                "photo_count": imageIDs.count
+            ])
+            return false
+        }
 
         guard DailyUsageManager.shared.canSendChatMessage() else {
             let tier = RevenueCatManager.shared.planTier
@@ -481,28 +536,44 @@ final class AskChatManager: ObservableObject {
                 "subscription_tier": tier.rawValue,
                 "turns_in_thread": messages.filter { $0.isUser }.count
             ])
-            return
+            return false
         }
         DailyUsageManager.shared.recordChatMessage()
+        if countsScans {
+            for _ in imageIDs { DailyUsageManager.shared.recordReceiptAnalysis() }
+        }
 
         // Message length only — never the text itself, which is financial data.
         AnalyticsManager.shared.track(.askMessageSent, properties: [
             "source": source.rawValue,
             "character_count": trimmed.count,
             "word_count": trimmed.split(separator: " ").count,
-            "turn_index": messages.filter { $0.isUser }.count
+            "turn_index": messages.filter { $0.isUser }.count,
+            "photo_count": imageIDs.count
         ])
 
-        messages.append(AskDisplayMessage(isUser: true, content: .text(trimmed)))
+        let userMessage = AskDisplayMessage(
+            isUser: true,
+            content: .text(trimmed),
+            imageIDs: imageIDs.isEmpty ? nil : imageIDs
+        )
+        messages.append(userMessage)
         isThinking = true
         turnStartedAt = Date()
 
         persist()
 
         // Cap context: only the last 20 messages go to the model. Tool rounds ride along;
-        // the service decides how many of the most recent ones to replay.
+        // the service decides how many of the most recent ones to replay. Only this turn
+        // uploads its photos; earlier ones are noted in their text.
+        let photos = imageIDs.compactMap(AskImageStore.data(for:))
         let history = visibleMessages.suffix(20).map {
-            AskChatService.HistoryTurn(isUser: $0.isUser, text: $0.historyText, toolRounds: $0.toolRounds)
+            AskChatService.HistoryTurn(
+                isUser: $0.isUser,
+                text: $0.historyTextWithPhotos,
+                toolRounds: $0.toolRounds,
+                images: $0.id == userMessage.id ? photos : []
+            )
         }
         Task {
             do {
@@ -535,6 +606,7 @@ final class AskChatManager: ObservableObject {
                 }
             }
         }
+        return true
     }
 
     // MARK: Streaming handlers (words drain one by one for the typing feel)
@@ -1326,6 +1398,27 @@ struct AskPage: View {
     @State private var showScrollToBottom = false
     @FocusState private var composerFocused: Bool
 
+    /// Photos waiting in the composer, saved to AskImageStore as soon as they're picked.
+    private struct ComposerPhoto: Identifiable {
+        let id: String
+        let thumbnail: UIImage
+    }
+    @State private var attachedPhotos: [ComposerPhoto] = []
+    @State private var processingPhotoCount = 0
+    @State private var showingPhotoLibrary = false
+    @State private var pickedLibraryItems: [PhotosPickerItem] = []
+    @State private var showingCamera = false
+    @State private var showingCameraPermissionAlert = false
+
+    private var photoSlotsLeft: Int {
+        AskImageStore.maxPhotosPerMessage - attachedPhotos.count - processingPhotoCount
+    }
+
+    private var canSend: Bool {
+        let hasText = !composeText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        return (hasText || !attachedPhotos.isEmpty) && processingPhotoCount == 0 && !chat.isThinking
+    }
+
     var body: some View {
         // Composer floats above the thread; messages scroll behind it.
         ScrollViewReader { proxy in
@@ -1505,6 +1598,99 @@ struct AskPage: View {
             .presentationCornerRadius(20)
             .presentationDragIndicator(.hidden)
         }
+        .photosPicker(
+            isPresented: $showingPhotoLibrary,
+            selection: $pickedLibraryItems,
+            maxSelectionCount: max(1, photoSlotsLeft),
+            matching: .images,
+            photoLibrary: .shared()
+        )
+        .onChange(of: pickedLibraryItems) { _, items in
+            guard !items.isEmpty else { return }
+            pickedLibraryItems = []
+            loadLibraryPhotos(Array(items.prefix(max(0, photoSlotsLeft))))
+        }
+        .fullScreenCover(isPresented: $showingCamera) {
+            CameraView(
+                isPresented: $showingCamera,
+                onPhotoTaken: { image in attachPhoto(image) },
+                onCancel: { showingCamera = false }
+            )
+        }
+        .alert("Camera Access Disabled", isPresented: $showingCameraPermissionAlert) {
+            Button("Open Settings") {
+                if let settingsURL = URL(string: UIApplication.openSettingsURLString) {
+                    UIApplication.shared.open(settingsURL)
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("To take photos for Ask, please enable camera access in Settings.")
+        }
+    }
+
+    // MARK: Photos
+
+    private func openCamera() {
+        CameraManager.checkPermissionStatus { status in
+            switch status {
+            case .granted: showingCamera = true
+            case .denied: showingCameraPermissionAlert = true
+            case .notDetermined: break
+            }
+        }
+    }
+
+    private func loadLibraryPhotos(_ items: [PhotosPickerItem]) {
+        for item in items {
+            processingPhotoCount += 1
+            Task {
+                let data = try? await item.loadTransferable(type: Data.self)
+                let image = data.flatMap(UIImage.init(data:))
+                await savePhoto(image)
+            }
+        }
+    }
+
+    private func attachPhoto(_ image: UIImage) {
+        guard photoSlotsLeft > 0 else { return }
+        processingPhotoCount += 1
+        Task { await savePhoto(image) }
+    }
+
+    /// Resizes and saves off the main thread, then adds the thumbnail to the composer.
+    private func savePhoto(_ image: UIImage?) async {
+        let saved = await Task.detached(priority: .userInitiated) { () -> ComposerPhoto? in
+            guard let image, let id = AskImageStore.save(image),
+                  let stored = AskImageStore.image(for: id) else { return nil }
+            let thumbnail = stored.preparingThumbnail(of: CGSize(width: 168, height: 168)) ?? stored
+            return ComposerPhoto(id: id, thumbnail: thumbnail)
+        }.value
+        processingPhotoCount = max(0, processingPhotoCount - 1)
+        if let saved {
+            withAnimation(.easeOut(duration: 0.15)) { attachedPhotos.append(saved) }
+        }
+    }
+
+    private func removePhoto(_ photo: ComposerPhoto) {
+        withAnimation(.easeOut(duration: 0.15)) {
+            attachedPhotos.removeAll { $0.id == photo.id }
+        }
+        AskImageStore.delete([photo.id])
+    }
+
+    /// Sends what's in the composer. Text and photos are only cleared once the turn is
+    /// actually sent, so hitting a daily limit doesn't lose them.
+    private func sendComposer() {
+        guard canSend else { return }
+        // Clear first (avoids autocorrect re-inserting), then send.
+        let text = composeText
+        composeText = ""
+        if chat.send(text, imageIDs: attachedPhotos.map(\.id)) {
+            attachedPhotos = []
+        } else {
+            composeText = text
+        }
     }
 
     /// First name for the hero greeting; falls back to a plain greeting.
@@ -1528,53 +1714,71 @@ struct AskPage: View {
     // MARK: Composer — white card on grey (Figma 1639-7821)
 
     private var composerBar: some View {
-        // Single line: input + send. Plus/mic hidden until those features land.
-        HStack(alignment: .bottom, spacing: 12) {
-            TextField("", text: $composeText, axis: .vertical)
-                .font(AppFonts.overusedGroteskMedium(size: 16))
-                .foregroundColor(AppColors.foregroundPrimary)
-                .accentColor(AppColors.accentBackground)
-                .lineLimit(1...4)
-                .focused($composerFocused)
-                // Cycling examples stand in for the placeholder while the field is
-                // idle — they double as a menu of what Ask can actually do.
-                .overlay(alignment: .leading) {
-                    if composeText.isEmpty && !composerFocused {
-                        AskTypingPlaceholder()
-                            .allowsHitTesting(false)
-                            .transition(.opacity)
+        // Attached photo thumbnails, then one line: plus + input + send. Mic hidden until it lands.
+        VStack(alignment: .leading, spacing: 8) {
+            if !attachedPhotos.isEmpty || processingPhotoCount > 0 {
+                composerPhotoStrip
+            }
+            HStack(alignment: .bottom, spacing: 12) {
+                Menu {
+                    Button {
+                        openCamera()
+                    } label: {
+                        Label("Take photo", systemImage: "camera")
                     }
+                    Button {
+                        showingPhotoLibrary = true
+                    } label: {
+                        Label("Choose from library", systemImage: "photo.on.rectangle")
+                    }
+                } label: {
+                    AppIcon(assetName: "plus", fallbackSystemName: "plus", size: 22)
+                        .foregroundColor(AppColors.foregroundSecondary)
+                        .opacity(photoSlotsLeft > 0 ? 1 : 0.4)
+                        .padding(.vertical, 8)
                 }
-                .submitLabel(.done)
-                .onChange(of: composeText) { _, newValue in
-                    // Vertical-axis fields insert newlines on Return: send the
-                    // message (if any) and dismiss the keyboard.
-                    if newValue.contains("\n") {
-                        let text = newValue.replacingOccurrences(of: "\n", with: "")
-                        composeText = text
-                        composerFocused = false
-                        if !text.trimmingCharacters(in: .whitespaces).isEmpty && !chat.isThinking {
-                            chat.send(text)
-                            composeText = ""
+                .disabled(photoSlotsLeft <= 0)
+                .accessibilityLabel("Attach photos")
+
+                TextField("", text: $composeText, axis: .vertical)
+                    .font(AppFonts.overusedGroteskMedium(size: 16))
+                    .foregroundColor(AppColors.foregroundPrimary)
+                    .accentColor(AppColors.accentBackground)
+                    .lineLimit(1...4)
+                    .focused($composerFocused)
+                    // Cycling examples stand in for the placeholder while the field is
+                    // idle — they double as a menu of what Ask can actually do.
+                    .overlay(alignment: .leading) {
+                        if composeText.isEmpty && !composerFocused {
+                            AskTypingPlaceholder()
+                                .allowsHitTesting(false)
+                                .transition(.opacity)
                         }
                     }
-                }
-                .padding(.vertical, 10)
+                    .submitLabel(.done)
+                    .onChange(of: composeText) { _, newValue in
+                        // Vertical-axis fields insert newlines on Return: send the
+                        // message (if any) and dismiss the keyboard.
+                        if newValue.contains("\n") {
+                            let text = newValue.replacingOccurrences(of: "\n", with: "")
+                            composeText = text
+                            composerFocused = false
+                            sendComposer()
+                        }
+                    }
+                    .padding(.vertical, 10)
 
-            // Bare icon, no button chrome — keeps the input lean.
-            Button {
-                // Clear first (avoids autocorrect re-inserting), then send.
-                let text = composeText
-                composeText = ""
-                guard !chat.isThinking else { composeText = text; return }
-                chat.send(text)
-            } label: {
-                AppIcon(assetName: "send-01", fallbackSystemName: "paperplane.fill", size: 22)
-                    .foregroundColor(AppColors.accentBackground)
-                    .opacity(composeText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || chat.isThinking ? 0.5 : 1)
-                    .padding(.vertical, 8)
+                // Bare icon, no button chrome — keeps the input lean.
+                Button {
+                    sendComposer()
+                } label: {
+                    AppIcon(assetName: "send-01", fallbackSystemName: "paperplane.fill", size: 22)
+                        .foregroundColor(AppColors.accentBackground)
+                        .opacity(canSend ? 1 : 0.5)
+                        .padding(.vertical, 8)
+                }
+                .buttonStyle(PlainButtonStyle())
             }
-            .buttonStyle(PlainButtonStyle())
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 10)
@@ -1584,6 +1788,51 @@ struct AskPage: View {
         .shadow(color: Color(red: 0.06, green: 0.09, blue: 0.16).opacity(0.06), radius: 16, x: 0, y: 12)
         .padding(.horizontal, 24)
         .padding(.bottom, 10) // footer text sits just below
+    }
+
+    /// Thumbnails of the photos waiting to be sent, each with an x to remove it. A spinner
+    /// tile stands in for each photo still being resized.
+    private var composerPhotoStrip: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(attachedPhotos) { photo in
+                    Image(uiImage: photo.thumbnail)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: 56, height: 56)
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 10)
+                                .inset(by: 0.5)
+                                .stroke(AppColors.line1stLine, lineWidth: 1)
+                        )
+                        .overlay(alignment: .topTrailing) {
+                            Button {
+                                removePhoto(photo)
+                            } label: {
+                                Image(systemName: "xmark")
+                                    .font(.system(size: 9, weight: .bold))
+                                    .foregroundColor(.white)
+                                    .frame(width: 20, height: 20)
+                                    .background(Circle().fill(Color.black.opacity(0.65)))
+                            }
+                            .buttonStyle(.plain)
+                            .offset(x: 6, y: -6)
+                            .accessibilityLabel("Remove photo")
+                        }
+                        .transition(.opacity)
+                }
+                ForEach(0..<processingPhotoCount, id: \.self) { _ in
+                    RoundedRectangle(cornerRadius: 10)
+                        .fill(Color(red: 0.96, green: 0.96, blue: 0.97))
+                        .frame(width: 56, height: 56)
+                        .overlay(ProgressView())
+                }
+            }
+            // Room for the remove buttons, which sit over the thumbnail's corner.
+            .padding(.top, 8)
+            .padding(.trailing, 8)
+        }
     }
 
 }
@@ -1667,14 +1916,23 @@ private struct AskMessageView: View {
         if message.isUser {
             HStack {
                 Spacer(minLength: 60)
-                if case .text(let text) = message.content {
-                    Text(text)
-                        .font(AppFonts.overusedGroteskMedium(size: 16))
-                        .foregroundColor(AppColors.foregroundPrimary)
-                        .padding(.horizontal, 20)
-                        .padding(.vertical, 14)
-                        .background(Color(red: 0.96, green: 0.96, blue: 0.97))
-                        .cornerRadius(12)
+                VStack(alignment: .trailing, spacing: 8) {
+                    if let photoIDs = message.imageIDs, !photoIDs.isEmpty {
+                        HStack(spacing: 8) {
+                            ForEach(photoIDs, id: \.self) { id in
+                                AskStoredPhotoView(photoID: id)
+                            }
+                        }
+                    }
+                    if case .text(let text) = message.content, !text.isEmpty {
+                        Text(text)
+                            .font(AppFonts.overusedGroteskMedium(size: 16))
+                            .foregroundColor(AppColors.foregroundPrimary)
+                            .padding(.horizontal, 20)
+                            .padding(.vertical, 14)
+                            .background(Color(red: 0.96, green: 0.96, blue: 0.97))
+                            .cornerRadius(12)
+                    }
                 }
             }
         } else {
@@ -1753,6 +2011,48 @@ private struct AskMessageView: View {
             case .subscriptionDelete(let delete):
                 AskSubscriptionDeleteCard(messageID: message.id, delete: delete)
             }
+        }
+    }
+}
+
+// MARK: - Photo in a sent message
+
+/// One attached photo in the user's bubble, loaded from AskImageStore off the main thread.
+/// A chat synced from another device carries the id but not the file, so it shows a
+/// plain photo tile instead.
+private struct AskStoredPhotoView: View {
+    let photoID: String
+    @State private var image: UIImage? = nil
+    @State private var loaded = false
+
+    var body: some View {
+        ZStack {
+            if let image {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
+            } else {
+                Color(red: 0.96, green: 0.96, blue: 0.97)
+                if loaded {
+                    Image(systemName: "photo")
+                        .font(.system(size: 18))
+                        .foregroundColor(AppColors.foregroundSecondary)
+                }
+            }
+        }
+        .frame(width: 64, height: 64)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .inset(by: 0.5)
+                .stroke(AppColors.line1stLine, lineWidth: 1)
+        )
+        .task(id: photoID) {
+            let id = photoID
+            image = await Task.detached(priority: .utility) { () -> UIImage? in
+                AskImageStore.image(for: id)?.preparingThumbnail(of: CGSize(width: 192, height: 192))
+            }.value
+            loaded = true
         }
     }
 }

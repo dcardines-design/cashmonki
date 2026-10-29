@@ -56,6 +56,9 @@ final class AskChatService {
         let text: String
         /// Tool rounds recorded when this turn was produced, replayed verbatim when recent.
         let toolRounds: [AskToolRound]?
+        /// JPEG photos sent with this turn. Only the turn being sent carries them; older
+        /// photos are described in `text` instead of being uploaded again.
+        var images: [Data] = []
     }
 
     /// An assistant reply plus the tool exchange that produced it, so the caller can store
@@ -108,7 +111,17 @@ final class AskChatService {
                     }
                 }
             }
-            messages.append(["role": turn.isUser ? "user" : "assistant", "content": turn.text])
+            if turn.isUser && !turn.images.isEmpty {
+                // Photos go first and the words after them, the order the model reads best.
+                var parts: [[String: Any]] = turn.images.map { data in
+                    ["type": "image_url", "image_url": ["url": "data:image/jpeg;base64,\(data.base64EncodedString())"]]
+                }
+                let text = turn.text.isEmpty ? "(Photo sent with no message.)" : turn.text
+                parts.append(["type": "text", "text": text])
+                messages.append(["role": "user", "content": parts])
+            } else {
+                messages.append(["role": turn.isUser ? "user" : "assistant", "content": turn.text])
+            }
         }
 
         // Tool calls made during THIS turn. The model often omits `source` on a table or
@@ -286,6 +299,9 @@ final class AskChatService {
         let (bytes, response) = try await URLSession.shared.bytes(for: request)
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
             print("🔴 AskChat: OpenRouter error \((response as? HTTPURLResponse)?.statusCode ?? -1)")
+            if (response as? HTTPURLResponse)?.statusCode == 413 {
+                throw AskChatError.badResponse("Those photos were too big to send. Try fewer at once.")
+            }
             throw AskChatError.badResponse("The assistant is unavailable right now. Please try again.")
         }
 
@@ -1107,6 +1123,8 @@ final class AskChatService {
         14. {"type": "subscription_update", "subscription_id": "...", "amount": 649, "name": "...", "frequency": "...", "next_due_date": "yyyy-MM-dd", "category_id": "...", "auto_add": true, "is_active": true, "note": "..."} — when the user asks to change a recurring item ("Netflix went up to 649", "move my rent to the 5th", "stop auto adding my gym"). For the SAME change across several use "subscription_ids": ["...", "..."] (max 10). RULES: call get_subscriptions first and use its exact "id" values — never invent ids; include ONLY the fields being changed; is_active false pauses it, which is what "pause", "stop tracking" or "cancel for now" should map to.
 
         15. {"type": "subscription_delete", "subscription_ids": ["...", "..."]} — when the user asks to remove recurring items for good (max 10). RULES: call get_subscriptions first and use exact "id" values; prefer subscription_update with "is_active": false unless they clearly want it gone. The app asks the user to confirm.
+
+        PHOTOS: The user can attach up to \(AskImageStore.maxPhotosPerMessage) photos to a message. When a photo is a receipt, bill, invoice or a screenshot of a payment, read it and propose it as a transaction_draft: the total actually paid (not a subtotal), the merchant, the date printed on it (today if there is none) and the currency shown on it (the user's primary currency if none is shown). Call get_categories first, as for any draft. Several receipts in one message, or the user asking for the line items separately, means a transaction_draft_batch. If you can't read the total, or can't tell which number is the total, ask a short text question instead of guessing. If the photo isn't a receipt or payment, reply briefly in text about what you can help with. Never claim to see details you can't actually read. History may contain (The user attached N photos here...) records: those photos are not shown to you again, so rely on what you replied at the time.
 
         For currency questions ("how much is 4600 PHP in USD?"), call convert_currency and answer with a text message using its result — never estimate exchange rates yourself.
 
