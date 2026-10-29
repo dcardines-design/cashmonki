@@ -25,6 +25,7 @@ enum AskStructuredMessage {
     case chart(AskChartMessage)
     case stat(AskStatMessage)
     case categoryDraft(AskCategoryDraft)
+    case categoryMerge(AskCategoryMerge)
     case budgetDraft(AskBudgetDraft)
     case budgetUpdate(AskBudgetUpdate)
     case budgetDelete(AskBudgetDelete)
@@ -46,6 +47,7 @@ enum AskStructuredMessage {
         case .chart: return "chart"
         case .stat: return "stat"
         case .categoryDraft: return "category_draft"
+        case .categoryMerge: return "category_merge"
         case .budgetDraft: return "budget_draft"
         case .budgetUpdate: return "budget_update"
         case .budgetDelete: return "budget_delete"
@@ -184,6 +186,28 @@ struct AskCategoryDraft: Codable {
     let parent: String?
     /// "expense" (default) or "income".
     let category_type: String?
+}
+
+/// One set of duplicate categories: `merge_ids` fold into `keep_id`.
+struct AskCategoryMergeGroup: Codable {
+    let keep_id: String
+    let merge_ids: [String]
+}
+
+/// Proposed clean-up of duplicate categories. Ids come from get_duplicate_categories
+/// or get_categories. Applied ONLY after the user confirms. A single group may be sent
+/// flat (`keep_id` + `merge_ids`) instead of inside `groups`.
+struct AskCategoryMerge: Codable {
+    let type: String
+    let groups: [AskCategoryMergeGroup]?
+    let keep_id: String?
+    let merge_ids: [String]?
+
+    var allGroups: [AskCategoryMergeGroup] {
+        if let groups, !groups.isEmpty { return groups }
+        if let keep_id, let merge_ids { return [AskCategoryMergeGroup(keep_id: keep_id, merge_ids: merge_ids)] }
+        return []
+    }
 }
 
 // MARK: - Tool-call replay
@@ -533,6 +557,20 @@ enum AskMessageDecoder {
                   draft.name.count <= 40
             else { return malformed(trimmed) }
             return .categoryDraft(draft)
+
+        case "category_merge":
+            guard let merge = try? decoder.decode(AskCategoryMerge.self, from: data) else {
+                return malformed(trimmed)
+            }
+            let groups = merge.allGroups
+            guard (1...10).contains(groups.count),
+                  groups.allSatisfy({ group in
+                      UUID(uuidString: group.keep_id) != nil
+                          && (1...20).contains(group.merge_ids.count)
+                          && group.merge_ids.allSatisfy { UUID(uuidString: $0) != nil && $0 != group.keep_id }
+                  })
+            else { return malformed(trimmed) }
+            return .categoryMerge(merge)
 
         case "stat":
             guard let stat = try? decoder.decode(AskStatMessage.self, from: data),

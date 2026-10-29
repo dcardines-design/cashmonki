@@ -1830,7 +1830,7 @@ struct Txn: Identifiable, Equatable, Hashable, Codable {
     // Backward compatibility properties
     var userId: UUID { accountID }
     var accountId: UUID? { walletID }
-    let category: String // Keep for backward compatibility and UI display
+    var category: String // Keep for backward compatibility and UI display (mutable: category merge re-files it)
     var categoryId: UUID? // New ID-based lookup for performance (mutable: category re-link repoints a dead id)
     let amount: Double // negative for expense (in primary currency)
     let date: Date

@@ -401,7 +401,10 @@ final class AskChatService {
                     "to": ["type": "string", "description": "Custom range end, yyyy-MM-dd"]
                  ]),
             tool("get_categories",
-                 "Fetch the user's transaction categories (id, name, type). Use to suggest categories for a transaction draft.",
+                 "Fetch the user's transaction categories (id, name, type, parent for subcategories, transactions = how many transactions are filed under it). Use to suggest categories for a transaction draft.",
+                 [:]),
+            tool("get_duplicate_categories",
+                 "Find groups of duplicate categories (same name ignoring case, spacing, punctuation, emoji and a trailing s, same type, same parent). Each group lists every copy with its id, name, parent and transaction count, plus suggested_keep_id = the copy with the most transactions. Call before proposing a category_merge.",
                  [:]),
             tool("compare_spending",
                  "Sum the user's spending for each named period (real data), optionally filtered to one category. Use for any comparison across time (this month vs last month, monthly trend). Returns one row per period; chart or stat the result.",
@@ -501,6 +504,9 @@ final class AskChatService {
 
         case "get_categories":
             return encodeCategories()
+
+        case "get_duplicate_categories":
+            return encodeDuplicateCategories()
 
         case "compare_spending":
             let category = args["category"] as? String
@@ -734,11 +740,62 @@ final class AskChatService {
     }
 
     private func encodeCategories() -> String {
-        let categories = CategoriesManager.shared.categories
-            .filter { !$0.isDeleted }
-            .map { ["id": $0.id.uuidString, "name": $0.name, "type": $0.type.rawValue] }
+        let categories = categoryEntries().map { entry -> [String: Any] in
+            var row: [String: Any] = ["id": entry.id.uuidString, "name": entry.name, "type": entry.type.rawValue, "transactions": entry.transactions]
+            if let parent = entry.parent { row["parent"] = parent }
+            return row
+        }
         guard let data = try? JSONSerialization.data(withJSONObject: ["categories": categories]),
               let string = String(data: data, encoding: .utf8) else { return "{\"categories\": []}" }
+        return string
+    }
+
+    /// Every live category and subcategory with how many transactions are filed under it.
+    /// "No Category" is left out: it is a fallback bucket, never a merge target.
+    private func categoryEntries() -> [(id: UUID, name: String, emoji: String, type: CategoryType, parent: String?, transactions: Int)] {
+        var counts: [UUID: Int] = [:]
+        for txn in UserManager.shared.currentUser.transactions {
+            if let id = txn.categoryId { counts[id, default: 0] += 1 }
+        }
+        let manager = CategoriesManager.shared
+        let live = manager.categories.filter { !$0.isDeleted && $0.name != "No Category" }
+        var entries: [(id: UUID, name: String, emoji: String, type: CategoryType, parent: String?, transactions: Int)] = []
+        for category in live {
+            let parent = category.parentCategoryId.flatMap { manager.findCategory(by: $0)?.name }
+            entries.append((category.id, category.name, category.emoji, category.type, parent, counts[category.id] ?? 0))
+            for sub in category.subcategories {
+                entries.append((sub.id, sub.name, sub.emoji, sub.type, category.name, counts[sub.id] ?? 0))
+            }
+        }
+        return entries
+    }
+
+    /// Groups copies whose names only differ by case, spacing, punctuation, emoji or a
+    /// trailing "s", within the same parent: "Supplies" under Hobbies and a top-level
+    /// "Supplies" are different things. Done here rather than by the model so the groups
+    /// and counts are exact.
+    private func encodeDuplicateCategories() -> String {
+        func normalized(_ name: String) -> String {
+            var key = String(name.lowercased().unicodeScalars.filter { CharacterSet.alphanumerics.contains($0) })
+            if key.count > 3, key.hasSuffix("s") { key.removeLast() }
+            return key
+        }
+        let grouped = Dictionary(grouping: categoryEntries()) { "\($0.type.rawValue):\($0.parent ?? ""):\(normalized($0.name))" }
+        let groups = grouped.values
+            .filter { $0.count > 1 && !normalized($0[0].name).isEmpty }
+            .map { copies -> [String: Any] in
+                let ranked = copies.sorted { $0.transactions > $1.transactions }
+                return [
+                    "suggested_keep_id": ranked[0].id.uuidString,
+                    "copies": ranked.map { copy -> [String: Any] in
+                        var row: [String: Any] = ["id": copy.id.uuidString, "name": copy.name, "emoji": copy.emoji, "type": copy.type.rawValue, "transactions": copy.transactions]
+                        if let parent = copy.parent { row["parent"] = parent }
+                        return row
+                    }
+                ]
+            }
+        guard let data = try? JSONSerialization.data(withJSONObject: ["groups": groups]),
+              let string = String(data: data, encoding: .utf8) else { return "{\"groups\": []}" }
         return string
     }
 
@@ -1107,6 +1164,8 @@ final class AskChatService {
         14. {"type": "subscription_update", "subscription_id": "...", "amount": 649, "name": "...", "frequency": "...", "next_due_date": "yyyy-MM-dd", "category_id": "...", "auto_add": true, "is_active": true, "note": "..."} — when the user asks to change a recurring item ("Netflix went up to 649", "move my rent to the 5th", "stop auto adding my gym"). For the SAME change across several use "subscription_ids": ["...", "..."] (max 10). RULES: call get_subscriptions first and use its exact "id" values — never invent ids; include ONLY the fields being changed; is_active false pauses it, which is what "pause", "stop tracking" or "cancel for now" should map to.
 
         15. {"type": "subscription_delete", "subscription_ids": ["...", "..."]} — when the user asks to remove recurring items for good (max 10). RULES: call get_subscriptions first and use exact "id" values; prefer subscription_update with "is_active": false unless they clearly want it gone. The app asks the user to confirm.
+
+        16. {"type": "category_merge", "groups": [{"keep_id": "...", "merge_ids": ["...", "..."]}]} — when the user asks to fix, clean up, tidy, collapse, dedupe or merge their categories, or mentions duplicate/repeated categories. RULES: call get_duplicate_categories first and put EVERY group it returns into ONE card (max 10 groups); keep_id is the copy with the most transactions (the group's suggested_keep_id) unless the user named which copy to keep; merge_ids are all the other copies in that group; use only exact ids from the tool result — never invent ids, never merge categories the tool did not group unless the user explicitly asked to merge those specific ones (then use get_categories ids). If get_duplicate_categories returns no groups, reply with a short text saying there are no duplicates. The app moves every transaction, budget and recurring item into the kept copy, then deletes the empty copies, after the user confirms — you never do it yourself.
 
         For currency questions ("how much is 4600 PHP in USD?"), call convert_currency and answer with a text message using its result — never estimate exchange rates yourself.
 
