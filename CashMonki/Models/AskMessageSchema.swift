@@ -26,6 +26,7 @@ enum AskStructuredMessage {
     case stat(AskStatMessage)
     case categoryDraft(AskCategoryDraft)
     case categoryMerge(AskCategoryMerge)
+    case categoryReorganize(AskCategoryReorganize)
     case budgetDraft(AskBudgetDraft)
     case budgetUpdate(AskBudgetUpdate)
     case budgetDelete(AskBudgetDelete)
@@ -48,6 +49,7 @@ enum AskStructuredMessage {
         case .stat: return "stat"
         case .categoryDraft: return "category_draft"
         case .categoryMerge: return "category_merge"
+        case .categoryReorganize: return "category_reorganize"
         case .budgetDraft: return "budget_draft"
         case .budgetUpdate: return "budget_update"
         case .budgetDelete: return "budget_delete"
@@ -208,6 +210,35 @@ struct AskCategoryMerge: Codable {
         if let keep_id, let merge_ids { return [AskCategoryMergeGroup(keep_id: keep_id, merge_ids: merge_ids)] }
         return []
     }
+}
+
+/// One step of a reorganize card. `action` is "nest" (category_id goes under parent_id),
+/// "unnest" (category_id becomes top-level) or "refile" (from_id's transactions, optionally
+/// only those whose merchant contains `merchant`, move to to_id).
+struct AskCategoryChange: Codable {
+    let action: String
+    let category_id: String?
+    let parent_id: String?
+    let from_id: String?
+    let to_id: String?
+    let merchant: String?
+
+    var isValid: Bool {
+        func isID(_ value: String?) -> Bool { value.flatMap { UUID(uuidString: $0) } != nil }
+        switch action {
+        case "nest": return isID(category_id) && isID(parent_id) && category_id != parent_id
+        case "unnest": return isID(category_id)
+        case "refile": return isID(from_id) && isID(to_id) && from_id != to_id
+        default: return false
+        }
+    }
+}
+
+/// Proposed restructuring of the user's categories. Ids come from get_category_layout.
+/// Applied ONLY after the user confirms.
+struct AskCategoryReorganize: Codable {
+    let type: String
+    let changes: [AskCategoryChange]
 }
 
 // MARK: - Tool-call replay
@@ -571,6 +602,13 @@ enum AskMessageDecoder {
                   })
             else { return malformed(trimmed) }
             return .categoryMerge(merge)
+
+        case "category_reorganize":
+            guard let reorganize = try? decoder.decode(AskCategoryReorganize.self, from: data),
+                  (1...10).contains(reorganize.changes.count),
+                  reorganize.changes.allSatisfy(\.isValid)
+            else { return malformed(trimmed) }
+            return .categoryReorganize(reorganize)
 
         case "stat":
             guard let stat = try? decoder.decode(AskStatMessage.self, from: data),
