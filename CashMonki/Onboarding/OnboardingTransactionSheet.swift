@@ -27,7 +27,6 @@ struct OnboardingTransactionSheet: View {
     @State private var hasSkipped = false
     @State private var isTransactionSaving = false
     @State private var isCompletingOnboarding = false
-    @State private var showingUsageLimitModal = false
     @State private var showingCameraPermissionAlert = false
     
     @ObservedObject private var userManager = UserManager.shared
@@ -199,16 +198,6 @@ struct OnboardingTransactionSheet: View {
             .presentationDragIndicator(.hidden)
             .opacity(isTransactionSaving ? 0.0 : 1.0)
             .animation(.easeInOut(duration: 0.2), value: isTransactionSaving)
-        }
-        .sheet(isPresented: $showingUsageLimitModal) {
-            UsageLimitModal(
-                isPresented: $showingUsageLimitModal,
-                onUpgradeToProTapped: {
-                    // Open RevenueCat paywall or subscription flow
-                    print("📊 OnboardingTransactionSheet: User wants to upgrade to Pro")
-                    // TODO: Implement RevenueCat subscription flow
-                }
-            )
         }
     }
     
