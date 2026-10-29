@@ -34,6 +34,7 @@ struct AskDisplayMessage: Identifiable, Codable {
         case stat(AskStatMessage)
         case question(String, [String])
         case categoryDraft(AskCategoryDraft)
+        case categoryMerge(AskCategoryMerge)
         case draftBatch(AskTransactionDraftBatch)
         case budgetDraft(AskBudgetDraft)
         case budgetUpdate(AskBudgetUpdate)
@@ -58,6 +59,7 @@ struct AskDisplayMessage: Identifiable, Codable {
             case .stat: return "stat"
             case .question: return "question"
             case .categoryDraft: return "category_draft"
+            case .categoryMerge: return "category_merge"
             case .draftBatch: return "transaction_draft_batch"
             case .budgetDraft: return "budget_draft"
             case .budgetUpdate: return "budget_update"
@@ -72,7 +74,7 @@ struct AskDisplayMessage: Identifiable, Codable {
         /// older pending card (see AskChatManager.appendPending).
         var isPending: Bool {
             switch self {
-            case .draft, .draftBatch, .update, .deleteRequest, .categoryDraft,
+            case .draft, .draftBatch, .update, .deleteRequest, .categoryDraft, .categoryMerge,
                  .budgetDraft, .budgetUpdate, .budgetDelete,
                  .subscriptionDraft, .subscriptionUpdate, .subscriptionDelete:
                 return true
@@ -141,6 +143,9 @@ struct AskDisplayMessage: Identifiable, Codable {
             return text + "\(Self.describe(stat.query)).)"
         case .question(let text, _): return text
         case .categoryDraft(let draft): return "(App is showing a PENDING new-category card, not created yet: \"\(draft.name)\"\(draft.parent.map { " under \($0)" } ?? "").)"
+        case .categoryMerge(let merge):
+            let groups = merge.allGroups.map { "keep \($0.keep_id), merge \($0.merge_ids.joined(separator: ", "))" }
+            return "(App is showing a PENDING category merge card, nothing merged yet: \(groups.joined(separator: "; ")). Revise it by emitting a fresh full category_merge.)"
         case .budgetDraft(let draft):
             let period = draft.period ?? "monthly"
             return "(App is showing a PENDING budget card, not saved yet: \(draft.category_name ?? "category") \(draft.amount) \(draft.currency ?? "") per \(period).)"
@@ -678,6 +683,9 @@ final class AskChatManager: ObservableObject {
         case .categoryDraft(let draft):
             removeStreamingMessage()
             appendPending(.categoryDraft(draft))
+        case .categoryMerge(let merge):
+            removeStreamingMessage()
+            appendPending(.categoryMerge(merge))
         case .budgetDraft(let draft):
             removeStreamingMessage()
             appendPending(.budgetDraft(draft))
@@ -896,6 +904,32 @@ final class AskChatManager: ObservableObject {
         confirmedDrafts.insert(messageID)
         trackCardResolved(messageID, confirmed: false)
         messages.append(AskDisplayMessage(isUser: false, content: .text("Okay, no new category.")))
+        persist()
+    }
+
+    /// Folds each duplicate group into its kept copy (Merge tap only).
+    func confirmCategoryMerge(messageID: UUID, merge: AskCategoryMerge) {
+        var results: [CategoriesManager.CategoryMergeResult] = []
+        for group in merge.allGroups {
+            guard let keepId = UUID(uuidString: group.keep_id) else { continue }
+            let mergeIds = group.merge_ids.compactMap { UUID(uuidString: $0) }
+            if let result = CategoriesManager.shared.mergeCategories(keepId: keepId, mergeIds: mergeIds) {
+                results.append(result)
+            }
+        }
+        guard !results.isEmpty else {
+            draftErrors[messageID] = "Those categories no longer exist."
+            return
+        }
+        draftErrors[messageID] = nil
+        confirmedDrafts.insert(messageID)
+        trackCardResolved(messageID, confirmed: true)
+        let moved = results.reduce(0) { $0 + $1.movedTransactions }
+        let movedText = moved == 1 ? "1 transaction" : "\(moved) transactions"
+        let receipt = results.count == 1
+            ? "✅ Merged \(results[0].removedCount + 1) \(results[0].keptName) categories into one and moved \(movedText)."
+            : "✅ Merged \(results.count) sets of duplicate categories and moved \(movedText)."
+        messages.append(AskDisplayMessage(isUser: false, content: .systemNote(receipt)))
         persist()
     }
 
@@ -1738,6 +1772,8 @@ private struct AskMessageView: View {
                 AskQuestionView(messageID: message.id, text: text, choices: choices)
             case .categoryDraft(let draft):
                 AskCategoryDraftCard(messageID: message.id, draft: draft)
+            case .categoryMerge(let merge):
+                AskCategoryMergeCard(messageID: message.id, merge: merge)
             case .draftBatch(let batch):
                 AskDraftBatchCard(messageID: message.id, batch: batch)
             case .budgetDraft(let draft):
@@ -3201,6 +3237,81 @@ private struct AskCategoryDraftCard: View {
             }
             .background(AppColors.surfacePrimary)
             .cornerRadius(16)
+        }
+    }
+}
+
+// MARK: - Category merge card
+
+private struct AskCategoryMergeCard: View {
+    let messageID: UUID
+    let merge: AskCategoryMerge
+
+    @ObservedObject private var chat = AskChatManager.shared
+    @ObservedObject private var categories = CategoriesManager.shared
+
+    private var isConfirmed: Bool { chat.confirmedDrafts.contains(messageID) }
+
+    private struct Copy {
+        let name: String
+        let emoji: String
+        let transactions: Int
+    }
+
+    private struct Group {
+        let keep: Copy
+        let others: [Copy]
+    }
+
+    /// Resolved against live data, so names and counts are the app's, never the model's.
+    /// Copies that no longer exist drop out; a group with nothing left to merge drops too.
+    private var groups: [Group] {
+        let transactions = UserManager.shared.currentUser.transactions
+        func copy(_ id: String) -> Copy? {
+            guard let uuid = UUID(uuidString: id),
+                  let found = categories.findCategoryOrSubcategoryById(uuid) else { return nil }
+            let count = transactions.filter { $0.categoryId == uuid }.count
+            if let category = found.category, !category.isDeleted {
+                return Copy(name: category.name, emoji: category.emoji, transactions: count)
+            }
+            if let sub = found.subcategory {
+                return Copy(name: sub.name, emoji: sub.emoji, transactions: count)
+            }
+            return nil
+        }
+        return merge.allGroups.compactMap { group in
+            guard let keep = copy(group.keep_id) else { return nil }
+            let others = group.merge_ids.compactMap(copy)
+            return others.isEmpty ? nil : Group(keep: keep, others: others)
+        }
+    }
+
+    private func count(_ copy: Copy) -> String {
+        copy.transactions == 1 ? "1 transaction" : "\(copy.transactions) transactions"
+    }
+
+    var body: some View {
+        let groups = self.groups
+        if !isConfirmed, let first = groups.first {
+            AskConfirmCardShell(
+                label: "MERGE CATEGORIES",
+                title: groups.count == 1
+                    ? "\(first.keep.emoji) \(first.keep.name)"
+                    : groups.map { "\($0.keep.emoji) \($0.keep.name)" }.joined(separator: ", "),
+                detail: groups.map { group in
+                    let merged = group.others.map { "\($0.name) (\(count($0)))" }.joined(separator: ", ")
+                    return "Keep \(group.keep.name) (\(count(group.keep))), fold in \(merged)"
+                }.joined(separator: "\n"),
+                error: chat.draftErrors[messageID],
+                prompt: groups.count == 1 ? "Merge into one?" : "Merge these \(groups.count) sets?",
+                actionTitle: "Merge",
+                actionColor: nil,
+                action: { chat.confirmCategoryMerge(messageID: messageID, merge: merge) }
+            )
+        } else if !isConfirmed {
+            Text("Those duplicate categories couldn't be found anymore.")
+                .font(AppFonts.overusedGroteskMedium(size: 14))
+                .foregroundColor(AppColors.foregroundSecondary)
         }
     }
 }

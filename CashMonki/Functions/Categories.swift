@@ -2066,6 +2066,161 @@ class CategoriesManager: ObservableObject {
         }
     }
 
+    // MARK: - Merge duplicates
+
+    struct CategoryMergeResult {
+        let keptName: String
+        let removedCount: Int
+        let movedTransactions: Int
+    }
+
+    /// Folds duplicate categories into `keepId`: re-files their transactions, budgets and
+    /// recurring items onto the kept copy, moves their subcategories under it, then removes
+    /// the emptied copies. Everything is matched by id - duplicates share names, so the
+    /// name-based `deleteCategory` would hit the kept copy too. Copies of a different type
+    /// (income vs expense) are skipped, since re-filing would flip the transactions' sign.
+    /// Returns nil when nothing could be merged.
+    @MainActor
+    func mergeCategories(keepId: UUID, mergeIds: [UUID]) -> CategoryMergeResult? {
+        let noCategoryIds: Set<UUID> = [
+            UUID(uuidString: "00000000-0000-0000-0000-000000000001")!,
+            UUID(uuidString: "00000000-0000-0000-0000-000000000002")!
+        ]
+
+        // The kept copy: a category (top-level or child) or an embedded subcategory.
+        let keepName: String
+        let keepType: CategoryType
+        let keepIndex = categories.firstIndex { $0.id == keepId && !$0.isDeleted }
+        // Budgets are parent-category scoped, so a kept subcategory hands them to its parent.
+        let budgetTarget: (id: UUID, name: String)
+        if let keepIndex {
+            let keep = categories[keepIndex]
+            keepName = keep.name
+            keepType = keep.type
+            if let parentId = keep.parentCategoryId, let parent = findCategory(by: parentId) {
+                budgetTarget = (parent.id, parent.name)
+            } else {
+                budgetTarget = (keep.id, keep.name)
+            }
+        } else if let embedded = findSubcategoryById(keepId) {
+            keepName = embedded.subcategory.name
+            keepType = embedded.subcategory.type
+            budgetTarget = (embedded.parent.id, embedded.parent.name)
+        } else {
+            print("❌ mergeCategories: kept category \(keepId.uuidString.prefix(8)) not found")
+            return nil
+        }
+        // Only a top-level keeper can adopt the merged copies' subcategories.
+        let keepIsTopLevel = keepIndex.map { categories[$0].parentCategoryId == nil } ?? false
+
+        var mergedIds: Set<UUID> = []
+        var mergedNames: Set<String> = []
+
+        for mergeId in Set(mergeIds) where mergeId != keepId && !noCategoryIds.contains(mergeId) {
+            if let index = categories.firstIndex(where: { $0.id == mergeId && !$0.isDeleted }) {
+                let copy = categories[index]
+                guard copy.type == keepType else {
+                    print("⚠️ mergeCategories: skipping '\(copy.name)' - \(copy.type) vs \(keepType)")
+                    continue
+                }
+                let children = categories.indices.filter {
+                    !categories[$0].isDeleted && categories[$0].parentCategoryId == mergeId
+                }
+                if (!children.isEmpty || !copy.subcategories.isEmpty) && !keepIsTopLevel {
+                    print("⚠️ mergeCategories: skipping '\(copy.name)' - has subcategories and the kept copy can't hold them")
+                    continue
+                }
+                for child in children where categories[child].id != keepId {
+                    categories[child].parentCategoryId = keepId
+                    categories[child].updatedAt = Date()
+                }
+                if let keepIndex, !copy.subcategories.isEmpty {
+                    let adopted = copy.subcategories.map {
+                        SubcategoryData(id: $0.id, name: $0.name, emoji: $0.emoji, type: $0.type, parent: keepName, parentId: keepId)
+                    }
+                    categories[keepIndex].subcategories.append(contentsOf: adopted)
+                    categories[keepIndex].updatedAt = Date()
+                }
+                categories[index].subcategories = []
+                categories[index].isDeleted = true
+                categories[index].updatedAt = Date()
+                mergedIds.insert(mergeId)
+                mergedNames.insert(copy.name.lowercased())
+            } else if let embedded = findSubcategoryById(mergeId),
+                      let parentIndex = categories.firstIndex(where: { $0.id == embedded.parent.id }) {
+                guard embedded.subcategory.type == keepType else {
+                    print("⚠️ mergeCategories: skipping '\(embedded.subcategory.name)' - \(embedded.subcategory.type) vs \(keepType)")
+                    continue
+                }
+                categories[parentIndex].subcategories.removeAll { $0.id == mergeId }
+                categories[parentIndex].updatedAt = Date()
+                mergedIds.insert(mergeId)
+                mergedNames.insert(embedded.subcategory.name.lowercased())
+            }
+        }
+
+        guard !mergedIds.isEmpty else {
+            print("❌ mergeCategories: nothing to merge into '\(keepName)'")
+            return nil
+        }
+
+        saveCategories()
+        clearCategoryGroupCache()
+
+        // Transactions: by id, plus legacy rows with no id that only carry a merged copy's name.
+        let userManager = UserManager.shared
+        let refiled: [Txn] = userManager.getTransactions().compactMap { transaction in
+            let matches = transaction.categoryId.map(mergedIds.contains)
+                ?? mergedNames.contains(transaction.category.lowercased())
+            guard matches else { return nil }
+            var moved = transaction
+            moved.category = keepName
+            moved.categoryId = keepId
+            return moved
+        }
+        userManager.updateTransactions(refiled)
+
+        // Budgets: repoint, unless the target already has one in that wallet - then the
+        // duplicate's budget goes, since a wallet holds one budget per category.
+        var budgetsChanged = false
+        for budget in userManager.currentUser.budgets where mergedIds.contains(budget.categoryId) {
+            let targetHasBudget = userManager.currentUser.budgets.contains {
+                $0.id != budget.id && $0.categoryId == budgetTarget.id && $0.walletId == budget.walletId
+            }
+            if targetHasBudget {
+                userManager.deleteBudget(withId: budget.id)
+            } else {
+                userManager.updateBudget(Budget(
+                    id: budget.id,
+                    walletId: budget.walletId,
+                    categoryId: budgetTarget.id,
+                    categoryName: budgetTarget.name,
+                    amount: budget.amount,
+                    currency: budget.currency,
+                    period: budget.period,
+                    applyToAllPeriods: budget.applyToAllPeriods,
+                    isActive: budget.isActive,
+                    createdAt: budget.createdAt
+                ))
+            }
+            budgetsChanged = true
+        }
+        if budgetsChanged { userManager.backupSoon() }
+
+        // Recurring items generate future transactions, so they follow the kept copy too.
+        for subscription in SubscriptionManager.shared.subscriptions {
+            guard let categoryId = subscription.categoryId, mergedIds.contains(categoryId) else { continue }
+            var moved = subscription
+            moved.categoryId = keepId
+            moved.category = keepName
+            SubscriptionManager.shared.updateSubscription(moved)
+        }
+
+        print("✅ mergeCategories: merged \(mergedIds.count) copies into '\(keepName)', re-filed \(refiled.count) transactions")
+        objectWillChange.send()
+        return CategoryMergeResult(keptName: keepName, removedCount: mergedIds.count, movedTransactions: refiled.count)
+    }
+
     /// Delete a specific subcategory and convert affected transactions to "No Category"
     func deleteSubcategory(subcategoryName: String, parentCategoryName: String) -> Bool {
         print("🗑️ deleteSubcategory: Starting deletion of subcategory '\(subcategoryName)' under '\(parentCategoryName)'")
