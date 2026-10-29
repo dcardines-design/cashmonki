@@ -118,8 +118,9 @@ struct AskDisplayMessage: Identifiable, Codable {
         case .text(let text): return text
         case .failed(_, let userText):
             // The assistant never saw this turn; show it as the user's question so a retry
-            // doesn't look like a repeat.
-            return userText
+            // doesn't look like a repeat. A photo-only turn has no text, and an empty
+            // message makes every later request fail.
+            return userText.isEmpty ? "(The user's photo message did not reach you.)" : userText
         case .systemNote(let text): return "(App completed and recorded an action the user approved: \"\(text)\". You did not do this — never repeat or claim it.)"
         case .table(let table):
             // Title alone left follow-ups like "top 5 only" with nothing to work from: no
@@ -402,11 +403,18 @@ final class AskChatManager: ObservableObject {
         let files = (try? FileManager.default.contentsOfDirectory(at: documents, includingPropertiesForKeys: nil)) ?? []
         var ids = Set<String>()
         for file in files where file.lastPathComponent.hasPrefix("ask_chat_") && file.pathExtension == "json" {
+            // Only the photo ids are decoded, so a chat with a card type this build doesn't
+            // know still protects its photos.
             guard let data = try? Data(contentsOf: file),
-                  let chat = try? JSONDecoder().decode(PersistedChat.self, from: data) else { continue }
+                  let chat = try? JSONDecoder().decode(PhotoIDsOnly.self, from: data) else { continue }
             ids.formUnion(chat.messages.flatMap { $0.imageIDs ?? [] })
         }
         return ids
+    }
+
+    private struct PhotoIDsOnly: Decodable {
+        struct Message: Decodable { let imageIDs: [String]? }
+        let messages: [Message]
     }
 
     private static func loadPersisted() -> PersistedChat? {
@@ -485,17 +493,22 @@ final class AskChatManager: ObservableObject {
     func retry(messageID: UUID) {
         guard let index = messages.firstIndex(where: { $0.id == messageID }),
               case .failed(_, let userText) = messages[index].content else { return }
-        messages.remove(at: index)
-        // Remove the user's turn too - send() re-appends it, photos included.
-        var imageIDs: [String] = []
-        if let userIndex = messages.lastIndex(where: { $0.isUser }),
+        let failedMessage = messages[index]
+        // Remove the user's turn too - send() re-appends it, photos included. It's the user
+        // message just before this failure, not the newest one.
+        var userTurn: (index: Int, message: AskDisplayMessage)? = nil
+        if let userIndex = messages[..<index].lastIndex(where: { $0.isUser }),
            case .text(let existing) = messages[userIndex].content,
            existing == userText {
-            imageIDs = messages[userIndex].imageIDs ?? []
-            messages.remove(at: userIndex)
+            userTurn = (userIndex, messages[userIndex])
         }
+        messages.remove(at: index)
+        if let userTurn { messages.remove(at: userTurn.index) }
+        if send(userText, imageIDs: userTurn?.message.imageIDs ?? [], isRetry: true) { return }
+        // Not sent (a daily limit): put both back so the photos and the Try again stay.
+        if let userTurn { messages.insert(userTurn.message, at: userTurn.index) }
+        messages.insert(failedMessage, at: index)
         persist()
-        send(userText, imageIDs: imageIDs, isRetry: true)
     }
 
     /// Sends a turn, with any attached photos (AskImageStore ids). Returns false when nothing
@@ -505,6 +518,13 @@ final class AskChatManager: ObservableObject {
     func send(_ text: String, imageIDs: [String] = [], source: SendSource = .typed, isRetry: Bool = false) -> Bool {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty || !imageIDs.isEmpty, !isThinking else { return false }
+
+        // Checked before anything is counted: the proxy turns away requests over ~4.5 MB.
+        let photos = imageIDs.compactMap(AskImageStore.data(for:))
+        if photos.reduce(0, { $0 + $1.count }) > AskImageStore.maxPhotoBytesPerMessage {
+            messages.append(AskDisplayMessage(isUser: false, content: .text("Those photos are too big to send together. Try fewer at once.")))
+            return false
+        }
 
         let countsScans = !imageIDs.isEmpty && !isRetry
         if countsScans && DailyUsageManager.shared.getRemainingUsage() < imageIDs.count {
@@ -566,11 +586,10 @@ final class AskChatManager: ObservableObject {
         // Cap context: only the last 20 messages go to the model. Tool rounds ride along;
         // the service decides how many of the most recent ones to replay. Only this turn
         // uploads its photos; earlier ones are noted in their text.
-        let photos = imageIDs.compactMap(AskImageStore.data(for:))
         let history = visibleMessages.suffix(20).map {
             AskChatService.HistoryTurn(
                 isUser: $0.isUser,
-                text: $0.historyTextWithPhotos,
+                text: $0.id == userMessage.id ? $0.historyText : $0.historyTextWithPhotos,
                 toolRounds: $0.toolRounds,
                 images: $0.id == userMessage.id ? photos : []
             )

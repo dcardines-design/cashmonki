@@ -12,9 +12,12 @@ import UIKit
 enum AskImageStore {
     /// Long side of what the model sees: enough to read a receipt, small enough that several
     /// photos stay well under the proxy's request size limit.
-    static let maxPixelSize: CGFloat = 1568
-    static let jpegQuality: CGFloat = 0.7
+    static let maxPixelSize: CGFloat = 1280
+    static let jpegQuality: CGFloat = 0.65
     static let maxPhotosPerMessage = 4
+    /// Raw JPEG bytes one message may carry. Base64 adds a third, so this keeps a request
+    /// with history and tool definitions under the proxy's ~4.5 MB body limit.
+    static let maxPhotoBytesPerMessage = 2_500_000
 
     private static var directory: URL {
         let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
@@ -82,7 +85,10 @@ enum AskImageStore {
         let format = UIGraphicsImageRendererFormat.default()
         format.scale = 1
         format.opaque = true
-        let resized = UIGraphicsImageRenderer(size: target, format: format).image { _ in
+        let resized = UIGraphicsImageRenderer(size: target, format: format).image { context in
+            // White under a transparent screenshot; an opaque JPEG would otherwise turn it black.
+            UIColor.white.setFill()
+            context.fill(CGRect(origin: .zero, size: target))
             image.draw(in: CGRect(origin: .zero, size: target))
         }
         return resized.jpegData(compressionQuality: jpegQuality)
