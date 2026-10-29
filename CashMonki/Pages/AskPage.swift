@@ -521,6 +521,12 @@ final class AskChatManager: ObservableObject {
 
         // Checked before anything is counted: the proxy turns away requests over ~4.5 MB.
         let photos = imageIDs.compactMap(AskImageStore.data(for:))
+        // A photo-only turn whose files aren't here (a chat synced from another device, then
+        // retried) would go out as an empty message, which makes every later request fail.
+        if trimmed.isEmpty && photos.isEmpty {
+            messages.append(AskDisplayMessage(isUser: false, content: .text("Those photos aren't on this device. Attach them again to send.")))
+            return false
+        }
         if photos.reduce(0, { $0 + $1.count }) > AskImageStore.maxPhotoBytesPerMessage {
             messages.append(AskDisplayMessage(isUser: false, content: .text("Those photos are too big to send together. Try fewer at once.")))
             return false
