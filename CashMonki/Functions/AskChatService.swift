@@ -658,6 +658,7 @@ final class AskChatService {
 
         let calendar = Calendar.current
         let realTxns = UserManager.shared.currentUser.transactions
+        let primaryCurrency = CurrencyPreferences.shared.primaryCurrency
         var result: [(date: Date, category: String, amount: Double)] = []
 
         for sub in SubscriptionManager.persistedSubscriptions() {
@@ -671,12 +672,18 @@ final class AskChatService {
                 .filter { $0.subscriptionId == sub.id }
                 .map { calendar.startOfDay(for: $0.date) })
 
+            // Spending sums are in the primary currency; a 15 USD subscription used to add 15
+            // to a PHP total.
+            let amount = sub.currency == primaryCurrency
+                ? abs(sub.amount)
+                : abs(CurrencyRateManager.shared.convertAmount(sub.amount, from: sub.currency, to: primaryCurrency))
+
             var occurrence = sub.createdAt
             var steps = 0
             while occurrence <= upperBound && steps < 2000 {
                 steps += 1
                 if occurrence >= from, !coveredDays.contains(calendar.startOfDay(for: occurrence)) {
-                    result.append((date: occurrence, category: sub.category, amount: -abs(sub.amount)))
+                    result.append((date: occurrence, category: sub.category, amount: -amount))
                 }
                 occurrence = sub.frequency.nextOccurrence(from: occurrence)
             }
@@ -718,23 +725,14 @@ final class AskChatService {
     }
 
     private func budgetRows() -> [[String: String]] {
-        let calendar = Calendar.current
-        let now = Date()
         // Paused budgets are listed too (with active=false) — otherwise the model
         // could pause one and never see it again to resume it.
         return UserManager.shared.currentUser.budgets
             .map { budget in
-                // Spent = expenses in this budget's category over the current period.
-                let periodStart: Date
-                switch budget.period.rawValue.lowercased() {
-                case "daily": periodStart = calendar.startOfDay(for: now)
-                case "weekly": periodStart = calendar.date(byAdding: .day, value: -7, to: now)!
-                case "yearly": periodStart = calendar.date(from: calendar.dateComponents([.year], from: now))!
-                default: periodStart = calendar.date(from: calendar.dateComponents([.year, .month], from: now))!
-                }
-                let spent = UserManager.shared.currentUser.transactions
-                    .filter { $0.categoryId == budget.categoryId && $0.amount < 0 && $0.date >= periodStart }
-                    .reduce(0) { $0 + abs($1.amount) }
+                // Same figure the Budgets page shows: the budget's category and its
+                // subcategories, over the period's calendar range, converted to the primary
+                // currency. The old local copy missed subcategories and quarterly periods.
+                let spent = BudgetManager.shared.spentAmount(for: budget)
                 return [
                     "id": budget.id.uuidString,
                     "category": budget.categoryName,
@@ -1175,6 +1173,9 @@ private extension ISO8601DateFormatter {
     static let askDateOnly: ISO8601DateFormatter = {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withFullDate]
+        // ISO8601DateFormatter defaults to GMT: in UTC+8 "today" was yesterday until 8 am,
+        // while every other Ask date (drafts, tool ranges) is parsed in local time.
+        formatter.timeZone = .autoupdatingCurrent
         return formatter
     }()
 }
