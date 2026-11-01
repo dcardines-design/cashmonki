@@ -282,6 +282,9 @@ final class AskChatManager: ObservableObject {
     /// which outlasts `isThinking`). Messages sent meanwhile wait in `queuedMessages`.
     @Published private(set) var isTurnInFlight = false
 
+    /// Shown beside the thinking dots: what the in-flight turn is waiting on, if known.
+    @Published private(set) var thinkingStatus: String? = nil
+
     /// A message the user sent while a reply was still coming. Not persisted: it lives
     /// only until its turn starts, when it becomes a normal user message.
     struct QueuedMessage: Identifiable {
@@ -445,8 +448,9 @@ final class AskChatManager: ObservableObject {
         let uid = Self.currentUID()
         // Tool results are user data - drop the previous account's rows before loading.
         AskChatService.shared.clearCaches()
-        // Queued messages belong to the account that wrote them.
+        // Queued messages and the thinking status belong to the account that wrote them.
         discardQueue()
+        thinkingStatus = nil
         let local = Self.loadPersisted()
         messages = (local?.messages ?? []).filter { !Self.isLimitNotice($0) }
         confirmedDrafts = Set(local?.confirmed ?? [])
@@ -557,6 +561,7 @@ final class AskChatManager: ObservableObject {
     /// Called once per turn, after the reply (or the failure) has fully landed.
     private func turnDidEnd() {
         isTurnInFlight = false
+        thinkingStatus = nil
         sendNextQueued()
     }
 
@@ -650,6 +655,8 @@ final class AskChatManager: ObservableObject {
         messages.append(userMessage)
         isThinking = true
         isTurnInFlight = true
+        thinkingStatus = imageIDs.isEmpty ? nil
+            : imageIDs.count == 1 ? "Reading your photo…" : "Reading your photos…"
         turnStartedAt = Date()
 
         persist()
@@ -665,15 +672,23 @@ final class AskChatManager: ObservableObject {
                 images: $0.id == userMessage.id ? photos : []
             )
         }
+        // Read here on the main actor; the service builds the prompt off it.
+        let categoriesJSON = AskChatService.shared.currentCategoriesJSON()
         Task {
             do {
                 let reply = try await AskChatService.shared.send(
                     history: history,
+                    categoriesJSON: categoriesJSON,
                     onDelta: { delta in
                         Task { @MainActor in self.handleStreamDelta(delta) }
                     },
                     onStreamReset: {
                         Task { @MainActor in self.handleStreamReset() }
+                    },
+                    onStatus: { status in
+                        Task { @MainActor in
+                            if self.isTurnInFlight { self.thinkingStatus = status }
+                        }
                     }
                 )
                 await MainActor.run { self.finish(with: reply) }
@@ -722,8 +737,10 @@ final class AskChatManager: ObservableObject {
         isDraining = true
         Task { @MainActor in
             while !wordQueue.isEmpty {
-                appendToken(wordQueue.removeFirst())
-                try? await Task.sleep(nanoseconds: 60_000_000) // one word per 60ms
+                let count = min(wordsPerTick, wordQueue.count)
+                appendToken(wordQueue.prefix(count).joined())
+                wordQueue.removeFirst(count)
+                try? await Task.sleep(nanoseconds: 40_000_000)
             }
             isDraining = false
             if let final = pendingFinalText {
@@ -731,6 +748,18 @@ final class AskChatManager: ObservableObject {
                 settleStreamedText(final)
             }
         }
+    }
+
+    /// Words revealed per 40ms tick. The model writes faster than one word per tick, so a
+    /// long reply used to keep "typing" for seconds after it had fully arrived. More words
+    /// go out per tick the further the reveal falls behind, and the tail flushes in a few
+    /// ticks once the whole reply is in. Batching (rather than shorter sleeps) keeps chat
+    /// re-renders at 25 a second.
+    private var wordsPerTick: Int {
+        if pendingFinalText != nil { return max(3, wordQueue.count / 4) }
+        if wordQueue.count > 12 { return 4 }
+        if wordQueue.count > 4 { return 2 }
+        return 1
     }
 
     private func appendToken(_ token: String) {
@@ -1545,7 +1574,7 @@ struct AskPage: View {
                                 .transition(.opacity)
                         }
                         if chat.isThinking {
-                            AskThinkingDots()
+                            AskThinkingDots(status: chat.thinkingStatus)
                                 .transition(.opacity)
                         }
                         ForEach(chat.queuedMessages) { queued in
@@ -3733,19 +3762,31 @@ private struct AskStreamingWordsView: View {
 // MARK: - Thinking indicator (three pulsing dots)
 
 private struct AskThinkingDots: View {
+    /// What the turn is waiting on ("Checking your budgets…"); dots alone when nil.
+    var status: String? = nil
     @State private var activeDot = 0
     private let timer = Timer.publish(every: 0.3, on: .main, in: .common).autoconnect()
 
     var body: some View {
-        HStack(spacing: 5) {
-            ForEach(0..<3, id: \.self) { index in
-                Circle()
-                    .fill(AppColors.foregroundTertiary)
-                    .frame(width: 7, height: 7)
-                    .opacity(activeDot == index ? 1 : 0.3)
-                    .scaleEffect(activeDot == index ? 1.15 : 1)
+        HStack(spacing: 10) {
+            HStack(spacing: 5) {
+                ForEach(0..<3, id: \.self) { index in
+                    Circle()
+                        .fill(AppColors.foregroundTertiary)
+                        .frame(width: 7, height: 7)
+                        .opacity(activeDot == index ? 1 : 0.3)
+                        .scaleEffect(activeDot == index ? 1.15 : 1)
+                }
+            }
+            if let status {
+                Text(status)
+                    .font(AppFonts.overusedGroteskMedium(size: 14))
+                    .foregroundColor(AppColors.foregroundSecondary)
+                    .transition(.opacity)
+                    .id(status)
             }
         }
+        .animation(.easeOut(duration: 0.2), value: status)
         .padding(.vertical, 6)
         .onReceive(timer) { _ in
             withAnimation(.easeInOut(duration: 0.25)) {
