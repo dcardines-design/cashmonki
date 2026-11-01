@@ -323,8 +323,17 @@ final class AskChatManager: ObservableObject {
         return false
     }
 
+    /// Identity whose chat is in memory. A reload for the same identity (UserManager posts the
+    /// load-complete notification more than once per launch) only merges the cloud copy.
+    private var loadedUID: String
+
+    /// Bumped when the in-flight turn is abandoned (account switch). Callbacks from a turn
+    /// started under an older generation are dropped instead of landing in the new chat.
+    private var turnGeneration = 0
+
     private init() {
         Self.migrateLegacyFileIfNeeded()
+        loadedUID = Self.currentUID()
         if let saved = Self.loadPersisted() {
             // Drop any limit notices persisted by older builds — they're daily-state, not history.
             messages = saved.messages.filter { !Self.isLimitNotice($0) }
@@ -446,17 +455,22 @@ final class AskChatManager: ObservableObject {
     /// cloud copy (returning user on a fresh install). Called on login/logout via notification.
     func reloadForCurrentUser() {
         let uid = Self.currentUID()
-        // Tool results are user data - drop the previous account's rows before loading.
-        AskChatService.shared.clearCaches()
-        // Queued messages and the thinking status belong to the account that wrote them.
-        discardQueue()
-        thinkingStatus = nil
-        let local = Self.loadPersisted()
-        messages = (local?.messages ?? []).filter { !Self.isLimitNotice($0) }
-        confirmedDrafts = Set(local?.confirmed ?? [])
-        supersededCards = Set(local?.superseded ?? [])
-        addedBatchRows = Self.decodeBatchRows(local?.batchRows)
-        objectWillChange.send()
+        // Same identity: keep the in-memory chat (it can be ahead of the file, which is
+        // written in the background) and any turn in flight; just merge the cloud copy.
+        if uid != loadedUID {
+            loadedUID = uid
+            // The in-flight reply, queued messages and tool results belong to the account
+            // that wrote them, not the one signing in.
+            abandonTurn()
+            AskChatService.shared.clearCaches()
+            discardQueue()
+            let local = Self.loadPersisted()
+            messages = (local?.messages ?? []).filter { !Self.isLimitNotice($0) }
+            confirmedDrafts = Set(local?.confirmed ?? [])
+            supersededCards = Set(local?.superseded ?? [])
+            addedBatchRows = Self.decodeBatchRows(local?.batchRows)
+            objectWillChange.send()
+        }
 
         guard syncEnabled else { return }
         FirestoreService.shared.fetchAskChat(userId: uid) { [weak self] result in
@@ -464,21 +478,47 @@ final class AskChatManager: ObservableObject {
                   case .success(let data?) = result,
                   let cloud = try? JSONDecoder().decode(PersistedChat.self, from: data) else { return }
             Task { @MainActor in
+                // The account may have changed again while the fetch was out.
+                guard self.loadedUID == uid else { return }
                 self.mergeCloud(cloud)
             }
         }
     }
 
-    /// Union local + cloud chat by message id. No per-message timestamp exists, so the longer
-    /// snapshot is treated as the base (usually the more complete history) and any messages the
-    /// other side uniquely has are appended. Capped at 100.
+    /// Drops the turn in flight: its reply, streamed words and status never reach the chat.
+    private func abandonTurn() {
+        turnGeneration += 1
+        isThinking = false
+        isTurnInFlight = false
+        thinkingStatus = nil
+        streamingMessageID = nil
+        wordQueue = []
+        rawPending = ""
+        pendingFinalText = nil
+        pendingToolRounds = []
+        turnStartedAt = nil
+    }
+
+    /// Union local + cloud chat by message id. No per-message timestamp exists, so order comes
+    /// from the messages both copies share: each cloud-only message goes right after the last
+    /// shared message that precedes it in the cloud copy (at the start if none does). Appending
+    /// them at the end instead put an older cloud window below the newest local messages, and
+    /// the 100 cap then cut the local history. Capped at 100, newest kept.
     private func mergeCloud(_ cloud: PersistedChat) {
         let cloudMsgs = cloud.messages.filter { !Self.isLimitNotice($0) }
-        let base = cloudMsgs.count > messages.count ? cloudMsgs : messages
-        let other = cloudMsgs.count > messages.count ? messages : cloudMsgs
-        let baseIDs = Set(base.map { $0.id })
-        var merged = base
-        merged.append(contentsOf: other.filter { !baseIDs.contains($0.id) })
+        var merged = messages
+        var insertAt = 0
+        for message in cloudMsgs {
+            if let index = merged.firstIndex(where: { $0.id == message.id }) {
+                insertAt = index + 1
+                continue
+            }
+            // A failed bubble only the cloud has was retried (and removed) or abandoned on
+            // another device; bringing it back would show a stale "Try again".
+            if case .failed = message.content { continue }
+            merged.insert(message, at: insertAt)
+            insertAt += 1
+        }
         messages = Array(merged.suffix(100))
         confirmedDrafts.formUnion(cloud.confirmed)
         supersededCards.formUnion(cloud.superseded ?? [])
@@ -674,26 +714,39 @@ final class AskChatManager: ObservableObject {
         }
         // Read here on the main actor; the service builds the prompt off it.
         let categoriesJSON = AskChatService.shared.currentCategoriesJSON()
+        // Every callback checks this, so a turn abandoned by an account switch stays silent.
+        let generation = turnGeneration
         Task {
             do {
                 let reply = try await AskChatService.shared.send(
                     history: history,
                     categoriesJSON: categoriesJSON,
                     onDelta: { delta in
-                        Task { @MainActor in self.handleStreamDelta(delta) }
+                        Task { @MainActor in
+                            guard self.turnGeneration == generation else { return }
+                            self.handleStreamDelta(delta)
+                        }
                     },
                     onStreamReset: {
-                        Task { @MainActor in self.handleStreamReset() }
+                        Task { @MainActor in
+                            guard self.turnGeneration == generation else { return }
+                            self.handleStreamReset()
+                        }
                     },
                     onStatus: { status in
                         Task { @MainActor in
-                            if self.isTurnInFlight { self.thinkingStatus = status }
+                            guard self.turnGeneration == generation, self.isTurnInFlight else { return }
+                            self.thinkingStatus = status
                         }
                     }
                 )
-                await MainActor.run { self.finish(with: reply) }
+                await MainActor.run {
+                    guard self.turnGeneration == generation else { return }
+                    self.finish(with: reply)
+                }
             } catch {
                 await MainActor.run {
+                    guard self.turnGeneration == generation else { return }
                     self.isThinking = false
                     self.wordQueue = []
                     self.rawPending = ""
@@ -803,11 +856,17 @@ final class AskChatManager: ObservableObject {
         isThinking = true
     }
 
+    /// Withdraws streamed text, including words still waiting to be revealed. Without the
+    /// queue reset, prose streamed before a card kept "typing" into a fresh bubble under the
+    /// card, which the next turn then continued in.
     private func removeStreamingMessage() {
         if let id = streamingMessageID {
             messages.removeAll { $0.id == id }
         }
         streamingMessageID = nil
+        wordQueue = []
+        rawPending = ""
+        pendingFinalText = nil
     }
 
     /// Milliseconds since the user's message went out, or 0 if no turn is in flight.
@@ -969,7 +1028,20 @@ final class AskChatManager: ObservableObject {
 
     /// Writes the transaction with whatever the user confirmed. Only called
     /// from the draft card's Confirm button — never by the model.
+    /// Records a draft card the user saved from the edit sheet instead of tapping +.
+    func confirmDraftFromEditSheet(messageID: UUID, transaction: Txn) {
+        guard !confirmedDrafts.contains(messageID) else { return }
+        UserManager.shared.addTransaction(transaction)
+        draftErrors[messageID] = nil
+        confirmedDrafts.insert(messageID)
+        trackCardResolved(messageID, confirmed: true, extra: ["via": "edit_sheet"])
+        messages.append(AskDisplayMessage(isUser: false, content: .systemNote("✅ Added \(AskFormat.currencyWithSymbol(abs(transaction.amount)))\(transaction.category.isEmpty ? "" : " to \(transaction.category)").")))
+        persist()
+    }
+
     func confirmDraft(messageID: UUID, amount: Double, currency: Currency, merchant: String?, date: Date, note: String?, categoryId: UUID?, categoryName: String) {
+        // A second tap before the card re-renders would otherwise write the transaction twice.
+        guard !confirmedDrafts.contains(messageID) else { return }
         guard amount > 0 else {
             draftErrors[messageID] = "Enter a valid amount."
             return
@@ -1061,6 +1133,7 @@ final class AskChatManager: ObservableObject {
     /// Creates the suggested category (Confirm tap only). Custom categories
     /// are a paid (Plus/Pro) feature — free users get the paywall instead.
     func confirmCategoryDraft(messageID: UUID, draft: AskCategoryDraft) {
+        guard !confirmedDrafts.contains(messageID) else { return }
         guard RevenueCatManager.shared.planTier.allowsCustomCategories else {
             paywallMode = .default
             showLimitPaywall = true
@@ -1167,6 +1240,7 @@ final class AskChatManager: ObservableObject {
     // MARK: Budget cards
 
     func confirmBudgetDraft(messageID: UUID, draft: AskBudgetDraft) {
+        guard !confirmedDrafts.contains(messageID) else { return }
         guard let categoryId = UUID(uuidString: draft.category_id) else {
             draftErrors[messageID] = "That category no longer exists."
             return
@@ -1253,6 +1327,7 @@ final class AskChatManager: ObservableObject {
     // MARK: Recurring / subscription cards
 
     func confirmSubscriptionDraft(messageID: UUID, draft: AskSubscriptionDraft) {
+        guard !confirmedDrafts.contains(messageID) else { return }
         // Free accounts are capped at 2 recurring items — same gate the Add sheet uses.
         guard SubscriptionManager.shared.canAddMoreSubscriptions else {
             paywallMode = .default
@@ -2511,11 +2586,7 @@ private struct AskDraftCard: View {
                 prefillDate: date,
                 prefillCurrency: currency
             ) { newTxn in
-                UserManager.shared.addTransaction(newTxn)
-                chat.draftErrors[messageID] = nil
-                chat.confirmedDrafts.insert(messageID)
-                chat.trackCardResolved(messageID, confirmed: true, extra: ["via": "edit_sheet"])
-                chat.messages.append(AskDisplayMessage(isUser: false, content: .systemNote("✅ Added \(AskFormat.currencyWithSymbol(abs(newTxn.amount)))\(newTxn.category.isEmpty ? "" : " to \(newTxn.category)").")))
+                chat.confirmDraftFromEditSheet(messageID: messageID, transaction: newTxn)
             }
             .presentationDetents([.fraction(0.98)])
             .presentationDragIndicator(.hidden)
