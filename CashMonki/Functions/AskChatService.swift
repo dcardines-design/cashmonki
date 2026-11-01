@@ -84,12 +84,17 @@ final class AskChatService {
     /// `onStreamReset` fires if already-streamed text must be withdrawn
     /// (another tool round started). Structured JSON is never streamed —
     /// it buffers silently and arrives complete in the return value.
+    /// `onStatus` reports what the next round trip is waiting on (e.g. "Checking your budgets…").
+    /// `categoriesJSON` is the user's category list, snapshotted on the main actor
+    /// (`currentCategoriesJSON()`), since this runs off it and the list can change meanwhile.
     func send(
         history: [HistoryTurn],
+        categoriesJSON: String,
         onDelta: @escaping @Sendable (String) -> Void = { _ in },
-        onStreamReset: @escaping @Sendable () -> Void = {}
+        onStreamReset: @escaping @Sendable () -> Void = {},
+        onStatus: @escaping @Sendable (String) -> Void = { _ in }
     ) async throws -> Reply {
-        var messages: [[String: Any]] = [["role": "system", "content": systemPrompt]]
+        var messages: [[String: Any]] = [["role": "system", "content": systemPrompt(categoriesJSON: categoriesJSON)]]
 
         // Replay tool rounds only for the last few assistant turns (see maxReplayedTurns).
         let replayCutoff = history.enumerated()
@@ -134,11 +139,12 @@ final class AskChatService {
             let response = try await streamWithRetry(messages: messages, onDelta: onDelta, onStreamReset: onStreamReset)
 
             if !response.toolCalls.isEmpty {
+                onStatus(Self.statusText(forTools: response.toolCalls.map(\.name)))
                 messages.append(response.rawAssistantMessage)
                 var roundResults: [AskToolResult] = []
                 for call in response.toolCalls {
                     turnCallIDs.append(call.id)
-                    let result = executeTool(name: call.name, argumentsJSON: call.arguments, callID: call.id)
+                    let result = executeTool(name: call.name, argumentsJSON: call.arguments, callID: call.id, categoriesJSON: categoriesJSON)
                     messages.append([
                         "role": "tool",
                         "tool_call_id": call.id,
@@ -235,6 +241,20 @@ final class AskChatService {
             throw AskChatError.badResponse("The assistant got stuck fetching data. Try again.")
         }
         return Reply(message: AskMessageDecoder.decode(forced.content), toolRounds: toolRounds)
+    }
+
+    /// What the user sees under the thinking dots while a tool round's results go back to
+    /// the model. The first tool in the round decides it.
+    private static func statusText(forTools names: [String]) -> String {
+        switch names.first {
+        case "get_recent_transactions": return "Looking through your transactions…"
+        case "get_spending_by_category", "compare_spending": return "Adding up your spending…"
+        case "get_categories": return "Checking your categories…"
+        case "get_budgets": return "Checking your budgets…"
+        case "get_subscriptions": return "Checking your subscriptions…"
+        case "convert_currency": return "Converting currency…"
+        default: return "Working on it…"
+        }
     }
 
     // MARK: - OpenRouter call (SSE streaming)
@@ -416,9 +436,9 @@ final class AskChatService {
                     "from": ["type": "string", "description": "Custom range start, yyyy-MM-dd (overrides period)"],
                     "to": ["type": "string", "description": "Custom range end, yyyy-MM-dd"]
                  ]),
-            tool("get_categories",
-                 "Fetch the user's transaction categories (id, name, type). Use to suggest categories for a transaction draft.",
-                 [:]),
+            // No get_categories tool: the list is in the system prompt, and offering the tool
+            // let the model spend a whole round trip fetching it anyway. executeTool still
+            // answers it, so replayed history that called it stays valid.
             tool("compare_spending",
                  "Sum the user's spending for each named period (real data), optionally filtered to one category. Use for any comparison across time (this month vs last month, monthly trend). Returns one row per period; chart or stat the result.",
                  [
@@ -492,7 +512,7 @@ final class AskChatService {
         lastRows = []
     }
 
-    private func executeTool(name: String, argumentsJSON: String, callID: String) -> String {
+    private func executeTool(name: String, argumentsJSON: String, callID: String, categoriesJSON: String) -> String {
         let args = (try? JSONSerialization.jsonObject(with: Data(argumentsJSON.utf8)) as? [String: Any]) ?? [:]
         print("🛠️ AskChat: tool \(name) \(args)")
 
@@ -516,7 +536,7 @@ final class AskChatService {
             return encodeRows(rows)
 
         case "get_categories":
-            return encodeCategories()
+            return categoriesJSON
 
         case "compare_spending":
             let category = args["category"] as? String
@@ -638,6 +658,7 @@ final class AskChatService {
 
         let calendar = Calendar.current
         let realTxns = UserManager.shared.currentUser.transactions
+        let primaryCurrency = CurrencyPreferences.shared.primaryCurrency
         var result: [(date: Date, category: String, amount: Double)] = []
 
         for sub in SubscriptionManager.persistedSubscriptions() {
@@ -651,12 +672,18 @@ final class AskChatService {
                 .filter { $0.subscriptionId == sub.id }
                 .map { calendar.startOfDay(for: $0.date) })
 
+            // Spending sums are in the primary currency; a 15 USD subscription used to add 15
+            // to a PHP total.
+            let amount = sub.currency == primaryCurrency
+                ? abs(sub.amount)
+                : abs(CurrencyRateManager.shared.convertAmount(sub.amount, from: sub.currency, to: primaryCurrency))
+
             var occurrence = sub.createdAt
             var steps = 0
             while occurrence <= upperBound && steps < 2000 {
                 steps += 1
                 if occurrence >= from, !coveredDays.contains(calendar.startOfDay(for: occurrence)) {
-                    result.append((date: occurrence, category: sub.category, amount: -abs(sub.amount)))
+                    result.append((date: occurrence, category: sub.category, amount: -amount))
                 }
                 occurrence = sub.frequency.nextOccurrence(from: occurrence)
             }
@@ -698,23 +725,14 @@ final class AskChatService {
     }
 
     private func budgetRows() -> [[String: String]] {
-        let calendar = Calendar.current
-        let now = Date()
         // Paused budgets are listed too (with active=false) — otherwise the model
         // could pause one and never see it again to resume it.
         return UserManager.shared.currentUser.budgets
             .map { budget in
-                // Spent = expenses in this budget's category over the current period.
-                let periodStart: Date
-                switch budget.period.rawValue.lowercased() {
-                case "daily": periodStart = calendar.startOfDay(for: now)
-                case "weekly": periodStart = calendar.date(byAdding: .day, value: -7, to: now)!
-                case "yearly": periodStart = calendar.date(from: calendar.dateComponents([.year], from: now))!
-                default: periodStart = calendar.date(from: calendar.dateComponents([.year, .month], from: now))!
-                }
-                let spent = UserManager.shared.currentUser.transactions
-                    .filter { $0.categoryId == budget.categoryId && $0.amount < 0 && $0.date >= periodStart }
-                    .reduce(0) { $0 + abs($1.amount) }
+                // Same figure the Budgets page shows: the budget's category and its
+                // subcategories, over the period's calendar range, converted to the primary
+                // currency. The old local copy missed subcategories and quarterly periods.
+                let spent = BudgetManager.shared.spentAmount(for: budget)
                 return [
                     "id": budget.id.uuidString,
                     "category": budget.categoryName,
@@ -749,7 +767,10 @@ final class AskChatService {
             }
     }
 
-    private func encodeCategories() -> String {
+    /// The user's categories as the model sees them. Reads CategoriesManager, so call it on
+    /// the main actor and pass the result into `send`.
+    @MainActor
+    func currentCategoriesJSON() -> String {
         let categories = CategoriesManager.shared.categories
             .filter { !$0.isDeleted }
             .map { ["id": $0.id.uuidString, "name": $0.name, "type": $0.type.rawValue] }
@@ -1084,7 +1105,7 @@ final class AskChatService {
 
     // MARK: - System prompt
 
-    private var systemPrompt: String {
+    private func systemPrompt(categoriesJSON: String) -> String {
         let today = ISO8601DateFormatter.askDateOnly.string(from: Date())
         let currency = CurrencyPreferences.shared.primaryCurrency.rawValue
         return """
@@ -1096,13 +1117,13 @@ final class AskChatService {
 
         2. {"type": "table", "title": "...", "columns": [{"key": "...", "label": "...", "align": "left|right", "format": "currency"?}]} — when showing transactions or spending data. RULES: you MUST call a data tool first (get_recent_transactions or get_spending_by_category); pick column keys from the tool result's row keys; do NOT include rows — the app fills them from the tool result; money columns get "align": "right" and "format": "currency"; set "source" to the tool_call_id whose rows you are showing, so the app fills the right data and a later turn can tell what the table was built from. Never invent, recall, or estimate numbers yourself — no tool result, no table.
 
-        3. {"type": "transaction_draft", "amount": 12.5, "currency": "\(currency)", "merchant": "...", "date": "yyyy-MM-dd", "note": "...", "suggested_categories": [{"id": "...", "name": "...", "confidence": 0.9}]} — when the user asks to add/log a transaction (e.g. "add $12 lunch at Chipotle yesterday"). RULES: amount is required — if it's missing or ambiguous, reply with a short text question instead of guessing; date defaults to today, resolve words like "yesterday"; note only if the user said something worth keeping; call get_categories first and suggest the best 1-3 matches from the REAL list (use their exact ids and names — never make up categories). You never create the transaction yourself — the app asks the user to confirm.
+        3. {"type": "transaction_draft", "amount": 12.5, "currency": "\(currency)", "merchant": "...", "date": "yyyy-MM-dd", "note": "...", "suggested_categories": [{"id": "...", "name": "...", "confidence": 0.9}]} — when the user asks to add/log a transaction (e.g. "add $12 lunch at Chipotle yesterday"). RULES: amount is required — if it's missing or ambiguous, reply with a short text question instead of guessing; date defaults to today, resolve words like "yesterday"; note only if the user said something worth keeping; suggest the best 1-3 matches from the CATEGORIES list at the end of this prompt (use their exact ids and names — never make up categories). You never create the transaction yourself — the app asks the user to confirm.
 
         3b. {"type": "transaction_draft_batch", "title": "Grocery run", "transactions": [{...}, {...}]} — when the user asks to log SEVERAL transactions in one go (e.g. "add 300 vegetables, 150 milk and 90 bread"). Each entry follows the transaction_draft schema above (2-10 of them, each needs its own amount and suggested_categories). The app renders one card with a row per transaction, each addable on its own plus an Add all button. Use a single transaction_draft when there's only one.
 
         5. {"type": "transaction", "transaction_ids": ["...", "..."]} — when the user asks to see 1 to 3 specific transactions (e.g. "show my last grab ride"). Call get_recent_transactions first and use the exact "id" values from the tool result. The app renders the transaction cards itself. For 4 or more transactions use a table instead — never this type.
 
-        4. {"type": "transaction_update", "transaction_id": "...", "amount": 150, "currency": "...", "merchant": "...", "date": "yyyy-MM-dd", "note": "...", "category_id": "..."} — when the user asks to change/edit existing transactions (e.g. "change that Jollibee lunch to 150"). For the SAME change applied to several transactions (e.g. "move all my Grab rides to Transportation"), use "transaction_ids": ["...", "..."] (max 10) instead of transaction_id. RULES: call get_recent_transactions first and use the exact "id" values from the tool result — never invent ids; include ONLY the fields being changed, omit everything else; if a category change is requested, also call get_categories and use its exact id; if it's unclear which transactions the user means, ask a short text question instead of guessing. Different changes to different transactions = separate turns. The app shows the change and asks the user to confirm — you never apply it yourself. Never include the "id" column when showing tables.
+        4. {"type": "transaction_update", "transaction_id": "...", "amount": 150, "currency": "...", "merchant": "...", "date": "yyyy-MM-dd", "note": "...", "category_id": "..."} — when the user asks to change/edit existing transactions (e.g. "change that Jollibee lunch to 150"). For the SAME change applied to several transactions (e.g. "move all my Grab rides to Transportation"), use "transaction_ids": ["...", "..."] (max 10) instead of transaction_id. RULES: call get_recent_transactions first and use the exact "id" values from the tool result — never invent ids; include ONLY the fields being changed, omit everything else; if a category change is requested, use the exact id from the CATEGORIES list; if it's unclear which transactions the user means, ask a short text question instead of guessing. Different changes to different transactions = separate turns. The app shows the change and asks the user to confirm — you never apply it yourself. Never include the "id" column when showing tables.
 
         6. {"type": "transaction_delete", "transaction_ids": ["...", "..."]} — when the user asks to delete/remove transactions (max 10). RULES: call get_recent_transactions first and use exact "id" values — never invent ids; if it's unclear which transactions the user means, ask a short text question. The app shows the transactions and asks the user to confirm — you never delete anything yourself.
 
@@ -1110,21 +1131,21 @@ final class AskChatService {
 
         8. {"type": "stat", "title": "July spending", "value": 22722, "compare_value": 25900?, "compare_label": "June"?, "good_direction": "down"?} — when the user asks for a single headline number ("how much did I spend this month?", "am I overspending?"). RULES: call a data tool first and compute value (and compare_value if comparing periods) strictly from tool results; good_direction is "down" for spending metrics, "up" for income/savings; set "source" to the tool_call_id you computed from; the app computes and renders the percentage itself.
 
-        9. {"type": "category_draft", "name": "Fast Food", "emoji": "🍔", "parent": "Dining"?, "category_type": "expense"} — when the user asks for category ideas, wants to organize their spending, or a transaction clearly fits no existing category. RULES: call get_categories first and only suggest something that does NOT already exist; "parent" must be an EXACT existing category name (omit for a top-level category); one suggestion per message; pick a fitting emoji. The app asks the user to confirm and handles the Pro paywall — you never create it yourself.
+        9. {"type": "category_draft", "name": "Fast Food", "emoji": "🍔", "parent": "Dining"?, "category_type": "expense"} — when the user asks for category ideas, wants to organize their spending, or a transaction clearly fits no existing category. RULES: check the CATEGORIES list and only suggest something that does NOT already exist; "parent" must be an EXACT existing category name (omit for a top-level category); one suggestion per message; pick a fitting emoji. The app asks the user to confirm and handles the Pro paywall — you never create it yourself.
 
-        10. {"type": "budget_draft", "category_id": "...", "category_name": "Food", "amount": 5000, "currency": "\(currency)", "period": "monthly", "apply_to_all_periods": true} — when the user asks to set/create a budget (e.g. "budget 5000 a month for food"). RULES: call get_categories first and use an exact id from it; call get_budgets too and, if that category already has a budget, propose a budget_update instead of a second budget; period is one of daily, weekly, monthly, quarterly, yearly (default monthly); if the amount or the category is unclear, ask a short text question instead of guessing. The app asks the user to confirm — you never create it yourself.
+        10. {"type": "budget_draft", "category_id": "...", "category_name": "Food", "amount": 5000, "currency": "\(currency)", "period": "monthly", "apply_to_all_periods": true} — when the user asks to set/create a budget (e.g. "budget 5000 a month for food"). RULES: use an exact id from the CATEGORIES list; call get_budgets too and, if that category already has a budget, propose a budget_update instead of a second budget; period is one of daily, weekly, monthly, quarterly, yearly (default monthly); if the amount or the category is unclear, ask a short text question instead of guessing. The app asks the user to confirm — you never create it yourself.
 
         11. {"type": "budget_update", "budget_id": "...", "amount": 6000, "currency": "...", "period": "monthly", "is_active": true} — when the user asks to change an existing budget (e.g. "raise my food budget to 6000", "pause my shopping budget"). For the SAME change across several budgets use "budget_ids": ["...", "..."] (max 10). RULES: call get_budgets first and use its exact "id" values — never invent ids; include ONLY the fields being changed; is_active false pauses a budget instead of deleting it. The app asks the user to confirm.
 
         12. {"type": "budget_delete", "budget_ids": ["...", "..."]} — when the user asks to remove/delete budgets (max 10). RULES: call get_budgets first and use exact "id" values; if it's unclear which budget they mean, ask a short text question. The app asks the user to confirm — you never delete anything yourself. Prefer budget_update with "is_active": false when the user says pause or stop rather than delete.
 
-        13. {"type": "subscription_draft", "name": "Netflix", "amount": 549, "currency": "\(currency)", "category_id": "...", "frequency": "monthly", "start_date": "yyyy-MM-dd", "auto_add": true, "note": "..."} — when the user asks to track something recurring (e.g. "add my Netflix, 549 monthly", "I pay 2000 rent every month"). RULES: call get_subscriptions first and, if that item already exists, propose a subscription_update instead of a duplicate; call get_categories and use an exact id (omit category_id and it files under Subscriptions); frequency is daily, weekly, monthly, quarterly or yearly (default monthly); start_date defaults to today; auto_add true means each due date creates the transaction for them. If the amount or how often is unclear, ask a short text question. The app asks the user to confirm and handles the free-plan limit.
+        13. {"type": "subscription_draft", "name": "Netflix", "amount": 549, "currency": "\(currency)", "category_id": "...", "frequency": "monthly", "start_date": "yyyy-MM-dd", "auto_add": true, "note": "..."} — when the user asks to track something recurring (e.g. "add my Netflix, 549 monthly", "I pay 2000 rent every month"). RULES: call get_subscriptions first and, if that item already exists, propose a subscription_update instead of a duplicate; use an exact id from the CATEGORIES list (omit category_id and it files under Subscriptions); frequency is daily, weekly, monthly, quarterly or yearly (default monthly); start_date defaults to today; auto_add true means each due date creates the transaction for them. If the amount or how often is unclear, ask a short text question. The app asks the user to confirm and handles the free-plan limit.
 
         14. {"type": "subscription_update", "subscription_id": "...", "amount": 649, "name": "...", "frequency": "...", "next_due_date": "yyyy-MM-dd", "category_id": "...", "auto_add": true, "is_active": true, "note": "..."} — when the user asks to change a recurring item ("Netflix went up to 649", "move my rent to the 5th", "stop auto adding my gym"). For the SAME change across several use "subscription_ids": ["...", "..."] (max 10). RULES: call get_subscriptions first and use its exact "id" values — never invent ids; include ONLY the fields being changed; is_active false pauses it, which is what "pause", "stop tracking" or "cancel for now" should map to.
 
         15. {"type": "subscription_delete", "subscription_ids": ["...", "..."]} — when the user asks to remove recurring items for good (max 10). RULES: call get_subscriptions first and use exact "id" values; prefer subscription_update with "is_active": false unless they clearly want it gone. The app asks the user to confirm.
 
-        PHOTOS: The user can attach up to \(AskImageStore.maxPhotosPerMessage) photos to a message. When a photo is a receipt, bill, invoice or a screenshot of a payment, read it and propose it as a transaction_draft: the total actually paid (not a subtotal), the merchant, the date printed on it (today if there is none) and the currency shown on it (the user's primary currency if none is shown). Call get_categories first, as for any draft. ONE receipt is ONE transaction_draft for its grand total, even when it lists several items: never a row per line item, and never a transaction_draft_batch, because the user paid once. Put the items in "note" instead (e.g. "Latte, croissant, cold brew"). Use a transaction_draft_batch only for several separate receipts in one message (one row per receipt, each its own total), or when the user explicitly asks to split one receipt into its items. If you can't read the total, or can't tell which number is the total, ask a short text question instead of guessing. If the photo isn't a receipt or payment, reply briefly in text about what you can help with. Never claim to see details you can't actually read. History may contain (The user attached N photos here...) records: those photos are not shown to you again, so rely on what you replied at the time.
+        PHOTOS: The user can attach up to \(AskImageStore.maxPhotosPerMessage) photos to a message. When a photo is a receipt, bill, invoice or a screenshot of a payment, read it and propose it as a transaction_draft: the total actually paid (not a subtotal), the merchant, the date printed on it (today if there is none) and the currency shown on it (the user's primary currency if none is shown). Suggest categories from the CATEGORIES list, as for any draft. ONE receipt is ONE transaction_draft for its grand total, even when it lists several items: never a row per line item, and never a transaction_draft_batch, because the user paid once. Put the items in "note" instead (e.g. "Latte, croissant, cold brew"). Use a transaction_draft_batch only for several separate receipts in one message (one row per receipt, each its own total), or when the user explicitly asks to split one receipt into its items. If you can't read the total, or can't tell which number is the total, ask a short text question instead of guessing. If the photo isn't a receipt or payment, reply briefly in text about what you can help with. Never claim to see details you can't actually read. History may contain (The user attached N photos here...) records: those photos are not shown to you again, so rely on what you replied at the time.
 
         For currency questions ("how much is 4600 PHP in USD?"), call convert_currency and answer with a text message using its result — never estimate exchange rates yourself.
 
@@ -1138,9 +1159,12 @@ final class AskChatService {
 
         CRITICAL: Never show a raw id ("id", "budget_id", "category_id") as a table column — ids are for targeting, not for reading.
 
-        CRITICAL: History may contain PENDING card records like (App is showing a PENDING transaction card, not saved yet: 100 PHP Coffee.). Those propose something the user has NOT approved — nothing was written. If the user then asks to change one ("make it 150", "that's food not coffee", "drop the milk one"), emit a FRESH card of the same type carrying the FULL corrected proposal — every field the pending card had, not just the changed one, INCLUDING suggested_categories (call get_categories again if you need the ids). A revision that drops the category loses it. The app replaces the pending card with your new one. Never answer such a request with text alone claiming it was updated, and never treat a pending card as saved data.
+        CRITICAL: History may contain PENDING card records like (App is showing a PENDING transaction card, not saved yet: 100 PHP Coffee.). Those propose something the user has NOT approved — nothing was written. If the user then asks to change one ("make it 150", "that's food not coffee", "drop the milk one"), emit a FRESH card of the same type carrying the FULL corrected proposal — every field the pending card had, not just the changed one, INCLUDING suggested_categories (take the ids from the CATEGORIES list). A revision that drops the category loses it. The app replaces the pending card with your new one. Never answer such a request with text alone claiming it was updated, and never treat a pending card as saved data.
 
         CRITICAL: History may also contain app confirmation lines like "✅ Added 100 PHP to Coffee.", "🗑️ Deleted 2 transactions.", or "✅ Added 🍔 Fast Food as a new category." — these are the APP's record of an action the user ALREADY approved by tapping Confirm on a card. You never complete actions yourself. NEVER write a "✅ Added...", "🗑️ Deleted...", or similar completion line — doing so falsely tells the user something was saved when nothing was. To act, emit the matching draft/update/delete JSON and let the app confirm and record it.
+
+        CATEGORIES: The user's current categories are below. This list is always current; use its exact ids and names.
+        \(categoriesJSON)
         """
     }
 }
@@ -1149,6 +1173,9 @@ private extension ISO8601DateFormatter {
     static let askDateOnly: ISO8601DateFormatter = {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withFullDate]
+        // ISO8601DateFormatter defaults to GMT: in UTC+8 "today" was yesterday until 8 am,
+        // while every other Ask date (drafts, tool ranges) is parsed in local time.
+        formatter.timeZone = .autoupdatingCurrent
         return formatter
     }()
 }

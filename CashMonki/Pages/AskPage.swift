@@ -278,6 +278,26 @@ final class AskChatManager: ObservableObject {
     /// Message currently receiving streamed text, if any.
     @Published private(set) var streamingMessageID: UUID? = nil
 
+    /// True from send until the reply has fully landed (including the word-by-word drain,
+    /// which outlasts `isThinking`). Messages sent meanwhile wait in `queuedMessages`.
+    @Published private(set) var isTurnInFlight = false
+
+    /// Shown beside the thinking dots: what the in-flight turn is waiting on, if known.
+    @Published private(set) var thinkingStatus: String? = nil
+
+    /// A message the user sent while a reply was still coming. Not persisted: it lives
+    /// only until its turn starts, when it becomes a normal user message.
+    struct QueuedMessage: Identifiable {
+        let id = UUID()
+        let text: String
+        let imageIDs: [String]
+        let source: SendSource
+    }
+    @Published private(set) var queuedMessages: [QueuedMessage] = []
+    static let maxQueuedMessages = 3
+
+    var canQueueMore: Bool { queuedMessages.count < Self.maxQueuedMessages }
+
     /// Shown (ephemerally) when a free user hits the daily message limit. Never persisted —
     /// it reflects live daily state, so a stale copy must not survive into the next day's reset.
     /// Counts reset at local midnight (DailyUsageManager).
@@ -303,8 +323,17 @@ final class AskChatManager: ObservableObject {
         return false
     }
 
+    /// Identity whose chat is in memory. A reload for the same identity (UserManager posts the
+    /// load-complete notification more than once per launch) only merges the cloud copy.
+    private var loadedUID: String
+
+    /// Bumped when the in-flight turn is abandoned (account switch). Callbacks from a turn
+    /// started under an older generation are dropped instead of landing in the new chat.
+    private var turnGeneration = 0
+
     private init() {
         Self.migrateLegacyFileIfNeeded()
+        loadedUID = Self.currentUID()
         if let saved = Self.loadPersisted() {
             // Drop any limit notices persisted by older builds — they're daily-state, not history.
             messages = saved.messages.filter { !Self.isLimitNotice($0) }
@@ -426,14 +455,22 @@ final class AskChatManager: ObservableObject {
     /// cloud copy (returning user on a fresh install). Called on login/logout via notification.
     func reloadForCurrentUser() {
         let uid = Self.currentUID()
-        // Tool results are user data - drop the previous account's rows before loading.
-        AskChatService.shared.clearCaches()
-        let local = Self.loadPersisted()
-        messages = (local?.messages ?? []).filter { !Self.isLimitNotice($0) }
-        confirmedDrafts = Set(local?.confirmed ?? [])
-        supersededCards = Set(local?.superseded ?? [])
-        addedBatchRows = Self.decodeBatchRows(local?.batchRows)
-        objectWillChange.send()
+        // Same identity: keep the in-memory chat (it can be ahead of the file, which is
+        // written in the background) and any turn in flight; just merge the cloud copy.
+        if uid != loadedUID {
+            loadedUID = uid
+            // The in-flight reply, queued messages and tool results belong to the account
+            // that wrote them, not the one signing in.
+            abandonTurn()
+            AskChatService.shared.clearCaches()
+            discardQueue()
+            let local = Self.loadPersisted()
+            messages = (local?.messages ?? []).filter { !Self.isLimitNotice($0) }
+            confirmedDrafts = Set(local?.confirmed ?? [])
+            supersededCards = Set(local?.superseded ?? [])
+            addedBatchRows = Self.decodeBatchRows(local?.batchRows)
+            objectWillChange.send()
+        }
 
         guard syncEnabled else { return }
         FirestoreService.shared.fetchAskChat(userId: uid) { [weak self] result in
@@ -441,21 +478,47 @@ final class AskChatManager: ObservableObject {
                   case .success(let data?) = result,
                   let cloud = try? JSONDecoder().decode(PersistedChat.self, from: data) else { return }
             Task { @MainActor in
+                // The account may have changed again while the fetch was out.
+                guard self.loadedUID == uid else { return }
                 self.mergeCloud(cloud)
             }
         }
     }
 
-    /// Union local + cloud chat by message id. No per-message timestamp exists, so the longer
-    /// snapshot is treated as the base (usually the more complete history) and any messages the
-    /// other side uniquely has are appended. Capped at 100.
+    /// Drops the turn in flight: its reply, streamed words and status never reach the chat.
+    private func abandonTurn() {
+        turnGeneration += 1
+        isThinking = false
+        isTurnInFlight = false
+        thinkingStatus = nil
+        streamingMessageID = nil
+        wordQueue = []
+        rawPending = ""
+        pendingFinalText = nil
+        pendingToolRounds = []
+        turnStartedAt = nil
+    }
+
+    /// Union local + cloud chat by message id. No per-message timestamp exists, so order comes
+    /// from the messages both copies share: each cloud-only message goes right after the last
+    /// shared message that precedes it in the cloud copy (at the start if none does). Appending
+    /// them at the end instead put an older cloud window below the newest local messages, and
+    /// the 100 cap then cut the local history. Capped at 100, newest kept.
     private func mergeCloud(_ cloud: PersistedChat) {
         let cloudMsgs = cloud.messages.filter { !Self.isLimitNotice($0) }
-        let base = cloudMsgs.count > messages.count ? cloudMsgs : messages
-        let other = cloudMsgs.count > messages.count ? messages : cloudMsgs
-        let baseIDs = Set(base.map { $0.id })
-        var merged = base
-        merged.append(contentsOf: other.filter { !baseIDs.contains($0.id) })
+        var merged = messages
+        var insertAt = 0
+        for message in cloudMsgs {
+            if let index = merged.firstIndex(where: { $0.id == message.id }) {
+                insertAt = index + 1
+                continue
+            }
+            // A failed bubble only the cloud has was retried (and removed) or abandoned on
+            // another device; bringing it back would show a stale "Try again".
+            if case .failed = message.content { continue }
+            merged.insert(message, at: insertAt)
+            insertAt += 1
+        }
         messages = Array(merged.suffix(100))
         confirmedDrafts.formUnion(cloud.confirmed)
         supersededCards.formUnion(cloud.superseded ?? [])
@@ -511,13 +574,59 @@ final class AskChatManager: ObservableObject {
         persist()
     }
 
+    /// Sends now, or queues the message when a reply is still coming. Returns false when it
+    /// was neither sent nor queued, so the composer can keep what was typed.
+    @discardableResult
+    func submit(_ text: String, imageIDs: [String] = [], source: SendSource = .typed) -> Bool {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty || !imageIDs.isEmpty else { return false }
+        guard isTurnInFlight else { return send(trimmed, imageIDs: imageIDs, source: source) }
+        guard canQueueMore else { return false }
+        queuedMessages.append(QueuedMessage(text: trimmed, imageIDs: imageIDs, source: source))
+        return true
+    }
+
+    /// Drops a queued message before it goes out, along with its photos.
+    func removeQueued(id: UUID) {
+        guard let index = queuedMessages.firstIndex(where: { $0.id == id }) else { return }
+        AskImageStore.delete(queuedMessages[index].imageIDs)
+        queuedMessages.remove(at: index)
+    }
+
+    private func discardQueue() {
+        AskImageStore.delete(queuedMessages.flatMap(\.imageIDs))
+        queuedMessages = []
+    }
+
+    /// Called once per turn, after the reply (or the failure) has fully landed.
+    private func turnDidEnd() {
+        isTurnInFlight = false
+        thinkingStatus = nil
+        sendNextQueued()
+    }
+
+    /// Sends queued messages in order until one goes out. A message that can't go (too
+    /// big, photos missing) is skipped with its notice; once the daily Ask limit is hit
+    /// the rest would fail the same way, so they're dropped behind the limit notice.
+    private func sendNextQueued() {
+        while !isTurnInFlight, !queuedMessages.isEmpty {
+            let next = queuedMessages.removeFirst()
+            if send(next.text, imageIDs: next.imageIDs, source: next.source) { return }
+            AskImageStore.delete(next.imageIDs)
+            if !DailyUsageManager.shared.canSendChatMessage() {
+                discardQueue()
+                return
+            }
+        }
+    }
+
     /// Sends a turn, with any attached photos (AskImageStore ids). Returns false when nothing
     /// was sent (empty, busy, or a daily limit), so the composer can keep what was typed.
     /// Each photo counts as one receipt scan; a retry doesn't count its photos again.
     @discardableResult
     func send(_ text: String, imageIDs: [String] = [], source: SendSource = .typed, isRetry: Bool = false) -> Bool {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty || !imageIDs.isEmpty, !isThinking else { return false }
+        guard !trimmed.isEmpty || !imageIDs.isEmpty, !isTurnInFlight else { return false }
 
         // Checked before anything is counted: the proxy turns away requests over ~4.5 MB.
         let photos = imageIDs.compactMap(AskImageStore.data(for:))
@@ -585,6 +694,9 @@ final class AskChatManager: ObservableObject {
         )
         messages.append(userMessage)
         isThinking = true
+        isTurnInFlight = true
+        thinkingStatus = imageIDs.isEmpty ? nil
+            : imageIDs.count == 1 ? "Reading your photo…" : "Reading your photos…"
         turnStartedAt = Date()
 
         persist()
@@ -600,20 +712,41 @@ final class AskChatManager: ObservableObject {
                 images: $0.id == userMessage.id ? photos : []
             )
         }
+        // Read here on the main actor; the service builds the prompt off it.
+        let categoriesJSON = AskChatService.shared.currentCategoriesJSON()
+        // Every callback checks this, so a turn abandoned by an account switch stays silent.
+        let generation = turnGeneration
         Task {
             do {
                 let reply = try await AskChatService.shared.send(
                     history: history,
+                    categoriesJSON: categoriesJSON,
                     onDelta: { delta in
-                        Task { @MainActor in self.handleStreamDelta(delta) }
+                        Task { @MainActor in
+                            guard self.turnGeneration == generation else { return }
+                            self.handleStreamDelta(delta)
+                        }
                     },
                     onStreamReset: {
-                        Task { @MainActor in self.handleStreamReset() }
+                        Task { @MainActor in
+                            guard self.turnGeneration == generation else { return }
+                            self.handleStreamReset()
+                        }
+                    },
+                    onStatus: { status in
+                        Task { @MainActor in
+                            guard self.turnGeneration == generation, self.isTurnInFlight else { return }
+                            self.thinkingStatus = status
+                        }
                     }
                 )
-                await MainActor.run { self.finish(with: reply) }
+                await MainActor.run {
+                    guard self.turnGeneration == generation else { return }
+                    self.finish(with: reply)
+                }
             } catch {
                 await MainActor.run {
+                    guard self.turnGeneration == generation else { return }
                     self.isThinking = false
                     self.wordQueue = []
                     self.rawPending = ""
@@ -628,6 +761,7 @@ final class AskChatManager: ObservableObject {
                         "latency_ms": self.elapsedTurnMilliseconds()
                     ])
                     self.persist()
+                    self.turnDidEnd()
                 }
             }
         }
@@ -656,8 +790,10 @@ final class AskChatManager: ObservableObject {
         isDraining = true
         Task { @MainActor in
             while !wordQueue.isEmpty {
-                appendToken(wordQueue.removeFirst())
-                try? await Task.sleep(nanoseconds: 60_000_000) // one word per 60ms
+                let count = min(wordsPerTick, wordQueue.count)
+                appendToken(wordQueue.prefix(count).joined())
+                wordQueue.removeFirst(count)
+                try? await Task.sleep(nanoseconds: 40_000_000)
             }
             isDraining = false
             if let final = pendingFinalText {
@@ -665,6 +801,18 @@ final class AskChatManager: ObservableObject {
                 settleStreamedText(final)
             }
         }
+    }
+
+    /// Words revealed per 40ms tick. The model writes faster than one word per tick, so a
+    /// long reply used to keep "typing" for seconds after it had fully arrived. More words
+    /// go out per tick the further the reveal falls behind, and the tail flushes in a few
+    /// ticks once the whole reply is in. Batching (rather than shorter sleeps) keeps chat
+    /// re-renders at 25 a second.
+    private var wordsPerTick: Int {
+        if pendingFinalText != nil { return max(3, wordQueue.count / 4) }
+        if wordQueue.count > 12 { return 4 }
+        if wordQueue.count > 4 { return 2 }
+        return 1
     }
 
     private func appendToken(_ token: String) {
@@ -689,6 +837,7 @@ final class AskChatManager: ObservableObject {
         streamingMessageID = nil
         attachPendingToolRounds()
         persist()
+        turnDidEnd()
     }
 
     /// Stamps the tool exchange onto the assistant message that just landed.
@@ -707,11 +856,17 @@ final class AskChatManager: ObservableObject {
         isThinking = true
     }
 
+    /// Withdraws streamed text, including words still waiting to be revealed. Without the
+    /// queue reset, prose streamed before a card kept "typing" into a fresh bubble under the
+    /// card, which the next turn then continued in.
     private func removeStreamingMessage() {
         if let id = streamingMessageID {
             messages.removeAll { $0.id == id }
         }
         streamingMessageID = nil
+        wordQueue = []
+        rawPending = ""
+        pendingFinalText = nil
     }
 
     /// Milliseconds since the user's message went out, or 0 if no turn is in flight.
@@ -743,7 +898,6 @@ final class AskChatManager: ObservableObject {
                 return
             }
             settleStreamedText(cleaned)
-            persist()
             return
         case .table(let table):
             removeStreamingMessage()
@@ -797,6 +951,7 @@ final class AskChatManager: ObservableObject {
         streamingMessageID = nil
         attachPendingToolRounds()
         persist()
+        turnDidEnd()
     }
 
     /// Appends a proposal card and retires any older one still awaiting the
@@ -873,7 +1028,20 @@ final class AskChatManager: ObservableObject {
 
     /// Writes the transaction with whatever the user confirmed. Only called
     /// from the draft card's Confirm button — never by the model.
+    /// Records a draft card the user saved from the edit sheet instead of tapping +.
+    func confirmDraftFromEditSheet(messageID: UUID, transaction: Txn) {
+        guard !confirmedDrafts.contains(messageID) else { return }
+        UserManager.shared.addTransaction(transaction)
+        draftErrors[messageID] = nil
+        confirmedDrafts.insert(messageID)
+        trackCardResolved(messageID, confirmed: true, extra: ["via": "edit_sheet"])
+        messages.append(AskDisplayMessage(isUser: false, content: .systemNote("✅ Added \(AskFormat.currencyWithSymbol(abs(transaction.amount)))\(transaction.category.isEmpty ? "" : " to \(transaction.category)").")))
+        persist()
+    }
+
     func confirmDraft(messageID: UUID, amount: Double, currency: Currency, merchant: String?, date: Date, note: String?, categoryId: UUID?, categoryName: String) {
+        // A second tap before the card re-renders would otherwise write the transaction twice.
+        guard !confirmedDrafts.contains(messageID) else { return }
         guard amount > 0 else {
             draftErrors[messageID] = "Enter a valid amount."
             return
@@ -965,6 +1133,7 @@ final class AskChatManager: ObservableObject {
     /// Creates the suggested category (Confirm tap only). Custom categories
     /// are a paid (Plus/Pro) feature — free users get the paywall instead.
     func confirmCategoryDraft(messageID: UUID, draft: AskCategoryDraft) {
+        guard !confirmedDrafts.contains(messageID) else { return }
         guard RevenueCatManager.shared.planTier.allowsCustomCategories else {
             paywallMode = .default
             showLimitPaywall = true
@@ -1071,6 +1240,7 @@ final class AskChatManager: ObservableObject {
     // MARK: Budget cards
 
     func confirmBudgetDraft(messageID: UUID, draft: AskBudgetDraft) {
+        guard !confirmedDrafts.contains(messageID) else { return }
         guard let categoryId = UUID(uuidString: draft.category_id) else {
             draftErrors[messageID] = "That category no longer exists."
             return
@@ -1157,6 +1327,7 @@ final class AskChatManager: ObservableObject {
     // MARK: Recurring / subscription cards
 
     func confirmSubscriptionDraft(messageID: UUID, draft: AskSubscriptionDraft) {
+        guard !confirmedDrafts.contains(messageID) else { return }
         // Free accounts are capped at 2 recurring items — same gate the Add sheet uses.
         guard SubscriptionManager.shared.canAddMoreSubscriptions else {
             paywallMode = .default
@@ -1441,7 +1612,9 @@ struct AskPage: View {
 
     private var canSend: Bool {
         let hasText = !composeText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        return (hasText || !attachedPhotos.isEmpty) && processingPhotoCount == 0 && !chat.isThinking
+        // While a reply is coming, sending queues the message (up to the queue limit).
+        return (hasText || !attachedPhotos.isEmpty) && processingPhotoCount == 0
+            && (!chat.isTurnInFlight || chat.canQueueMore)
     }
 
     var body: some View {
@@ -1476,12 +1649,21 @@ struct AskPage: View {
                                 .transition(.opacity)
                         }
                         if chat.isThinking {
-                            AskThinkingDots()
+                            AskThinkingDots(status: chat.thinkingStatus)
                                 .transition(.opacity)
+                        }
+                        ForEach(chat.queuedMessages) { queued in
+                            AskQueuedMessageView(message: queued) {
+                                withAnimation(.easeOut(duration: 0.15)) {
+                                    chat.removeQueued(id: queued.id)
+                                }
+                            }
+                            .transition(.opacity)
                         }
 
                     }
                     .animation(.easeOut(duration: 0.18), value: chat.messages.count)
+                    .animation(.easeOut(duration: 0.18), value: chat.queuedMessages.count)
                     .animation(.easeOut(duration: 0.15), value: chat.isThinking)
                     .padding(.horizontal, 20)
                     .padding(.top, 20)
@@ -1493,7 +1675,7 @@ struct AskPage: View {
                         .id("bottomAnchor")
                 }
                 .defaultScrollAnchor(.bottom)
-                .onChange(of: chat.messages.count) { _, _ in
+                .onChange(of: chat.messages.count + chat.queuedMessages.count) { _, _ in
                     // Defer one runloop so the new message is laid out, then ease down.
                     DispatchQueue.main.async {
                         withAnimation(.easeInOut(duration: 0.35)) {
@@ -1711,7 +1893,7 @@ struct AskPage: View {
         // Clear first (avoids autocorrect re-inserting), then send.
         let text = composeText
         composeText = ""
-        if chat.send(text, imageIDs: attachedPhotos.map(\.id)) {
+        if chat.submit(text, imageIDs: attachedPhotos.map(\.id)) {
             attachedPhotos = []
         } else {
             composeText = text
@@ -1934,6 +2116,64 @@ private struct AskTypingPlaceholder: View {
 
 // MARK: - Message rendering
 
+/// The user's side of a turn: photos above, then the text bubble.
+private struct AskUserBubbleContent: View {
+    let text: String
+    let photoIDs: [String]
+
+    var body: some View {
+        VStack(alignment: .trailing, spacing: 8) {
+            if !photoIDs.isEmpty {
+                HStack(spacing: 8) {
+                    ForEach(photoIDs, id: \.self) { id in
+                        AskStoredPhotoView(photoID: id)
+                    }
+                }
+            }
+            if !text.isEmpty {
+                Text(text)
+                    .font(AppFonts.overusedGroteskMedium(size: 16))
+                    .foregroundColor(AppColors.foregroundPrimary)
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 14)
+                    .background(Color(red: 0.96, green: 0.96, blue: 0.97))
+                    .cornerRadius(12)
+            }
+        }
+    }
+}
+
+/// A message waiting for the current reply to finish: the user's bubble, dimmed, with an
+/// x to cancel it and a "Queued" label underneath.
+private struct AskQueuedMessageView: View {
+    let message: AskChatManager.QueuedMessage
+    let onRemove: () -> Void
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Spacer(minLength: 60)
+            VStack(alignment: .trailing, spacing: 6) {
+                AskUserBubbleContent(text: message.text, photoIDs: message.imageIDs)
+                    .opacity(0.5)
+                Text("Queued")
+                    .font(AppFonts.overusedGroteskMedium(size: 12))
+                    .foregroundColor(AppColors.foregroundSecondary)
+            }
+            Button(action: onRemove) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(AppColors.foregroundSecondary)
+                    // Widen the tap target without changing the visual size
+                    .padding(8)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(PlainButtonStyle())
+            .padding(.top, 6)
+            .accessibilityLabel("Remove queued message")
+        }
+    }
+}
+
 private struct AskMessageView: View {
     let message: AskDisplayMessage
 
@@ -1941,23 +2181,10 @@ private struct AskMessageView: View {
         if message.isUser {
             HStack {
                 Spacer(minLength: 60)
-                VStack(alignment: .trailing, spacing: 8) {
-                    if let photoIDs = message.imageIDs, !photoIDs.isEmpty {
-                        HStack(spacing: 8) {
-                            ForEach(photoIDs, id: \.self) { id in
-                                AskStoredPhotoView(photoID: id)
-                            }
-                        }
-                    }
-                    if case .text(let text) = message.content, !text.isEmpty {
-                        Text(text)
-                            .font(AppFonts.overusedGroteskMedium(size: 16))
-                            .foregroundColor(AppColors.foregroundPrimary)
-                            .padding(.horizontal, 20)
-                            .padding(.vertical, 14)
-                            .background(Color(red: 0.96, green: 0.96, blue: 0.97))
-                            .cornerRadius(12)
-                    }
+                if case .text(let text) = message.content {
+                    AskUserBubbleContent(text: text, photoIDs: message.imageIDs ?? [])
+                } else {
+                    AskUserBubbleContent(text: "", photoIDs: message.imageIDs ?? [])
                 }
             }
         } else {
@@ -2359,11 +2586,7 @@ private struct AskDraftCard: View {
                 prefillDate: date,
                 prefillCurrency: currency
             ) { newTxn in
-                UserManager.shared.addTransaction(newTxn)
-                chat.draftErrors[messageID] = nil
-                chat.confirmedDrafts.insert(messageID)
-                chat.trackCardResolved(messageID, confirmed: true, extra: ["via": "edit_sheet"])
-                chat.messages.append(AskDisplayMessage(isUser: false, content: .systemNote("✅ Added \(AskFormat.currencyWithSymbol(abs(newTxn.amount)))\(newTxn.category.isEmpty ? "" : " to \(newTxn.category)").")))
+                chat.confirmDraftFromEditSheet(messageID: messageID, transaction: newTxn)
             }
             .presentationDetents([.fraction(0.98)])
             .presentationDragIndicator(.hidden)
@@ -3610,19 +3833,31 @@ private struct AskStreamingWordsView: View {
 // MARK: - Thinking indicator (three pulsing dots)
 
 private struct AskThinkingDots: View {
+    /// What the turn is waiting on ("Checking your budgets…"); dots alone when nil.
+    var status: String? = nil
     @State private var activeDot = 0
     private let timer = Timer.publish(every: 0.3, on: .main, in: .common).autoconnect()
 
     var body: some View {
-        HStack(spacing: 5) {
-            ForEach(0..<3, id: \.self) { index in
-                Circle()
-                    .fill(AppColors.foregroundTertiary)
-                    .frame(width: 7, height: 7)
-                    .opacity(activeDot == index ? 1 : 0.3)
-                    .scaleEffect(activeDot == index ? 1.15 : 1)
+        HStack(spacing: 10) {
+            HStack(spacing: 5) {
+                ForEach(0..<3, id: \.self) { index in
+                    Circle()
+                        .fill(AppColors.foregroundTertiary)
+                        .frame(width: 7, height: 7)
+                        .opacity(activeDot == index ? 1 : 0.3)
+                        .scaleEffect(activeDot == index ? 1.15 : 1)
+                }
+            }
+            if let status {
+                Text(status)
+                    .font(AppFonts.overusedGroteskMedium(size: 14))
+                    .foregroundColor(AppColors.foregroundSecondary)
+                    .transition(.opacity)
+                    .id(status)
             }
         }
+        .animation(.easeOut(duration: 0.2), value: status)
         .padding(.vertical, 6)
         .onReceive(timer) { _ in
             withAnimation(.easeInOut(duration: 0.25)) {
