@@ -36,6 +36,7 @@ struct AskDisplayMessage: Identifiable, Codable {
         case categoryDraft(AskCategoryDraft)
         case categoryMerge(AskCategoryMerge)
         case categoryReorganize(AskCategoryReorganize)
+        case categoryDelete(AskCategoryDelete)
         case draftBatch(AskTransactionDraftBatch)
         case budgetDraft(AskBudgetDraft)
         case budgetUpdate(AskBudgetUpdate)
@@ -62,6 +63,7 @@ struct AskDisplayMessage: Identifiable, Codable {
             case .categoryDraft: return "category_draft"
             case .categoryMerge: return "category_merge"
             case .categoryReorganize: return "category_reorganize"
+            case .categoryDelete: return "category_delete"
             case .draftBatch: return "transaction_draft_batch"
             case .budgetDraft: return "budget_draft"
             case .budgetUpdate: return "budget_update"
@@ -76,7 +78,7 @@ struct AskDisplayMessage: Identifiable, Codable {
         /// older pending card (see AskChatManager.appendPending).
         var isPending: Bool {
             switch self {
-            case .draft, .draftBatch, .update, .deleteRequest, .categoryDraft, .categoryMerge, .categoryReorganize,
+            case .draft, .draftBatch, .update, .deleteRequest, .categoryDraft, .categoryMerge, .categoryReorganize, .categoryDelete,
                  .budgetDraft, .budgetUpdate, .budgetDelete,
                  .subscriptionDraft, .subscriptionUpdate, .subscriptionDelete:
                 return true
@@ -148,6 +150,8 @@ struct AskDisplayMessage: Identifiable, Codable {
         case .categoryMerge(let merge):
             let groups = merge.allGroups.map { "keep \($0.keep_id), merge \($0.merge_ids.joined(separator: ", "))" }
             return "(App is showing a PENDING category merge card, nothing merged yet: \(groups.joined(separator: "; ")). Revise it by emitting a fresh full category_merge.)"
+        case .categoryDelete(let delete):
+            return "(App is showing a PENDING category delete card, nothing deleted yet: \(delete.category_ids.joined(separator: ", ")). Revise it by emitting a fresh full category_delete.)"
         case .categoryReorganize(let reorganize):
             let steps = reorganize.changes.map { change -> String in
                 switch change.action {
@@ -697,6 +701,9 @@ final class AskChatManager: ObservableObject {
         case .categoryMerge(let merge):
             removeStreamingMessage()
             appendPending(.categoryMerge(merge))
+        case .categoryDelete(let delete):
+            removeStreamingMessage()
+            appendPending(.categoryDelete(delete))
         case .categoryReorganize(let reorganize):
             removeStreamingMessage()
             appendPending(.categoryReorganize(reorganize))
@@ -918,6 +925,30 @@ final class AskChatManager: ObservableObject {
         confirmedDrafts.insert(messageID)
         trackCardResolved(messageID, confirmed: false)
         messages.append(AskDisplayMessage(isUser: false, content: .text("Okay, no new category.")))
+        persist()
+    }
+
+    /// Deletes the chosen categories (Delete tap only).
+    func confirmCategoryDelete(messageID: UUID, delete: AskCategoryDelete) {
+        guard !confirmedDrafts.contains(messageID) else { return }
+        let ids = delete.category_ids.compactMap { UUID(uuidString: $0) }
+        guard let result = CategoriesManager.shared.deleteCategories(ids: ids) else {
+            draftErrors[messageID] = "Those categories can't be deleted. A category with subcategories needs those deleted first."
+            return
+        }
+        draftErrors[messageID] = nil
+        confirmedDrafts.insert(messageID)
+        trackCardResolved(messageID, confirmed: true)
+        let names = result.deletedNames.joined(separator: ", ")
+        var receipt = "✅ Deleted \(names)."
+        if result.movedTransactions > 0 {
+            let moved = result.movedTransactions == 1 ? "1 transaction" : "\(result.movedTransactions) transactions"
+            receipt += " Moved \(moved) to No Category."
+        }
+        if !result.skippedNames.isEmpty {
+            receipt += " Kept \(result.skippedNames.joined(separator: ", ")) because of its subcategories."
+        }
+        messages.append(AskDisplayMessage(isUser: false, content: .systemNote(receipt)))
         persist()
     }
 
@@ -1822,6 +1853,8 @@ private struct AskMessageView: View {
                 AskCategoryDraftCard(messageID: message.id, draft: draft)
             case .categoryMerge(let merge):
                 AskCategoryMergeCard(messageID: message.id, merge: merge)
+            case .categoryDelete(let delete):
+                AskCategoryDeleteCard(messageID: message.id, delete: delete)
             case .categoryReorganize(let reorganize):
                 AskCategoryReorganizeCard(messageID: message.id, reorganize: reorganize)
             case .draftBatch(let batch):
@@ -3287,6 +3320,76 @@ private struct AskCategoryDraftCard: View {
             }
             .background(AppColors.surfacePrimary)
             .cornerRadius(16)
+        }
+    }
+}
+
+// MARK: - Category delete card
+
+private struct AskCategoryDeleteCard: View {
+    let messageID: UUID
+    let delete: AskCategoryDelete
+
+    @ObservedObject private var chat = AskChatManager.shared
+    @ObservedObject private var categories = CategoriesManager.shared
+
+    private var isConfirmed: Bool { chat.confirmedDrafts.contains(messageID) }
+
+    private struct Target {
+        let id: UUID
+        let name: String
+        let emoji: String
+        let transactions: Int
+        let childIds: Set<UUID>
+    }
+
+    /// Resolved against live data, so names and counts are the app's, never the model's.
+    private var targets: [Target] {
+        let transactions = UserManager.shared.currentUser.transactions
+        return delete.category_ids.compactMap { id in
+            guard let uuid = UUID(uuidString: id),
+                  let found = categories.findCategoryOrSubcategoryById(uuid) else { return nil }
+            let count = transactions.filter { $0.categoryId == uuid }.count
+            if let category = found.category, !category.isDeleted, category.name != "No Category" {
+                let nested = categories.categories.filter { !$0.isDeleted && $0.parentCategoryId == uuid }.map(\.id)
+                let childIds = Set(category.subcategories.map(\.id) + nested)
+                return Target(id: uuid, name: category.name, emoji: category.emoji, transactions: count, childIds: childIds)
+            }
+            if let sub = found.subcategory {
+                return Target(id: uuid, name: sub.name, emoji: sub.emoji, transactions: count, childIds: [])
+            }
+            return nil
+        }
+    }
+
+    var body: some View {
+        let targets = self.targets
+        let ids = Set(targets.map(\.id))
+        let kept = targets.filter { !$0.childIds.isSubset(of: ids) }
+        let deleted = targets.filter { $0.childIds.isSubset(of: ids) }
+        if !isConfirmed, !targets.isEmpty {
+            let moving = deleted.reduce(0) { $0 + $1.transactions }
+            let movingText = moving == 1 ? "1 transaction moves" : "\(moving) transactions move"
+            let detail = [
+                moving > 0 ? "\(movingText) to No Category." : nil,
+                kept.isEmpty ? nil : "\(kept.map(\.name).joined(separator: ", ")) stays, it has subcategories."
+            ].compactMap { $0 }.joined(separator: "\n")
+            AskConfirmCardShell(
+                label: "DELETE CATEGORY",
+                title: deleted.isEmpty
+                    ? kept.map { "\($0.emoji) \($0.name)" }.joined(separator: ", ")
+                    : deleted.map { "\($0.emoji) \($0.name)" }.joined(separator: ", "),
+                detail: detail.isEmpty ? nil : detail,
+                error: chat.draftErrors[messageID],
+                prompt: deleted.count > 1 ? "Delete these \(deleted.count)?" : "Delete this category?",
+                actionTitle: "Delete",
+                actionColor: AppColors.destructiveForeground,
+                action: { chat.confirmCategoryDelete(messageID: messageID, delete: delete) }
+            )
+        } else if !isConfirmed {
+            Text("Those categories couldn't be found anymore.")
+                .font(AppFonts.overusedGroteskMedium(size: 14))
+                .foregroundColor(AppColors.foregroundSecondary)
         }
     }
 }

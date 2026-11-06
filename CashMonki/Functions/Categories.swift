@@ -2180,32 +2180,7 @@ class CategoriesManager: ObservableObject {
         }
         userManager.updateTransactions(refiled)
 
-        // Budgets: repoint, unless the target already has one in that wallet - then the
-        // duplicate's budget goes, since a wallet holds one budget per category.
-        var budgetsChanged = false
-        for budget in userManager.currentUser.budgets where mergedIds.contains(budget.categoryId) {
-            let targetHasBudget = userManager.currentUser.budgets.contains {
-                $0.id != budget.id && $0.categoryId == budgetTarget.id && $0.walletId == budget.walletId
-            }
-            if targetHasBudget {
-                userManager.deleteBudget(withId: budget.id)
-            } else {
-                userManager.updateBudget(Budget(
-                    id: budget.id,
-                    walletId: budget.walletId,
-                    categoryId: budgetTarget.id,
-                    categoryName: budgetTarget.name,
-                    amount: budget.amount,
-                    currency: budget.currency,
-                    period: budget.period,
-                    applyToAllPeriods: budget.applyToAllPeriods,
-                    isActive: budget.isActive,
-                    createdAt: budget.createdAt
-                ))
-            }
-            budgetsChanged = true
-        }
-        if budgetsChanged { userManager.backupSoon() }
+        repointBudgets(from: mergedIds, to: budgetTarget)
 
         // Recurring items generate future transactions, so they follow the kept copy too.
         for subscription in SubscriptionManager.shared.subscriptions {
@@ -2219,6 +2194,155 @@ class CategoriesManager: ObservableObject {
         print("✅ mergeCategories: merged \(mergedIds.count) copies into '\(keepName)', re-filed \(refiled.count) transactions")
         objectWillChange.send()
         return CategoryMergeResult(keptName: keepName, removedCount: mergedIds.count, movedTransactions: refiled.count)
+    }
+
+    /// Moves budgets off `ids` onto `target`, unless the target already has one in that
+    /// wallet - then the old budget goes, since a wallet holds one budget per category.
+    @MainActor
+    private func repointBudgets(from ids: Set<UUID>, to target: (id: UUID, name: String)) {
+        let userManager = UserManager.shared
+        var budgetsChanged = false
+        for budget in userManager.currentUser.budgets where ids.contains(budget.categoryId) {
+            let targetHasBudget = userManager.currentUser.budgets.contains {
+                $0.id != budget.id && $0.categoryId == target.id && $0.walletId == budget.walletId
+            }
+            if targetHasBudget {
+                userManager.deleteBudget(withId: budget.id)
+            } else {
+                userManager.updateBudget(Budget(
+                    id: budget.id,
+                    walletId: budget.walletId,
+                    categoryId: target.id,
+                    categoryName: target.name,
+                    amount: budget.amount,
+                    currency: budget.currency,
+                    period: budget.period,
+                    applyToAllPeriods: budget.applyToAllPeriods,
+                    isActive: budget.isActive,
+                    createdAt: budget.createdAt
+                ))
+            }
+            budgetsChanged = true
+        }
+        if budgetsChanged { userManager.backupSoon() }
+    }
+
+    // MARK: - Delete by id
+
+    struct CategoryDeleteResult {
+        let deletedNames: [String]
+        let skippedNames: [String]
+        let movedTransactions: Int
+    }
+
+    /// Deletes categories and subcategories, moving their transactions, budgets and recurring
+    /// items to No Category. Everything is matched by id: the name-based `deleteCategory`
+    /// would also empty a duplicate that shares the name. A category that still has
+    /// subcategories is skipped unless those are in `ids` too, matching the rule in the
+    /// category editor. Returns nil when nothing could be deleted.
+    @MainActor
+    func deleteCategories(ids: [UUID]) -> CategoryDeleteResult? {
+        let noCategoryIncome = UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
+        let noCategoryExpense = UUID(uuidString: "00000000-0000-0000-0000-000000000002")!
+        let requested = Set(ids).subtracting([noCategoryIncome, noCategoryExpense])
+
+        var removed: [UUID: CategoryType] = [:]
+        var removedNames: [String: CategoryType] = [:]
+        var deletedNames: [String] = []
+        var skippedNames: [String] = []
+
+        func record(id: UUID, name: String, emoji: String, type: CategoryType) {
+            removed[id] = type
+            removedNames[name.lowercased()] = type
+            deletedNames.append(name)
+            AnalyticsManager.shared.track(.categoryDeleted, properties: [
+                "name": name,
+                "emoji": emoji,
+                "type": type.rawValue
+            ])
+        }
+
+        // Nested entries first, so a parent deleted along with all its subcategories is
+        // already empty when its turn comes.
+        let isNested: (UUID) -> Bool = { id in
+            self.findSubcategoryById(id) != nil
+                || self.categories.contains { $0.id == id && !$0.isDeleted && $0.parentCategoryId != nil }
+        }
+        let ordered = requested.filter(isNested) + requested.filter { !isNested($0) }
+
+        for id in ordered {
+            if let index = categories.firstIndex(where: { $0.id == id && !$0.isDeleted }) {
+                let category = categories[index]
+                let hasChildren = !category.subcategories.isEmpty
+                    || categories.contains { !$0.isDeleted && $0.parentCategoryId == id }
+                guard !hasChildren else {
+                    skippedNames.append(category.name)
+                    continue
+                }
+                categories[index].isDeleted = true
+                categories[index].updatedAt = Date()
+                record(id: id, name: category.name, emoji: category.emoji, type: category.type)
+            } else if let embedded = findSubcategoryById(id),
+                      let parentIndex = categories.firstIndex(where: { $0.id == embedded.parent.id }) {
+                categories[parentIndex].subcategories.removeAll { $0.id == id }
+                categories[parentIndex].updatedAt = Date()
+                record(id: id, name: embedded.subcategory.name, emoji: embedded.subcategory.emoji, type: embedded.subcategory.type)
+            }
+        }
+
+        guard !removed.isEmpty else {
+            print("❌ deleteCategories: nothing deleted, skipped \(skippedNames)")
+            return nil
+        }
+
+        saveCategories()
+        clearCategoryGroupCache()
+
+        func noCategoryId(for type: CategoryType) -> UUID {
+            type == .income ? noCategoryIncome : noCategoryExpense
+        }
+
+        // A surviving copy keeps its name, so legacy rows with no id stay with that copy.
+        var liveNames = Set(categories.filter { !$0.isDeleted }.map { $0.name.lowercased() })
+        for category in categories where !category.isDeleted {
+            liveNames.formUnion(category.subcategories.map { $0.name.lowercased() })
+        }
+
+        // Transactions: by id, plus legacy rows with no id that only carry a deleted name.
+        let userManager = UserManager.shared
+        let refiled: [Txn] = userManager.getTransactions().compactMap { transaction in
+            let type: CategoryType?
+            if let categoryId = transaction.categoryId {
+                type = removed[categoryId]
+            } else {
+                let name = transaction.category.lowercased()
+                type = liveNames.contains(name) ? nil : removedNames[name]
+            }
+            guard let type else { return nil }
+            var moved = transaction
+            moved.category = "No Category"
+            moved.categoryId = noCategoryId(for: type)
+            return moved
+        }
+        userManager.updateTransactions(refiled)
+
+        for type in Set(removed.values) {
+            let ids = Set(removed.filter { $0.value == type }.keys)
+            repointBudgets(from: ids, to: (noCategoryId(for: type), "No Category"))
+        }
+
+        // Recurring items would otherwise keep generating transactions in a deleted category.
+        for subscription in SubscriptionManager.shared.subscriptions {
+            guard let categoryId = subscription.categoryId, let type = removed[categoryId] else { continue }
+            var moved = subscription
+            moved.categoryId = noCategoryId(for: type)
+            moved.category = "No Category"
+            SubscriptionManager.shared.updateSubscription(moved)
+        }
+
+        print("✅ deleteCategories: deleted \(deletedNames), re-filed \(refiled.count) transactions")
+        objectWillChange.send()
+        return CategoryDeleteResult(deletedNames: deletedNames, skippedNames: skippedNames, movedTransactions: refiled.count)
     }
 
     // MARK: - Reorganize
