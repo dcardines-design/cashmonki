@@ -25,6 +25,13 @@ enum AskStructuredMessage {
     case chart(AskChartMessage)
     case stat(AskStatMessage)
     case categoryDraft(AskCategoryDraft)
+    case categoryMerge(AskCategoryMerge)
+    case categoryReorganize(AskCategoryReorganize)
+    case categoryDelete(AskCategoryDelete)
+    case subscriptionBatch(AskSubscriptionBatch)
+    case csvExport(AskCsvExport)
+    case walletCreate(AskWalletCreate)
+    case walletSwitch(AskWalletSwitch)
     case budgetDraft(AskBudgetDraft)
     case budgetUpdate(AskBudgetUpdate)
     case budgetDelete(AskBudgetDelete)
@@ -46,6 +53,13 @@ enum AskStructuredMessage {
         case .chart: return "chart"
         case .stat: return "stat"
         case .categoryDraft: return "category_draft"
+        case .categoryMerge: return "category_merge"
+        case .categoryReorganize: return "category_reorganize"
+        case .categoryDelete: return "category_delete"
+        case .subscriptionBatch: return "subscription_batch"
+        case .csvExport: return "csv_export"
+        case .walletCreate: return "wallet_create"
+        case .walletSwitch: return "wallet_switch"
         case .budgetDraft: return "budget_draft"
         case .budgetUpdate: return "budget_update"
         case .budgetDelete: return "budget_delete"
@@ -61,7 +75,8 @@ enum AskStructuredMessage {
 /// Proposed recurring item ("Netflix 549 monthly"). Created ONLY after the user
 /// confirms — and free accounts are capped, so the paywall can appear instead.
 struct AskSubscriptionDraft: Codable {
-    let type: String
+    /// Absent on items inside a subscription_batch.
+    let type: String?
     let name: String
     let amount: Double
     let currency: String?
@@ -184,6 +199,98 @@ struct AskCategoryDraft: Codable {
     let parent: String?
     /// "expense" (default) or "income".
     let category_type: String?
+}
+
+/// Several recurring items proposed at once, from find_recurring_charges.
+/// Applied ONLY after the user confirms.
+struct AskSubscriptionBatch: Codable {
+    let type: String
+    let subscriptions: [AskSubscriptionDraft]
+}
+
+/// A CSV export of transactions. Dates are ISO "yyyy-MM-dd"; everything nil exports all.
+struct AskCsvExport: Codable {
+    let type: String
+    let title: String?
+    let from: String?
+    let to: String?
+    let category: String?
+    let merchant: String?
+}
+
+/// A new wallet. Applied ONLY after the user confirms.
+struct AskWalletCreate: Codable {
+    let type: String
+    let name: String
+    let currency: String?
+}
+
+/// Switches the selected wallet. Applied ONLY after the user confirms.
+struct AskWalletSwitch: Codable {
+    let type: String
+    let wallet_id: String
+}
+
+/// Proposed deletion of categories or subcategories. Ids come from get_categories.
+/// Applied ONLY after the user confirms.
+struct AskCategoryDelete: Codable {
+    let type: String
+    let category_ids: [String]
+}
+
+/// One set of duplicate categories: `merge_ids` fold into `keep_id`.
+struct AskCategoryMergeGroup: Codable {
+    let keep_id: String
+    let merge_ids: [String]
+}
+
+/// Proposed clean-up of duplicate categories. Ids come from get_duplicate_categories
+/// or get_categories. Applied ONLY after the user confirms. A single group may be sent
+/// flat (`keep_id` + `merge_ids`) instead of inside `groups`.
+struct AskCategoryMerge: Codable {
+    let type: String
+    let groups: [AskCategoryMergeGroup]?
+    let keep_id: String?
+    let merge_ids: [String]?
+
+    var allGroups: [AskCategoryMergeGroup] {
+        if let groups, !groups.isEmpty { return groups }
+        if let keep_id, let merge_ids { return [AskCategoryMergeGroup(keep_id: keep_id, merge_ids: merge_ids)] }
+        return []
+    }
+}
+
+/// One step of a reorganize card. `action` is "nest" (category_id goes under parent_id),
+/// "unnest" (category_id becomes top-level) or "refile" (from_id's transactions, optionally
+/// only those whose merchant contains `merchant`, move to to_id).
+struct AskCategoryChange: Codable {
+    let action: String
+    let category_id: String?
+    let parent_id: String?
+    let from_id: String?
+    let to_id: String?
+    let merchant: String?
+
+    var isValid: Bool {
+        func isID(_ value: String?) -> Bool { value.flatMap { UUID(uuidString: $0) } != nil }
+        switch action {
+        case "nest": return isID(category_id) && isID(parent_id) && category_id != parent_id
+        case "unnest": return isID(category_id)
+        case "refile":
+            // Without a source category it needs a merchant, or it would move everything.
+            guard isID(to_id) else { return false }
+            if from_id == nil { return !(merchant ?? "").trimmingCharacters(in: .whitespaces).isEmpty }
+            return isID(from_id) && from_id != to_id
+        default: return false
+        }
+    }
+}
+
+/// Proposed restructuring of the user's categories. Ids come from get_category_layout.
+/// Applied ONLY after the user confirms.
+struct AskCategoryReorganize: Codable {
+    let type: String
+    let changes: [AskCategoryChange]
 }
 
 // MARK: - Tool-call replay
@@ -533,6 +640,57 @@ enum AskMessageDecoder {
                   draft.name.count <= 40
             else { return malformed(trimmed) }
             return .categoryDraft(draft)
+
+        case "category_merge":
+            guard let merge = try? decoder.decode(AskCategoryMerge.self, from: data) else {
+                return malformed(trimmed)
+            }
+            let groups = merge.allGroups
+            guard (1...10).contains(groups.count),
+                  groups.allSatisfy({ group in
+                      UUID(uuidString: group.keep_id) != nil
+                          && (1...20).contains(group.merge_ids.count)
+                          && group.merge_ids.allSatisfy { UUID(uuidString: $0) != nil && $0 != group.keep_id }
+                  })
+            else { return malformed(trimmed) }
+            return .categoryMerge(merge)
+
+        case "subscription_batch":
+            guard let batch = try? decoder.decode(AskSubscriptionBatch.self, from: data),
+                  (1...10).contains(batch.subscriptions.count),
+                  batch.subscriptions.allSatisfy({ $0.amount > 0 && !$0.name.trimmingCharacters(in: .whitespaces).isEmpty })
+            else { return malformed(trimmed) }
+            return .subscriptionBatch(batch)
+
+        case "csv_export":
+            guard let export = try? decoder.decode(AskCsvExport.self, from: data) else { return malformed(trimmed) }
+            return .csvExport(export)
+
+        case "wallet_create":
+            guard let wallet = try? decoder.decode(AskWalletCreate.self, from: data),
+                  !wallet.name.trimmingCharacters(in: .whitespaces).isEmpty
+            else { return malformed(trimmed) }
+            return .walletCreate(wallet)
+
+        case "wallet_switch":
+            guard let wallet = try? decoder.decode(AskWalletSwitch.self, from: data),
+                  UUID(uuidString: wallet.wallet_id) != nil
+            else { return malformed(trimmed) }
+            return .walletSwitch(wallet)
+
+        case "category_delete":
+            guard let delete = try? decoder.decode(AskCategoryDelete.self, from: data),
+                  (1...20).contains(delete.category_ids.count),
+                  delete.category_ids.allSatisfy({ UUID(uuidString: $0) != nil })
+            else { return malformed(trimmed) }
+            return .categoryDelete(delete)
+
+        case "category_reorganize":
+            guard let reorganize = try? decoder.decode(AskCategoryReorganize.self, from: data),
+                  (1...10).contains(reorganize.changes.count),
+                  reorganize.changes.allSatisfy(\.isValid)
+            else { return malformed(trimmed) }
+            return .categoryReorganize(reorganize)
 
         case "stat":
             guard let stat = try? decoder.decode(AskStatMessage.self, from: data),

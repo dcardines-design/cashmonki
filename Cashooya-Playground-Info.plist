@@ -39,6 +39,10 @@
 	<false/>
 	<key>NSCameraUsageDescription</key>
 	<string>This app uses the camera to scan receipts and automatically extract transaction details for expense tracking.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Cashmonki uses the microphone so you can talk to Ask instead of typing.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Cashmonki turns what you say into text for your Ask message.</string>
 	<key>OpenRouterAPIKey</key>
 	<string></string>
 	<key>RevenueCatAPIKey</key>

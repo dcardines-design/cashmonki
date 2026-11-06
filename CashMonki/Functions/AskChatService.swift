@@ -95,6 +95,10 @@ final class AskChatService {
         onStatus: @escaping @Sendable (String) -> Void = { _ in }
     ) async throws -> Reply {
         var messages: [[String: Any]] = [["role": "system", "content": systemPrompt(categoriesJSON: categoriesJSON)]]
+        let userText = history.last { $0.isUser }?.text ?? ""
+        // A short reply to Ask's own offer ("Yes") counts too.
+        let offeredAllWallets = history.last { !$0.isUser }?.text.lowercased().contains("all wallets") ?? false
+        let allowAllWallets = mentionsWallets(userText) || (offeredAllWallets && userText.count <= 20)
 
         // Replay tool rounds only for the last few assistant turns (see maxReplayedTurns).
         let replayCutoff = history.enumerated()
@@ -144,7 +148,7 @@ final class AskChatService {
                 var roundResults: [AskToolResult] = []
                 for call in response.toolCalls {
                     turnCallIDs.append(call.id)
-                    let result = executeTool(name: call.name, argumentsJSON: call.arguments, callID: call.id, categoriesJSON: categoriesJSON)
+                    let result = executeTool(name: call.name, argumentsJSON: call.arguments, callID: call.id, categoriesJSON: categoriesJSON, allowAllWallets: allowAllWallets)
                     messages.append([
                         "role": "tool",
                         "tool_call_id": call.id,
@@ -180,8 +184,13 @@ final class AskChatService {
                 guard let rows = rowsForThisTurn(source: stat.source, turnCallIDs: turnCallIDs), !rows.isEmpty else {
                     return Reply(message: .text("I couldn't fetch the data for that stat. Try asking again."), toolRounds: toolRounds)
                 }
+                // get_cashflow rows hold exact figures, so a stat must be one of them.
+                let cashflow = rows.flatMap { row in ["income", "expenses", "net"].compactMap { row[$0].flatMap(Double.init) } }
+                if !cashflow.isEmpty, !cashflow.contains(where: { abs(abs($0) - abs(stat.value)) <= 1 }) {
+                    return Reply(message: .text("I couldn't verify that number against your data. Try asking again."), toolRounds: toolRounds)
+                }
                 let total = rows.compactMap { Double($0["amount"] ?? $0["value"] ?? "") }.reduce(0) { $0 + abs($1) }
-                if abs(stat.value) > total * 1.05 + 1 {
+                if cashflow.isEmpty, abs(stat.value) > total * 1.05 + 1 {
                     return Reply(message: .text("I couldn't verify that number against your data. Try asking again."), toolRounds: toolRounds)
                 }
                 // When the model is clearly reporting the row total, use the total the app
@@ -248,10 +257,12 @@ final class AskChatService {
     private static func statusText(forTools names: [String]) -> String {
         switch names.first {
         case "get_recent_transactions": return "Looking through your transactions…"
-        case "get_spending_by_category", "compare_spending": return "Adding up your spending…"
-        case "get_categories": return "Checking your categories…"
+        case "get_spending_by_category", "compare_spending", "get_cashflow": return "Adding up your spending…"
+        case "get_categories", "get_all_categories", "get_category_layout", "get_duplicate_categories": return "Checking your categories…"
         case "get_budgets": return "Checking your budgets…"
         case "get_subscriptions": return "Checking your subscriptions…"
+        case "find_recurring_charges": return "Looking for repeat charges…"
+        case "get_wallets": return "Checking your wallets…"
         case "convert_currency": return "Converting currency…"
         default: return "Working on it…"
         }
@@ -427,22 +438,46 @@ final class AskChatService {
                     "category": ["type": "string", "description": "Only transactions whose category contains this text"],
                     "merchant": ["type": "string", "description": "Only transactions whose merchant contains this text"],
                     "from": ["type": "string", "description": "Only on/after this date, yyyy-MM-dd"],
-                    "to": ["type": "string", "description": "Only on/before this date, yyyy-MM-dd"]
+                    "to": ["type": "string", "description": "Only on/before this date, yyyy-MM-dd"],
+                    "all_wallets": ["type": "boolean", "description": "Count every wallet. Default false = the wallet in view, matching the Transactions page"],
+                    "wallet": ["type": "string", "description": "Name of one wallet to use instead of the wallet in view, from get_wallets"]
                  ]),
             tool("get_spending_by_category",
                  "Fetch the user's spending totals grouped by category (real data, full history available). Use before showing a spending table or chart.",
                  [
                     "period": ["type": "string", "enum": ["week", "month", "quarter", "year", "all"], "description": "Calendar period to date (month = since the 1st of this month), default month. For rolling windows like 'last 30 days' use from/to instead"],
                     "from": ["type": "string", "description": "Custom range start, yyyy-MM-dd (overrides period)"],
-                    "to": ["type": "string", "description": "Custom range end, yyyy-MM-dd"]
+                    "to": ["type": "string", "description": "Custom range end, yyyy-MM-dd"],
+                    "all_wallets": ["type": "boolean", "description": "Count every wallet. Default false = the wallet in view, matching the Transactions page"],
+                    "wallet": ["type": "string", "description": "Name of one wallet to use instead of the wallet in view, from get_wallets"]
+                 ]),
+            tool("get_cashflow",
+                 "Income, expenses and net for a period, totalled by the app (real data, same figures as the Transactions page). Use for ANY question about income, net, take-home, surplus or a total. Never add rows yourself.",
+                 [
+                    "period": ["type": "string", "enum": ["week", "month", "quarter", "year", "all"], "description": "Calendar period to date, default month. For a past month use from/to"],
+                    "from": ["type": "string", "description": "Custom range start, yyyy-MM-dd (overrides period)"],
+                    "to": ["type": "string", "description": "Custom range end, yyyy-MM-dd"],
+                    "all_wallets": ["type": "boolean", "description": "Count every wallet. Default false = the wallet in view, matching the Transactions page"],
+                    "wallet": ["type": "string", "description": "Name of one wallet to use instead of the wallet in view, from get_wallets"]
                  ]),
             // No get_categories tool: the list is in the system prompt, and offering the tool
             // let the model spend a whole round trip fetching it anyway. executeTool still
             // answers it, so replayed history that called it stays valid.
+            tool("get_all_categories",
+                 "Fetch every category AND subcategory (id, name, type, parent, transactions = how many are filed under it). Only for managing categories: deleting, merging or moving transactions. The CATEGORIES list in the prompt is enough for drafts.",
+                 [:]),
+            tool("get_category_layout",
+                 "Fetch how the user's categories are organized: every category and subcategory with id, name, emoji, type, parent_id/parent, transaction count, has_budget, and top_merchants (the merchants filed under it most, with counts). Use before proposing a category_reorganize.",
+                 [:]),
+            tool("get_duplicate_categories",
+                 "Find groups of duplicate categories (same name ignoring case, spacing, punctuation, emoji and a trailing s, same type, same parent). Each group lists every copy with its id, name, parent and transaction count, plus suggested_keep_id = the copy with the most transactions. Call before proposing a category_merge.",
+                 [:]),
             tool("compare_spending",
                  "Sum the user's spending for each named period (real data), optionally filtered to one category. Use for any comparison across time (this month vs last month, monthly trend). Returns one row per period; chart or stat the result.",
                  [
                     "category": ["type": "string", "description": "Only transactions whose category contains this text (optional)"],
+                    "all_wallets": ["type": "boolean", "description": "Count every wallet. Default false = the wallet in view, matching the Transactions page"],
+                    "wallet": ["type": "string", "description": "Name of one wallet to use instead of the wallet in view, from get_wallets"],
                     "periods": [
                         "type": "array",
                         "description": "2-12 periods to compare",
@@ -463,6 +498,12 @@ final class AskChatService {
                  [:]),
             tool("get_subscriptions",
                  "Fetch the user's recurring items / subscriptions (id, name, amount, currency, category, frequency, next due date, active, auto_add). Paused ones are included with active=false. Real data — use before answering any recurring/subscription question, and before proposing an edit or deletion (its \"id\" is the only valid target).",
+                 [:]),
+            tool("find_recurring_charges",
+                 "Scan the user's transactions for repeat charges that are NOT tracked as recurring items yet: same merchant, similar amount, regular gaps, still active. Returns merchant, amount, currency, frequency, charges, last_charge, category_id, category. Call before proposing a subscription_batch.",
+                 [:]),
+            tool("get_wallets",
+                 "Fetch the user's wallets (id, name, currency, selected, default, transactions). Call before proposing a wallet_switch or wallet_create.",
                  [:]),
             tool("convert_currency",
                  "Convert an amount between currencies using the app's live rates. Use for any currency question — never estimate rates yourself.",
@@ -512,8 +553,35 @@ final class AskChatService {
         lastRows = []
     }
 
-    private func executeTool(name: String, argumentsJSON: String, callID: String, categoriesJSON: String) -> String {
+    /// Whether the user's own words reach past the wallet in view. The model can't decide this
+    /// itself: left to choose, it reached for all wallets and its totals stopped matching the
+    /// Transactions page.
+    private func mentionsWallets(_ text: String) -> Bool {
+        let lowered = text.lowercased()
+        return lowered.contains("wallet") || lowered.contains("all accounts") || lowered.contains("every account")
+            || UserManager.shared.currentUser.subAccounts.contains { lowered.contains($0.name.lowercased()) }
+    }
+
+    private func executeTool(name: String, argumentsJSON: String, callID: String, categoriesJSON: String, allowAllWallets: Bool) -> String {
         let args = (try? JSONSerialization.jsonObject(with: Data(argumentsJSON.utf8)) as? [String: Any]) ?? [:]
+        let namedWallet = (args["wallet"] as? String)?.trimmingCharacters(in: .whitespaces).lowercased()
+        let wantsOtherWallets = ((args["all_wallets"] as? Bool) ?? false) || !(namedWallet ?? "").isEmpty
+        var scope = WalletScope.inView
+        if wantsOtherWallets && allowAllWallets {
+            let wallets = UserManager.shared.currentUser.subAccounts
+            if let namedWallet, !namedWallet.isEmpty {
+                // An unknown name stays on the wallet in view rather than widening to all.
+                if let match = wallets.first(where: { $0.name.lowercased() == namedWallet })
+                    ?? wallets.first(where: { $0.name.lowercased().contains(namedWallet) }) {
+                    scope = .named(match)
+                }
+            } else {
+                scope = .all
+            }
+        }
+        let scopeNote = wantsOtherWallets && !allowAllWallets
+            ? "These rows cover only \(AccountManager.shared.currentSubAccount?.name ?? "the wallet in view"). all_wallets and wallet were ignored because the user didn't mention wallets.\n"
+            : ""
         print("🛠️ AskChat: tool \(name) \(args)")
 
         switch name {
@@ -524,26 +592,48 @@ final class AskChatService {
                 category: args["category"] as? String,
                 merchant: args["merchant"] as? String,
                 from: args["from"] as? String,
-                to: args["to"] as? String
+                to: args["to"] as? String,
+                scope: scope
             )
             cache(rows: rows, callID: callID, tool: name, argumentsJSON: argumentsJSON)
-            return encodeRows(rows)
+            return scopeNote + encodeRows(rows)
+
+        case "get_cashflow":
+            let rows = cashflowRows(
+                period: (args["period"] as? String) ?? "month",
+                from: args["from"] as? String,
+                to: args["to"] as? String,
+                scope: scope
+            )
+            cache(rows: rows, callID: callID, tool: name, argumentsJSON: argumentsJSON)
+            return scopeNote + encodeRows(rows)
 
         case "get_spending_by_category":
             let period = (args["period"] as? String) ?? "month"
-            let rows = spendingByCategoryRows(period: period, from: args["from"] as? String, to: args["to"] as? String)
+            let rows = spendingByCategoryRows(
+                period: period,
+                from: args["from"] as? String,
+                to: args["to"] as? String,
+                scope: scope
+            )
             cache(rows: rows, callID: callID, tool: name, argumentsJSON: argumentsJSON)
-            return encodeRows(rows)
+            return scopeNote + encodeRows(rows)
 
         case "get_categories":
             return categoriesJSON
 
+        case "get_duplicate_categories":
+            return encodeDuplicateCategories()
+
+        case "get_category_layout":
+            return encodeCategoryLayout()
+
         case "compare_spending":
             let category = args["category"] as? String
             let periods = (args["periods"] as? [[String: Any]]) ?? []
-            let rows = comparisonRows(periods: periods, category: category)
+            let rows = comparisonRows(periods: periods, category: category, scope: scope)
             cache(rows: rows, callID: callID, tool: name, argumentsJSON: argumentsJSON)
-            return encodeRows(rows)
+            return scopeNote + encodeRows(rows)
 
         case "get_budgets":
             let rows = budgetRows()
@@ -552,6 +642,16 @@ final class AskChatService {
 
         case "get_subscriptions":
             let rows = subscriptionRows()
+            cache(rows: rows, callID: callID, tool: name, argumentsJSON: argumentsJSON)
+            return encodeRows(rows)
+
+        case "find_recurring_charges":
+            let rows = recurringChargeRows()
+            cache(rows: rows, callID: callID, tool: name, argumentsJSON: argumentsJSON)
+            return encodeRows(rows)
+
+        case "get_wallets":
+            let rows = walletRows()
             cache(rows: rows, callID: callID, tool: name, argumentsJSON: argumentsJSON)
             return encodeRows(rows)
 
@@ -576,7 +676,7 @@ final class AskChatService {
         return string
     }
 
-    private func recentTransactionRows(limit: Int, category: String? = nil, merchant: String? = nil, from: String? = nil, to: String? = nil) -> [[String: String]] {
+    private func recentTransactionRows(limit: Int, category: String? = nil, merchant: String? = nil, from: String? = nil, to: String? = nil, scope: WalletScope = .inView) -> [[String: String]] {
         let formatter = DateFormatter()
         formatter.dateFormat = "MMM d"
         let dayParser = DateFormatter()
@@ -585,7 +685,7 @@ final class AskChatService {
         // "to" is inclusive: push to the end of that day.
         let toDate = to.flatMap { dayParser.date(from: $0) }.map { $0.addingTimeInterval(86_399) }
 
-        return UserManager.shared.currentUser.transactions
+        return scopedTransactions(scope)
             .filter { txn in
                 if let category, !txn.category.localizedCaseInsensitiveContains(category) { return false }
                 if let merchant, !(txn.merchantName ?? "").localizedCaseInsensitiveContains(merchant) { return false }
@@ -601,12 +701,36 @@ final class AskChatService {
                     "date": formatter.string(from: txn.date),
                     "merchant": txn.merchantName ?? txn.category,
                     "category": txn.category,
-                    "amount": String(format: "%.2f", txn.amount)
+                    "amount": String(format: "%.2f", primaryAmount(txn))
                 ]
             }
     }
 
-    private func spendingByCategoryRows(period: String, from: String? = nil, to: String? = nil) -> [[String: String]] {
+    private enum WalletScope {
+        case inView
+        case all
+        case named(SubAccount)
+    }
+
+    /// The transactions the Transactions page counts: the wallet in view, unless the user
+    /// asked for every wallet. Totals from these match what the user sees on that page.
+    private func scopedTransactions(_ scope: WalletScope) -> [Txn] {
+        switch scope {
+        case .inView: return AccountManager.shared.filteredTransactions
+        case .all: return UserManager.shared.currentUser.transactions
+        case .named(let wallet): return UserManager.shared.currentUser.transactions(for: wallet.id)
+        }
+    }
+
+    /// A transaction's signed amount in the primary currency, converted like the Transactions page.
+    private func primaryAmount(_ txn: Txn) -> Double {
+        let primary = CurrencyPreferences.shared.primaryCurrency
+        return txn.primaryCurrency == primary
+            ? txn.amount
+            : CurrencyRateManager.shared.convertAmount(txn.amount, from: txn.primaryCurrency, to: primary)
+    }
+
+    private func dateRange(period: String, from: String?, to: String?) -> (from: Date, to: Date) {
         let calendar = Calendar.current
         let dayParser = DateFormatter()
         dayParser.dateFormat = "yyyy-MM-dd"
@@ -624,18 +748,40 @@ final class AskChatService {
         }
         let fromDate = from.flatMap { dayParser.date(from: $0) } ?? cutoff
         let toDate = to.flatMap { dayParser.date(from: $0) }.map { $0.addingTimeInterval(86_399) } ?? .distantFuture
+        return (fromDate, toDate)
+    }
 
-        let expenses = UserManager.shared.currentUser.transactions
-            .filter { $0.date >= fromDate && $0.date <= toDate && $0.amount < 0 }
-        var grouped = Dictionary(grouping: expenses, by: { $0.category })
-            .mapValues { txns in (amount: txns.reduce(0) { $0 + abs($1.amount) }, count: txns.count) }
-        // Fold in tracked subscriptions not already materialized as transactions.
-        for occ in subscriptionOccurrences(from: fromDate, to: toDate, category: nil) {
-            var entry = grouped[occ.category] ?? (amount: 0, count: 0)
-            entry.amount += abs(occ.amount)
-            entry.count += 1
-            grouped[occ.category] = entry
+    private func walletLabel(_ scope: WalletScope) -> String {
+        switch scope {
+        case .inView: return AccountManager.shared.currentSubAccount?.name ?? "Current wallet"
+        case .all: return "All wallets"
+        case .named(let wallet): return wallet.name
         }
+    }
+
+    /// Income, expenses and net, totalled here so the model never adds rows itself.
+    private func cashflowRows(period: String, from: String?, to: String?, scope: WalletScope) -> [[String: String]] {
+        let range = dateRange(period: period, from: from, to: to)
+        let amounts = scopedTransactions(scope)
+            .filter { $0.date >= range.from && $0.date <= range.to }
+            .map(primaryAmount)
+        let income = amounts.filter { $0 > 0 }.reduce(0, +)
+        let expenses = abs(amounts.filter { $0 < 0 }.reduce(0, +))
+        return [[
+            "wallet": walletLabel(scope),
+            "income": String(format: "%.2f", income),
+            "expenses": String(format: "%.2f", expenses),
+            "net": String(format: "%.2f", income - expenses),
+            "transactions": String(amounts.count)
+        ]]
+    }
+
+    private func spendingByCategoryRows(period: String, from: String? = nil, to: String? = nil, scope: WalletScope = .inView) -> [[String: String]] {
+        let range = dateRange(period: period, from: from, to: to)
+        let expenses = scopedTransactions(scope)
+            .filter { $0.date >= range.from && $0.date <= range.to && $0.amount < 0 }
+        let grouped = Dictionary(grouping: expenses, by: { $0.category })
+            .mapValues { txns in (amount: txns.reduce(0) { $0 + abs(primaryAmount($1)) }, count: txns.count) }
         return grouped
             .map { (category, agg) in (category, agg.amount, agg.count) }
             .sorted { $0.1 > $1.1 }
@@ -645,69 +791,10 @@ final class AskChatService {
             .map { ["category": $0.0, "amount": String(format: "%.2f", $0.1), "count": "\($0.2)"] }
     }
 
-    /// Virtual expense occurrences from tracked subscriptions that aren't already real transactions.
-    /// Subscriptions live in SubscriptionManager, not in currentUser.transactions — only auto-add
-    /// subs (once due) get materialized. This projects the rest (and any due-but-not-yet-generated
-    /// dates) so AI spending sums include recurring subscription costs. Days already covered by a
-    /// real subscription-linked txn are skipped (no double count). Occurrences after now are excluded
-    /// to match materialized-transaction behavior.
-    private func subscriptionOccurrences(from: Date, to: Date, category: String?) -> [(date: Date, category: String, amount: Double)] {
-        let now = Date()
-        let upperBound = min(to, now)
-        guard from <= upperBound else { return [] }
-
-        let calendar = Calendar.current
-        let realTxns = UserManager.shared.currentUser.transactions
-        let primaryCurrency = CurrencyPreferences.shared.primaryCurrency
-        var result: [(date: Date, category: String, amount: Double)] = []
-
-        for sub in SubscriptionManager.persistedSubscriptions() {
-            guard sub.isActive else { continue }
-            if let category, !sub.category.localizedCaseInsensitiveContains(category) { continue }
-            // Spending tools only sum expenses — skip income subscriptions.
-            if subscriptionIsIncome(sub) { continue }
-
-            // Days already materialized as real txns for this subscription.
-            let coveredDays = Set(realTxns
-                .filter { $0.subscriptionId == sub.id }
-                .map { calendar.startOfDay(for: $0.date) })
-
-            // Spending sums are in the primary currency; a 15 USD subscription used to add 15
-            // to a PHP total.
-            let amount = sub.currency == primaryCurrency
-                ? abs(sub.amount)
-                : abs(CurrencyRateManager.shared.convertAmount(sub.amount, from: sub.currency, to: primaryCurrency))
-
-            var occurrence = sub.createdAt
-            var steps = 0
-            while occurrence <= upperBound && steps < 2000 {
-                steps += 1
-                if occurrence >= from, !coveredDays.contains(calendar.startOfDay(for: occurrence)) {
-                    result.append((date: occurrence, category: sub.category, amount: -amount))
-                }
-                occurrence = sub.frequency.nextOccurrence(from: occurrence)
-            }
-        }
-        return result
-    }
-
-    /// Mirror of SubscriptionManager's income detection (that method is private there).
-    private func subscriptionIsIncome(_ sub: Subscription) -> Bool {
-        let cm = CategoriesManager.shared
-        if let catId = sub.categoryId, let r = cm.findCategoryOrSubcategoryById(catId) {
-            if let c = r.category { return c.type == .income }
-            if let s = r.subcategory { return s.type == .income }
-        }
-        let r = cm.findCategoryOrSubcategory(by: sub.category)
-        if let c = r.category { return c.type == .income }
-        if let s = r.subcategory { return s.type == .income }
-        return false
-    }
-
-    private func comparisonRows(periods: [[String: Any]], category: String?) -> [[String: String]] {
+    private func comparisonRows(periods: [[String: Any]], category: String?, scope: WalletScope = .inView) -> [[String: String]] {
         let parser = DateFormatter()
         parser.dateFormat = "yyyy-MM-dd"
-        let transactions = UserManager.shared.currentUser.transactions
+        let transactions = scopedTransactions(scope)
         return periods.prefix(12).compactMap { period in
             guard let label = period["label"] as? String,
                   let fromString = period["from"] as? String, let from = parser.date(from: fromString),
@@ -718,9 +805,8 @@ final class AskChatService {
                 if let category, !txn.category.localizedCaseInsensitiveContains(category) { return false }
                 return true
             }
-            let subs = subscriptionOccurrences(from: from, to: to, category: category)
-            let total = matching.reduce(0) { $0 + abs($1.amount) } + subs.reduce(0) { $0 + abs($1.amount) }
-            return ["label": label, "amount": String(format: "%.2f", total), "count": "\(matching.count + subs.count)"]
+            let total = matching.reduce(0) { $0 + abs(primaryAmount($1)) }
+            return ["label": label, "amount": String(format: "%.2f", total), "count": "\(matching.count)"]
         }
     }
 
@@ -747,14 +833,96 @@ final class AskChatService {
             }
     }
 
+    /// Repeat charges not tracked yet. A merchant counts when most gaps between its charges
+    /// fit one frequency, most amounts sit within 15% of the median, and the last charge is
+    /// recent enough that it still looks active. Auto-generated transactions are skipped:
+    /// those already belong to a recurring item.
+    private func recurringChargeRows() -> [[String: String]] {
+        let now = Date()
+        let calendar = Calendar.current
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        let tracked = SubscriptionManager.persistedSubscriptions().map { $0.name.lowercased() }
+
+        func median(_ values: [Double]) -> Double {
+            let sorted = values.sorted()
+            return sorted[sorted.count / 2]
+        }
+
+        // The wallet in view only: a tracked item is created in that wallet.
+        let charges = scopedTransactions(.inView).filter {
+            $0.amount < 0 && $0.subscriptionId == nil && !$0.isRecurring
+                && !($0.merchantName ?? "").trimmingCharacters(in: .whitespaces).isEmpty
+        }
+        let groups = Dictionary(grouping: charges) { ($0.merchantName ?? "").trimmingCharacters(in: .whitespaces).lowercased() }
+
+        let frequencies: [(frequency: RecurringFrequency, days: ClosedRange<Double>, minimumCharges: Int)] = [
+            (.weekly, 6...8, 4),
+            (.monthly, 26...35, 3),
+            (.quarterly, 84...98, 3),
+            (.yearly, 350...380, 2)
+        ]
+
+        var found: [(charges: Int, row: [String: String])] = []
+        for (merchant, group) in groups where group.count >= 2 {
+            guard !tracked.contains(where: { $0.contains(merchant) || merchant.contains($0) }) else { continue }
+            let sorted = group.sorted { $0.date < $1.date }
+            let gaps = zip(sorted, sorted.dropFirst()).map { $1.date.timeIntervalSince($0.date) / 86_400 }
+            let typicalGap = median(gaps)
+            guard let match = frequencies.first(where: { $0.days.contains(typicalGap) }),
+                  sorted.count >= match.minimumCharges,
+                  Double(gaps.filter(match.days.contains).count) / Double(gaps.count) >= 0.75,
+                  now.timeIntervalSince(sorted[sorted.count - 1].date) / 86_400 <= typicalGap * 1.5
+            else { continue }
+
+            let amounts = sorted.map { abs($0.originalAmount ?? $0.amount) }
+            let typicalAmount = median(amounts)
+            let steady = amounts.filter { abs($0 - typicalAmount) <= typicalAmount * 0.15 }.count
+            guard Double(steady) / Double(amounts.count) >= 0.75 else { continue }
+
+            let last = sorted[sorted.count - 1]
+            found.append((sorted.count, [
+                "merchant": last.merchantName ?? merchant,
+                "amount": String(format: "%.2f", abs(last.originalAmount ?? last.amount)),
+                "currency": (last.originalCurrency ?? last.primaryCurrency).rawValue,
+                "frequency": match.frequency.rawValue,
+                "charges": String(sorted.count),
+                "last_charge": formatter.string(from: calendar.startOfDay(for: last.date)),
+                "category_id": last.categoryId?.uuidString ?? "",
+                "category": last.category
+            ]))
+        }
+        return found.sorted { $0.charges > $1.charges }.prefix(10).map(\.row)
+    }
+
+    private func walletRows() -> [[String: String]] {
+        let user = UserManager.shared.currentUser
+        let selected = AccountManager.shared.selectedSubAccountId
+        return user.subAccounts.map { wallet in
+            [
+                "id": wallet.id.uuidString,
+                "name": wallet.name,
+                "currency": wallet.currency.rawValue,
+                "selected": wallet.id == selected ? "true" : "false",
+                "default": wallet.isDefault ? "true" : "false",
+                "transactions": String(user.transactions.filter { $0.accountId == wallet.id }.count)
+            ]
+        }
+    }
+
     private func subscriptionRows() -> [[String: String]] {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd"
+        let wallets = Dictionary(
+            UserManager.shared.currentUser.subAccounts.map { ($0.id, $0.name) },
+            uniquingKeysWith: { first, _ in first }
+        )
         return SubscriptionManager.persistedSubscriptions()
             .sorted { $0.nextDueDate < $1.nextDueDate }
             .map { sub in
                 [
                     "id": sub.id.uuidString,
+                    "wallet": sub.walletId.flatMap { wallets[$0] } ?? "",
                     "name": sub.name,
                     "amount": String(format: "%.2f", sub.amount),
                     "currency": sub.currency.rawValue,
@@ -776,6 +944,108 @@ final class AskChatService {
             .map { ["id": $0.id.uuidString, "name": $0.name, "type": $0.type.rawValue] }
         guard let data = try? JSONSerialization.data(withJSONObject: ["categories": categories]),
               let string = String(data: data, encoding: .utf8) else { return "{\"categories\": []}" }
+        return string
+    }
+
+    private func encodeCategories() -> String {
+        let categories = categoryEntries().map { entry -> [String: Any] in
+            var row: [String: Any] = ["id": entry.id.uuidString, "name": entry.name, "type": entry.type.rawValue, "transactions": entry.transactions]
+            if let parent = entry.parent { row["parent"] = parent }
+            return row
+        }
+        guard let data = try? JSONSerialization.data(withJSONObject: ["categories": categories]),
+              let string = String(data: data, encoding: .utf8) else { return "{\"categories\": []}" }
+        return string
+    }
+
+    /// Every live category and subcategory with how many transactions are filed under it.
+    /// "No Category" is left out: it is a fallback bucket, never a merge target.
+    private func categoryEntries() -> [(id: UUID, name: String, emoji: String, type: CategoryType, parent: String?, transactions: Int)] {
+        var counts: [UUID: Int] = [:]
+        for txn in UserManager.shared.currentUser.transactions {
+            if let id = txn.categoryId { counts[id, default: 0] += 1 }
+        }
+        let manager = CategoriesManager.shared
+        let live = manager.categories.filter { !$0.isDeleted && $0.name != "No Category" }
+        var entries: [(id: UUID, name: String, emoji: String, type: CategoryType, parent: String?, transactions: Int)] = []
+        for category in live {
+            let parent = category.parentCategoryId.flatMap { manager.findCategory(by: $0)?.name }
+            entries.append((category.id, category.name, category.emoji, category.type, parent, counts[category.id] ?? 0))
+            for sub in category.subcategories {
+                entries.append((sub.id, sub.name, sub.emoji, sub.type, category.name, counts[sub.id] ?? 0))
+            }
+        }
+        return entries
+    }
+
+    /// Categories plus what is actually filed under each, so a reorganize proposal can be
+    /// grounded in real merchants instead of names alone. Every top-level category is listed;
+    /// subcategories only under parents that are in use (the parent or a sibling has
+    /// transactions), so the model sees where activity could be split without ~150 empty rows.
+    private func encodeCategoryLayout() -> String {
+        let transactions = UserManager.shared.currentUser.transactions
+        var merchants: [UUID: [String: Int]] = [:]
+        for txn in transactions {
+            guard let id = txn.categoryId, let merchant = txn.merchantName?.trimmingCharacters(in: .whitespaces), !merchant.isEmpty else { continue }
+            merchants[id, default: [:]][merchant, default: 0] += 1
+        }
+        let budgeted = Set(UserManager.shared.currentUser.budgets.map(\.categoryId))
+        let manager = CategoriesManager.shared
+        let entries = categoryEntries()
+        var activeParents: Set<String> = []
+        for entry in entries where entry.transactions > 0 {
+            activeParents.insert(entry.parent ?? entry.name)
+        }
+        let rows = entries
+            .filter { entry in entry.parent.map(activeParents.contains) ?? true }
+            .map { entry -> [String: Any] in
+                var row: [String: Any] = [
+                    "id": entry.id.uuidString, "name": entry.name, "emoji": entry.emoji,
+                    "type": entry.type.rawValue, "transactions": entry.transactions,
+                    "has_budget": budgeted.contains(entry.id)
+                ]
+                if let parent = entry.parent {
+                    row["parent"] = parent
+                    if let parentID = manager.findCategoryOrSubcategoryById(entry.id)?.parent?.id
+                        ?? manager.findCategory(by: entry.id)?.parentCategoryId {
+                        row["parent_id"] = parentID.uuidString
+                    }
+                }
+                let top = (merchants[entry.id] ?? [:]).sorted { $0.value > $1.value }.prefix(5)
+                if !top.isEmpty { row["top_merchants"] = top.map { "\($0.key) (\($0.value))" } }
+                return row
+            }
+        guard let data = try? JSONSerialization.data(withJSONObject: ["categories": rows]),
+              let string = String(data: data, encoding: .utf8) else { return "{\"categories\": []}" }
+        return string
+    }
+
+    /// Groups copies whose names only differ by case, spacing, punctuation, emoji or a
+    /// trailing "s", within the same parent: "Supplies" under Hobbies and a top-level
+    /// "Supplies" are different things. Done here rather than by the model so the groups
+    /// and counts are exact.
+    private func encodeDuplicateCategories() -> String {
+        func normalized(_ name: String) -> String {
+            var key = String(name.lowercased().unicodeScalars.filter { CharacterSet.alphanumerics.contains($0) })
+            if key.count > 3, key.hasSuffix("s") { key.removeLast() }
+            return key
+        }
+        let grouped = Dictionary(grouping: categoryEntries()) { "\($0.type.rawValue):\($0.parent ?? ""):\(normalized($0.name))" }
+        let groups = grouped.values
+            .filter { $0.count > 1 && !normalized($0[0].name).isEmpty }
+            .map { copies -> [String: Any] in
+                let ranked = copies.sorted { $0.transactions > $1.transactions }
+                return [
+                    "suggested_keep_id": ranked[0].id.uuidString,
+                    "copies": ranked.map { copy -> [String: Any] in
+                        var row: [String: Any] = ["id": copy.id.uuidString, "name": copy.name, "emoji": copy.emoji, "type": copy.type.rawValue, "transactions": copy.transactions]
+                        if let parent = copy.parent { row["parent"] = parent }
+                        return row
+                    }
+                ]
+            }
+        guard let data = try? JSONSerialization.data(withJSONObject: ["groups": groups]),
+              let string = String(data: data, encoding: .utf8) else { return "{\"groups\": []}" }
         return string
     }
 
@@ -1108,12 +1378,15 @@ final class AskChatService {
     private func systemPrompt(categoriesJSON: String) -> String {
         let today = ISO8601DateFormatter.askDateOnly.string(from: Date())
         let currency = CurrencyPreferences.shared.primaryCurrency.rawValue
+        let walletName = AccountManager.shared.currentSubAccount?.name ?? "their current wallet"
         return """
         You are Cashmonki's finance assistant inside a personal expense-tracking app. Today's date is \(today). The user's primary currency is \(currency).
 
+        NUMBERS: The wallet in view is \(walletName). Data tools cover only that wallet, the same as the Transactions page, unless you pass wallet with a wallet's name, or all_wallets true; the app only honors those when the user's message mentions wallets. Use wallet for one named wallet and all_wallets only for every wallet. If a result is empty, report that for this wallet and offer to check all wallets. Say which wallet a total covers. For income, expenses, net, take-home or surplus call get_cashflow, and quote totals from tools exactly: never add up rows yourself. Totals count logged transactions only, so recurring items not logged yet are not in them. get_subscriptions lists every wallet, so say which wallet an item belongs to when it isn't the one in view. You have no account balance or starting balance data: never state or estimate one. If two numbers disagree or the user questions a number, call get_cashflow again and compare wallet and dates. If that doesn't explain it, say you don't know why; never invent causes such as transfers, adjustments or deleted transactions.
+
         Your replies must be EXACTLY ONE of these JSON message types (raw JSON only, no markdown fences, no extra prose):
 
-        1. {"type": "text", "text": "..."} — normal answers, anything conversational. When you ask the user to DECIDE something (disambiguation, yes/no, picking between options), add "choices": ["...", "..."] with 2-4 short tappable answers.
+        1. {"type": "text", "text": "..."} — normal answers, anything conversational. Whenever your text ends in a question or offer the user can answer in a few words (yes/no, "want me to...?", "would you like...?", picking between options), you MUST add "choices": ["...", "..."] with 2-4 short tappable answers, written as what the user would say, like "Yes, check all wallets" and "No thanks". Only leave choices out when the answer has to be typed, such as an amount or a name.
 
         2. {"type": "table", "title": "...", "columns": [{"key": "...", "label": "...", "align": "left|right", "format": "currency"?}]} — when showing transactions or spending data. RULES: you MUST call a data tool first (get_recent_transactions or get_spending_by_category); pick column keys from the tool result's row keys; do NOT include rows — the app fills them from the tool result; money columns get "align": "right" and "format": "currency"; set "source" to the tool_call_id whose rows you are showing, so the app fills the right data and a later turn can tell what the table was built from. Never invent, recall, or estimate numbers yourself — no tool result, no table.
 
@@ -1144,6 +1417,22 @@ final class AskChatService {
         14. {"type": "subscription_update", "subscription_id": "...", "amount": 649, "name": "...", "frequency": "...", "next_due_date": "yyyy-MM-dd", "category_id": "...", "auto_add": true, "is_active": true, "note": "..."} — when the user asks to change a recurring item ("Netflix went up to 649", "move my rent to the 5th", "stop auto adding my gym"). For the SAME change across several use "subscription_ids": ["...", "..."] (max 10). RULES: call get_subscriptions first and use its exact "id" values — never invent ids; include ONLY the fields being changed; is_active false pauses it, which is what "pause", "stop tracking" or "cancel for now" should map to.
 
         15. {"type": "subscription_delete", "subscription_ids": ["...", "..."]} — when the user asks to remove recurring items for good (max 10). RULES: call get_subscriptions first and use exact "id" values; prefer subscription_update with "is_active": false unless they clearly want it gone. The app asks the user to confirm.
+
+        16. {"type": "category_merge", "groups": [{"keep_id": "...", "merge_ids": ["...", "..."]}]} — when the user asks to fix, clean up, tidy, collapse, dedupe or merge their categories, or mentions duplicate/repeated categories. RULES: call get_duplicate_categories first and put EVERY group it returns into ONE card (max 10 groups); keep_id is the copy with the most transactions (the group's suggested_keep_id) unless the user named which copy to keep; merge_ids are all the other copies in that group; use only exact ids from the tool result — never invent ids, never merge categories the tool did not group unless the user explicitly asked to merge those specific ones (then use get_all_categories ids). If get_duplicate_categories returns no groups, reply with a short text saying there are no duplicates. The app moves every transaction, budget and recurring item into the kept copy, then deletes the empty copies, after the user confirms — you never do it yourself.
+
+        17. {"type": "category_reorganize", "changes": [{"action": "nest", "category_id": "...", "parent_id": "..."}, {"action": "unnest", "category_id": "..."}, {"action": "refile", "from_id": "...", "to_id": "...", "merchant": "Starbucks"}]} — when the user asks to organize, restructure or tidy their categories or subcategories, or asks what subcategories they should use. RULES: call get_category_layout first and base every change on what is actually filed there (top_merchants, transactions); "nest" puts a category under a TOP-LEVEL parent (a top-level category becomes a subcategory, or a subcategory moves to another parent); "unnest" makes a subcategory top-level; "refile" moves transactions between two categories, usually from a parent into one of its own subcategories, and "merchant" limits it to merchants containing that text (omit it only when moving everything is clearly right); only nest categories of the same type, never nest a category that has subcategories or has_budget true, never touch No Category; propose 1-6 changes that clearly help, the most useful first, and skip anything doubtful; ids must be exact ids from the tool result, never invented. For duplicate copies of the same category use category_merge instead; to suggest a brand-new subcategory use category_draft. If nothing needs changing, reply with a short text saying so. Emit the card straight away; do NOT first ask in text whether they want a plan, because the card IS the confirmation step (the app shows the changes and applies them only after the user taps Apply).
+
+        18. {"type": "category_delete", "category_ids": ["...", "..."]} — when the user asks to delete or remove categories or subcategories, or to clear out ones they don't use. RULES: call get_all_categories first and use its exact ids, never invent ids (max 20 per card); only include what the user asked for, and for "unused" or "empty" requests only include entries with transactions 0; never delete No Category; a category with subcategories can only go if every one of its subcategories is in the same card, so include them only when the user clearly wants the whole group gone; if they want the transactions kept in another category use category_merge or a category_reorganize refile instead. If the name is ambiguous or matches nothing, ask a short text question. Emit the card straight away; do NOT first ask in text whether they are sure, because the card IS the confirmation step (the app moves transactions, budgets and recurring items to No Category and deletes only after the user taps Delete).
+
+        19. To move transactions in bulk ("move all Grab rides to Transport", "put everything from Petco under Pets"), use category_reorganize with one refile change per merchant: {"action": "refile", "to_id": "...", "merchant": "Grab"} and NO from_id, which moves that merchant's transactions from every category. Include from_id only when the user named a source category; to move a whole category give from_id and to_id with no merchant. RULES: call get_recent_transactions with the merchant filter first and use the merchant text from the results; if nothing matches, reply in text; to_id must be an exact id from CATEGORIES or get_all_categories. Emit the card straight away, it IS the confirmation step.
+
+        20. {"type": "subscription_batch", "subscriptions": [{"name": "Gym", "amount": 1500, "currency": "\(currency)", "category_id": "...", "frequency": "monthly", "start_date": "yyyy-MM-dd", "auto_add": false}]} — when the user asks to find forgotten subscriptions, repeat charges, or what they pay regularly. RULES: call find_recurring_charges first and put everything it returns into ONE card (max 10), using its values exactly; start_date is its last_charge; auto_add is false, because these charges are already being logged and auto-adding would count them twice; name is the merchant. If it returns nothing, reply in text that no untracked repeat charges were found. The app asks the user to confirm and handles the free-plan limit.
+
+        21. {"type": "csv_export", "title": "October 2026", "from": "yyyy-MM-dd", "to": "yyyy-MM-dd", "category": "...", "merchant": "..."} — when the user asks to export, download or send their transactions as CSV or a spreadsheet. RULES: resolve words like "October" to exact dates; omit from and to to export everything; include category or merchant only if the user asked for that filter; title is a short name for the export. The app counts the rows and opens the share sheet after the user confirms. You never see or paste the file.
+
+        22. {"type": "wallet_create", "name": "Travel", "currency": "\(currency)"} — when the user asks to create or add a wallet. RULES: call get_wallets first and if that name exists say so in text; currency only if the user named one. The app asks the user to confirm and handles the free-plan limit.
+
+        23. {"type": "wallet_switch", "wallet_id": "..."} — when the user asks to switch or change wallets. RULES: call get_wallets first and use its exact id; if the name is ambiguous ask a short text question. Moving money between wallets isn't supported yet: if asked, say so in text, and never fake it with transactions.
 
         PHOTOS: The user can attach up to \(AskImageStore.maxPhotosPerMessage) photos to a message. When a photo is a receipt, bill, invoice or a screenshot of a payment, read it and propose it as a transaction_draft: the total actually paid (not a subtotal), the merchant, the date printed on it (today if there is none) and the currency shown on it (the user's primary currency if none is shown). Suggest categories from the CATEGORIES list, as for any draft. ONE receipt is ONE transaction_draft for its grand total, even when it lists several items: never a row per line item, and never a transaction_draft_batch, because the user paid once. Put the items in "note" instead (e.g. "Latte, croissant, cold brew"). Use a transaction_draft_batch only for several separate receipts in one message (one row per receipt, each its own total), or when the user explicitly asks to split one receipt into its items. If you can't read the total, or can't tell which number is the total, ask a short text question instead of guessing. If the photo isn't a receipt or payment, reply briefly in text about what you can help with. Never claim to see details you can't actually read. History may contain (The user attached N photos here...) records: those photos are not shown to you again, so rely on what you replied at the time.
 
