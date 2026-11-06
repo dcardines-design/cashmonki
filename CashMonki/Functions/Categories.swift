@@ -2353,8 +2353,20 @@ class CategoriesManager: ObservableObject {
         case nest(categoryId: UUID, parentId: UUID)
         /// Make a subcategory a top-level category.
         case unnest(categoryId: UUID)
-        /// Move transactions from one category to another, optionally only one merchant's.
-        case refile(fromId: UUID, toId: UUID, merchant: String?)
+        /// Move transactions to a category, optionally only one merchant's. With no `fromId`
+        /// the merchant's transactions move from wherever they are filed.
+        case refile(fromId: UUID?, toId: UUID, merchant: String?)
+    }
+
+    /// Whether a refile takes this transaction. Shared with the Ask card, so the count the
+    /// user confirms is the count that moves. A merchant-wide move checks the amount's sign
+    /// instead of a source category, so an expense never lands in an income category.
+    static func refileMatches(_ transaction: Txn, fromId: UUID?, toId: UUID, toType: CategoryType, merchant: String?) -> Bool {
+        guard transaction.categoryId != toId else { return false }
+        let needle = merchant?.trimmingCharacters(in: .whitespaces).lowercased() ?? ""
+        if !needle.isEmpty, !(transaction.merchantName ?? "").lowercased().contains(needle) { return false }
+        if let fromId { return transaction.categoryId == fromId }
+        return !needle.isEmpty && (transaction.amount < 0) == (toType == .expense)
     }
 
     struct CategoryReorganizeResult {
@@ -2454,15 +2466,13 @@ class CategoriesManager: ObservableObject {
             case .refile(let fromId, let toId, let merchant):
                 guard fromId != toId, !noCategoryIds.contains(toId),
                       let toName = name(of: toId),
-                      let toType = type(of: toId), type(of: fromId) == toType
+                      let toType = type(of: toId),
+                      fromId.map({ type(of: $0) == toType }) ?? true
                 else { skipped += 1; continue }
-                let needle = merchant?.trimmingCharacters(in: .whitespaces).lowercased()
                 var moved = 0
                 for transaction in userManager.getTransactions() {
                     let current = refiled[transaction.id] ?? transaction
-                    guard current.categoryId == fromId else { continue }
-                    if let needle, !needle.isEmpty,
-                       !(current.merchantName ?? "").lowercased().contains(needle) { continue }
+                    guard Self.refileMatches(current, fromId: fromId, toId: toId, toType: toType, merchant: merchant) else { continue }
                     var updated = current
                     updated.category = toName
                     updated.categoryId = toId

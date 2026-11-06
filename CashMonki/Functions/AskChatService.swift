@@ -252,6 +252,8 @@ final class AskChatService {
         case "get_categories", "get_all_categories", "get_category_layout", "get_duplicate_categories": return "Checking your categories…"
         case "get_budgets": return "Checking your budgets…"
         case "get_subscriptions": return "Checking your subscriptions…"
+        case "find_recurring_charges": return "Looking for repeat charges…"
+        case "get_wallets": return "Checking your wallets…"
         case "convert_currency": return "Converting currency…"
         default: return "Working on it…"
         }
@@ -473,6 +475,12 @@ final class AskChatService {
             tool("get_subscriptions",
                  "Fetch the user's recurring items / subscriptions (id, name, amount, currency, category, frequency, next due date, active, auto_add). Paused ones are included with active=false. Real data — use before answering any recurring/subscription question, and before proposing an edit or deletion (its \"id\" is the only valid target).",
                  [:]),
+            tool("find_recurring_charges",
+                 "Scan the user's transactions for repeat charges that are NOT tracked as recurring items yet: same merchant, similar amount, regular gaps, still active. Returns merchant, amount, currency, frequency, charges, last_charge, category_id, category. Call before proposing a subscription_batch.",
+                 [:]),
+            tool("get_wallets",
+                 "Fetch the user's wallets (id, name, currency, selected, default, transactions). Call before proposing a wallet_switch or wallet_create.",
+                 [:]),
             tool("convert_currency",
                  "Convert an amount between currencies using the app's live rates. Use for any currency question — never estimate rates yourself.",
                  [
@@ -567,6 +575,16 @@ final class AskChatService {
 
         case "get_subscriptions":
             let rows = subscriptionRows()
+            cache(rows: rows, callID: callID, tool: name, argumentsJSON: argumentsJSON)
+            return encodeRows(rows)
+
+        case "find_recurring_charges":
+            let rows = recurringChargeRows()
+            cache(rows: rows, callID: callID, tool: name, argumentsJSON: argumentsJSON)
+            return encodeRows(rows)
+
+        case "get_wallets":
+            let rows = walletRows()
             cache(rows: rows, callID: callID, tool: name, argumentsJSON: argumentsJSON)
             return encodeRows(rows)
 
@@ -760,6 +778,82 @@ final class AskChatService {
                     "remaining": String(format: "%.2f", budget.amount - spent)
                 ]
             }
+    }
+
+    /// Repeat charges not tracked yet. A merchant counts when most gaps between its charges
+    /// fit one frequency, most amounts sit within 15% of the median, and the last charge is
+    /// recent enough that it still looks active. Auto-generated transactions are skipped:
+    /// those already belong to a recurring item.
+    private func recurringChargeRows() -> [[String: String]] {
+        let now = Date()
+        let calendar = Calendar.current
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        let tracked = SubscriptionManager.persistedSubscriptions().map { $0.name.lowercased() }
+
+        func median(_ values: [Double]) -> Double {
+            let sorted = values.sorted()
+            return sorted[sorted.count / 2]
+        }
+
+        let charges = UserManager.shared.currentUser.transactions.filter {
+            $0.amount < 0 && $0.subscriptionId == nil && !$0.isRecurring
+                && !($0.merchantName ?? "").trimmingCharacters(in: .whitespaces).isEmpty
+        }
+        let groups = Dictionary(grouping: charges) { ($0.merchantName ?? "").trimmingCharacters(in: .whitespaces).lowercased() }
+
+        let frequencies: [(frequency: RecurringFrequency, days: ClosedRange<Double>, minimumCharges: Int)] = [
+            (.weekly, 6...8, 4),
+            (.monthly, 26...35, 3),
+            (.quarterly, 84...98, 3),
+            (.yearly, 350...380, 2)
+        ]
+
+        var found: [(charges: Int, row: [String: String])] = []
+        for (merchant, group) in groups where group.count >= 2 {
+            guard !tracked.contains(where: { $0.contains(merchant) || merchant.contains($0) }) else { continue }
+            let sorted = group.sorted { $0.date < $1.date }
+            let gaps = zip(sorted, sorted.dropFirst()).map { $1.date.timeIntervalSince($0.date) / 86_400 }
+            let typicalGap = median(gaps)
+            guard let match = frequencies.first(where: { $0.days.contains(typicalGap) }),
+                  sorted.count >= match.minimumCharges,
+                  Double(gaps.filter(match.days.contains).count) / Double(gaps.count) >= 0.75,
+                  now.timeIntervalSince(sorted[sorted.count - 1].date) / 86_400 <= typicalGap * 1.5
+            else { continue }
+
+            let amounts = sorted.map { abs($0.originalAmount ?? $0.amount) }
+            let typicalAmount = median(amounts)
+            let steady = amounts.filter { abs($0 - typicalAmount) <= typicalAmount * 0.15 }.count
+            guard Double(steady) / Double(amounts.count) >= 0.75 else { continue }
+
+            let last = sorted[sorted.count - 1]
+            found.append((sorted.count, [
+                "merchant": last.merchantName ?? merchant,
+                "amount": String(format: "%.2f", abs(last.originalAmount ?? last.amount)),
+                "currency": (last.originalCurrency ?? last.primaryCurrency).rawValue,
+                "frequency": match.frequency.rawValue,
+                "charges": String(sorted.count),
+                "last_charge": formatter.string(from: calendar.startOfDay(for: last.date)),
+                "category_id": last.categoryId?.uuidString ?? "",
+                "category": last.category
+            ]))
+        }
+        return found.sorted { $0.charges > $1.charges }.prefix(10).map(\.row)
+    }
+
+    private func walletRows() -> [[String: String]] {
+        let user = UserManager.shared.currentUser
+        let selected = AccountManager.shared.selectedSubAccountId
+        return user.subAccounts.map { wallet in
+            [
+                "id": wallet.id.uuidString,
+                "name": wallet.name,
+                "currency": wallet.currency.rawValue,
+                "selected": wallet.id == selected ? "true" : "false",
+                "default": wallet.isDefault ? "true" : "false",
+                "transactions": String(user.transactions.filter { $0.accountId == wallet.id }.count)
+            ]
+        }
     }
 
     private func subscriptionRows() -> [[String: String]] {
@@ -1267,6 +1361,16 @@ final class AskChatService {
         17. {"type": "category_reorganize", "changes": [{"action": "nest", "category_id": "...", "parent_id": "..."}, {"action": "unnest", "category_id": "..."}, {"action": "refile", "from_id": "...", "to_id": "...", "merchant": "Starbucks"}]} — when the user asks to organize, restructure or tidy their categories or subcategories, or asks what subcategories they should use. RULES: call get_category_layout first and base every change on what is actually filed there (top_merchants, transactions); "nest" puts a category under a TOP-LEVEL parent (a top-level category becomes a subcategory, or a subcategory moves to another parent); "unnest" makes a subcategory top-level; "refile" moves transactions between two categories, usually from a parent into one of its own subcategories, and "merchant" limits it to merchants containing that text (omit it only when moving everything is clearly right); only nest categories of the same type, never nest a category that has subcategories or has_budget true, never touch No Category; propose 1-6 changes that clearly help, the most useful first, and skip anything doubtful; ids must be exact ids from the tool result, never invented. For duplicate copies of the same category use category_merge instead; to suggest a brand-new subcategory use category_draft. If nothing needs changing, reply with a short text saying so. Emit the card straight away; do NOT first ask in text whether they want a plan, because the card IS the confirmation step (the app shows the changes and applies them only after the user taps Apply).
 
         18. {"type": "category_delete", "category_ids": ["...", "..."]} — when the user asks to delete or remove categories or subcategories, or to clear out ones they don't use. RULES: call get_all_categories first and use its exact ids, never invent ids (max 20 per card); only include what the user asked for, and for "unused" or "empty" requests only include entries with transactions 0; never delete No Category; a category with subcategories can only go if every one of its subcategories is in the same card, so include them only when the user clearly wants the whole group gone; if they want the transactions kept in another category use category_merge or a category_reorganize refile instead. If the name is ambiguous or matches nothing, ask a short text question. Emit the card straight away; do NOT first ask in text whether they are sure, because the card IS the confirmation step (the app moves transactions, budgets and recurring items to No Category and deletes only after the user taps Delete).
+
+        19. To move transactions in bulk ("move all Grab rides to Transport", "put everything from Petco under Pets"), use category_reorganize with one refile change per merchant: {"action": "refile", "to_id": "...", "merchant": "Grab"} and NO from_id, which moves that merchant's transactions from every category. Include from_id only when the user named a source category; to move a whole category give from_id and to_id with no merchant. RULES: call get_recent_transactions with the merchant filter first and use the merchant text from the results; if nothing matches, reply in text; to_id must be an exact id from CATEGORIES or get_all_categories. Emit the card straight away, it IS the confirmation step.
+
+        20. {"type": "subscription_batch", "subscriptions": [{"name": "Gym", "amount": 1500, "currency": "\(currency)", "category_id": "...", "frequency": "monthly", "start_date": "yyyy-MM-dd", "auto_add": false}]} — when the user asks to find forgotten subscriptions, repeat charges, or what they pay regularly. RULES: call find_recurring_charges first and put everything it returns into ONE card (max 10), using its values exactly; start_date is its last_charge; auto_add is false, because these charges are already being logged and auto-adding would count them twice; name is the merchant. If it returns nothing, reply in text that no untracked repeat charges were found. The app asks the user to confirm and handles the free-plan limit.
+
+        21. {"type": "csv_export", "title": "October 2026", "from": "yyyy-MM-dd", "to": "yyyy-MM-dd", "category": "...", "merchant": "..."} — when the user asks to export, download or send their transactions as CSV or a spreadsheet. RULES: resolve words like "October" to exact dates; omit from and to to export everything; include category or merchant only if the user asked for that filter; title is a short name for the export. The app counts the rows and opens the share sheet after the user confirms. You never see or paste the file.
+
+        22. {"type": "wallet_create", "name": "Travel", "currency": "\(currency)"} — when the user asks to create or add a wallet. RULES: call get_wallets first and if that name exists say so in text; currency only if the user named one. The app asks the user to confirm and handles the free-plan limit.
+
+        23. {"type": "wallet_switch", "wallet_id": "..."} — when the user asks to switch or change wallets. RULES: call get_wallets first and use its exact id; if the name is ambiguous ask a short text question. Moving money between wallets isn't supported yet: if asked, say so in text, and never fake it with transactions.
 
         PHOTOS: The user can attach up to \(AskImageStore.maxPhotosPerMessage) photos to a message. When a photo is a receipt, bill, invoice or a screenshot of a payment, read it and propose it as a transaction_draft: the total actually paid (not a subtotal), the merchant, the date printed on it (today if there is none) and the currency shown on it (the user's primary currency if none is shown). Suggest categories from the CATEGORIES list, as for any draft. ONE receipt is ONE transaction_draft for its grand total, even when it lists several items: never a row per line item, and never a transaction_draft_batch, because the user paid once. Put the items in "note" instead (e.g. "Latte, croissant, cold brew"). Use a transaction_draft_batch only for several separate receipts in one message (one row per receipt, each its own total), or when the user explicitly asks to split one receipt into its items. If you can't read the total, or can't tell which number is the total, ask a short text question instead of guessing. If the photo isn't a receipt or payment, reply briefly in text about what you can help with. Never claim to see details you can't actually read. History may contain (The user attached N photos here...) records: those photos are not shown to you again, so rely on what you replied at the time.
 
