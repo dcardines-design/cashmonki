@@ -384,7 +384,10 @@ class CurrencyRateManager: ObservableObject {
     
     // MARK: - Currency Management
     
-    func setPrimaryCurrency(_ currency: Currency) {
+    /// `convertTransactions` is only for the user changing currency in Settings. This is also
+    /// called whenever the Settings page appears, where a fresh install's default can differ from
+    /// the account's currency. Treating that as a change rewrote and uploaded every transaction.
+    func setPrimaryCurrency(_ currency: Currency, convertTransactions: Bool = false) {
         let oldPrimary = primaryCurrency
         primaryCurrency = currency
         saveData()
@@ -396,8 +399,10 @@ class CurrencyRateManager: ObservableObject {
             lastUpdateDate = nil // Force refresh
             
             // Convert all existing transactions to new primary currency using historical snapshot rates
-            print("📊 Starting batch conversion of all transactions to new primary currency...")
-            convertAllTransactionsToNewPrimaryCurrency(currency)
+            if convertTransactions {
+                print("📊 Starting batch conversion of all transactions to new primary currency...")
+                convertAllTransactionsToNewPrimaryCurrency(currency)
+            }
         }
         
         // Fetch new rates if online
@@ -621,7 +626,9 @@ class CurrencyRateManager: ObservableObject {
             // Apply correct sign based on income/expense (preserve original sign logic)
             let finalAmount = transaction.amount < 0 ? -abs(newConvertedAmount) : abs(newConvertedAmount)
             
-            // Create updated transaction
+            // Create updated transaction, keeping everything the conversion doesn't change.
+            var syncMetadata = transaction.syncMetadata
+            syncMetadata.markModified()
             let updatedTransaction = Txn(
                 txID: transaction.txID,
                 accountID: transaction.accountID,
@@ -645,7 +652,19 @@ class CurrencyRateManager: ObservableObject {
                 secondaryCurrency: transaction.secondaryCurrency,
                 exchangeRate: newExchangeRate, // Update exchange rate
                 secondaryAmount: transaction.secondaryAmount,
-                secondaryExchangeRate: transaction.secondaryExchangeRate
+                secondaryExchangeRate: transaction.secondaryExchangeRate,
+                userEnteredAmount: transaction.userEnteredAmount,
+                userEnteredCurrency: transaction.userEnteredCurrency,
+                syncMetadata: syncMetadata,
+                syncStatus: transaction.syncStatus,
+                isLocalOnly: transaction.isLocalOnly,
+                syncPriority: transaction.syncPriority,
+                isRecurring: transaction.isRecurring,
+                recurringFrequency: transaction.recurringFrequency,
+                recurringTemplateId: transaction.recurringTemplateId,
+                lastGeneratedDate: transaction.lastGeneratedDate,
+                isRecurringActive: transaction.isRecurringActive,
+                subscriptionId: transaction.subscriptionId
             )
             
             updatedTransactions.append(updatedTransaction)
