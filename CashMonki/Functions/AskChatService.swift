@@ -249,7 +249,7 @@ final class AskChatService {
         switch names.first {
         case "get_recent_transactions": return "Looking through your transactions…"
         case "get_spending_by_category", "compare_spending": return "Adding up your spending…"
-        case "get_categories": return "Checking your categories…"
+        case "get_categories", "get_all_categories", "get_category_layout", "get_duplicate_categories": return "Checking your categories…"
         case "get_budgets": return "Checking your budgets…"
         case "get_subscriptions": return "Checking your subscriptions…"
         case "convert_currency": return "Converting currency…"
@@ -439,6 +439,15 @@ final class AskChatService {
             // No get_categories tool: the list is in the system prompt, and offering the tool
             // let the model spend a whole round trip fetching it anyway. executeTool still
             // answers it, so replayed history that called it stays valid.
+            tool("get_all_categories",
+                 "Fetch every category AND subcategory (id, name, type, parent, transactions = how many are filed under it). Only for managing categories: deleting, merging or moving transactions. The CATEGORIES list in the prompt is enough for drafts.",
+                 [:]),
+            tool("get_category_layout",
+                 "Fetch how the user's categories are organized: every category and subcategory with id, name, emoji, type, parent_id/parent, transaction count, has_budget, and top_merchants (the merchants filed under it most, with counts). Use before proposing a category_reorganize.",
+                 [:]),
+            tool("get_duplicate_categories",
+                 "Find groups of duplicate categories (same name ignoring case, spacing, punctuation, emoji and a trailing s, same type, same parent). Each group lists every copy with its id, name, parent and transaction count, plus suggested_keep_id = the copy with the most transactions. Call before proposing a category_merge.",
+                 [:]),
             tool("compare_spending",
                  "Sum the user's spending for each named period (real data), optionally filtered to one category. Use for any comparison across time (this month vs last month, monthly trend). Returns one row per period; chart or stat the result.",
                  [
@@ -537,6 +546,12 @@ final class AskChatService {
 
         case "get_categories":
             return categoriesJSON
+
+        case "get_duplicate_categories":
+            return encodeDuplicateCategories()
+
+        case "get_category_layout":
+            return encodeCategoryLayout()
 
         case "compare_spending":
             let category = args["category"] as? String
@@ -776,6 +791,108 @@ final class AskChatService {
             .map { ["id": $0.id.uuidString, "name": $0.name, "type": $0.type.rawValue] }
         guard let data = try? JSONSerialization.data(withJSONObject: ["categories": categories]),
               let string = String(data: data, encoding: .utf8) else { return "{\"categories\": []}" }
+        return string
+    }
+
+    private func encodeCategories() -> String {
+        let categories = categoryEntries().map { entry -> [String: Any] in
+            var row: [String: Any] = ["id": entry.id.uuidString, "name": entry.name, "type": entry.type.rawValue, "transactions": entry.transactions]
+            if let parent = entry.parent { row["parent"] = parent }
+            return row
+        }
+        guard let data = try? JSONSerialization.data(withJSONObject: ["categories": categories]),
+              let string = String(data: data, encoding: .utf8) else { return "{\"categories\": []}" }
+        return string
+    }
+
+    /// Every live category and subcategory with how many transactions are filed under it.
+    /// "No Category" is left out: it is a fallback bucket, never a merge target.
+    private func categoryEntries() -> [(id: UUID, name: String, emoji: String, type: CategoryType, parent: String?, transactions: Int)] {
+        var counts: [UUID: Int] = [:]
+        for txn in UserManager.shared.currentUser.transactions {
+            if let id = txn.categoryId { counts[id, default: 0] += 1 }
+        }
+        let manager = CategoriesManager.shared
+        let live = manager.categories.filter { !$0.isDeleted && $0.name != "No Category" }
+        var entries: [(id: UUID, name: String, emoji: String, type: CategoryType, parent: String?, transactions: Int)] = []
+        for category in live {
+            let parent = category.parentCategoryId.flatMap { manager.findCategory(by: $0)?.name }
+            entries.append((category.id, category.name, category.emoji, category.type, parent, counts[category.id] ?? 0))
+            for sub in category.subcategories {
+                entries.append((sub.id, sub.name, sub.emoji, sub.type, category.name, counts[sub.id] ?? 0))
+            }
+        }
+        return entries
+    }
+
+    /// Categories plus what is actually filed under each, so a reorganize proposal can be
+    /// grounded in real merchants instead of names alone. Every top-level category is listed;
+    /// subcategories only under parents that are in use (the parent or a sibling has
+    /// transactions), so the model sees where activity could be split without ~150 empty rows.
+    private func encodeCategoryLayout() -> String {
+        let transactions = UserManager.shared.currentUser.transactions
+        var merchants: [UUID: [String: Int]] = [:]
+        for txn in transactions {
+            guard let id = txn.categoryId, let merchant = txn.merchantName?.trimmingCharacters(in: .whitespaces), !merchant.isEmpty else { continue }
+            merchants[id, default: [:]][merchant, default: 0] += 1
+        }
+        let budgeted = Set(UserManager.shared.currentUser.budgets.map(\.categoryId))
+        let manager = CategoriesManager.shared
+        let entries = categoryEntries()
+        var activeParents: Set<String> = []
+        for entry in entries where entry.transactions > 0 {
+            activeParents.insert(entry.parent ?? entry.name)
+        }
+        let rows = entries
+            .filter { entry in entry.parent.map(activeParents.contains) ?? true }
+            .map { entry -> [String: Any] in
+                var row: [String: Any] = [
+                    "id": entry.id.uuidString, "name": entry.name, "emoji": entry.emoji,
+                    "type": entry.type.rawValue, "transactions": entry.transactions,
+                    "has_budget": budgeted.contains(entry.id)
+                ]
+                if let parent = entry.parent {
+                    row["parent"] = parent
+                    if let parentID = manager.findCategoryOrSubcategoryById(entry.id)?.parent?.id
+                        ?? manager.findCategory(by: entry.id)?.parentCategoryId {
+                        row["parent_id"] = parentID.uuidString
+                    }
+                }
+                let top = (merchants[entry.id] ?? [:]).sorted { $0.value > $1.value }.prefix(5)
+                if !top.isEmpty { row["top_merchants"] = top.map { "\($0.key) (\($0.value))" } }
+                return row
+            }
+        guard let data = try? JSONSerialization.data(withJSONObject: ["categories": rows]),
+              let string = String(data: data, encoding: .utf8) else { return "{\"categories\": []}" }
+        return string
+    }
+
+    /// Groups copies whose names only differ by case, spacing, punctuation, emoji or a
+    /// trailing "s", within the same parent: "Supplies" under Hobbies and a top-level
+    /// "Supplies" are different things. Done here rather than by the model so the groups
+    /// and counts are exact.
+    private func encodeDuplicateCategories() -> String {
+        func normalized(_ name: String) -> String {
+            var key = String(name.lowercased().unicodeScalars.filter { CharacterSet.alphanumerics.contains($0) })
+            if key.count > 3, key.hasSuffix("s") { key.removeLast() }
+            return key
+        }
+        let grouped = Dictionary(grouping: categoryEntries()) { "\($0.type.rawValue):\($0.parent ?? ""):\(normalized($0.name))" }
+        let groups = grouped.values
+            .filter { $0.count > 1 && !normalized($0[0].name).isEmpty }
+            .map { copies -> [String: Any] in
+                let ranked = copies.sorted { $0.transactions > $1.transactions }
+                return [
+                    "suggested_keep_id": ranked[0].id.uuidString,
+                    "copies": ranked.map { copy -> [String: Any] in
+                        var row: [String: Any] = ["id": copy.id.uuidString, "name": copy.name, "emoji": copy.emoji, "type": copy.type.rawValue, "transactions": copy.transactions]
+                        if let parent = copy.parent { row["parent"] = parent }
+                        return row
+                    }
+                ]
+            }
+        guard let data = try? JSONSerialization.data(withJSONObject: ["groups": groups]),
+              let string = String(data: data, encoding: .utf8) else { return "{\"groups\": []}" }
         return string
     }
 
@@ -1144,6 +1261,12 @@ final class AskChatService {
         14. {"type": "subscription_update", "subscription_id": "...", "amount": 649, "name": "...", "frequency": "...", "next_due_date": "yyyy-MM-dd", "category_id": "...", "auto_add": true, "is_active": true, "note": "..."} — when the user asks to change a recurring item ("Netflix went up to 649", "move my rent to the 5th", "stop auto adding my gym"). For the SAME change across several use "subscription_ids": ["...", "..."] (max 10). RULES: call get_subscriptions first and use its exact "id" values — never invent ids; include ONLY the fields being changed; is_active false pauses it, which is what "pause", "stop tracking" or "cancel for now" should map to.
 
         15. {"type": "subscription_delete", "subscription_ids": ["...", "..."]} — when the user asks to remove recurring items for good (max 10). RULES: call get_subscriptions first and use exact "id" values; prefer subscription_update with "is_active": false unless they clearly want it gone. The app asks the user to confirm.
+
+        16. {"type": "category_merge", "groups": [{"keep_id": "...", "merge_ids": ["...", "..."]}]} — when the user asks to fix, clean up, tidy, collapse, dedupe or merge their categories, or mentions duplicate/repeated categories. RULES: call get_duplicate_categories first and put EVERY group it returns into ONE card (max 10 groups); keep_id is the copy with the most transactions (the group's suggested_keep_id) unless the user named which copy to keep; merge_ids are all the other copies in that group; use only exact ids from the tool result — never invent ids, never merge categories the tool did not group unless the user explicitly asked to merge those specific ones (then use get_all_categories ids). If get_duplicate_categories returns no groups, reply with a short text saying there are no duplicates. The app moves every transaction, budget and recurring item into the kept copy, then deletes the empty copies, after the user confirms — you never do it yourself.
+
+        17. {"type": "category_reorganize", "changes": [{"action": "nest", "category_id": "...", "parent_id": "..."}, {"action": "unnest", "category_id": "..."}, {"action": "refile", "from_id": "...", "to_id": "...", "merchant": "Starbucks"}]} — when the user asks to organize, restructure or tidy their categories or subcategories, or asks what subcategories they should use. RULES: call get_category_layout first and base every change on what is actually filed there (top_merchants, transactions); "nest" puts a category under a TOP-LEVEL parent (a top-level category becomes a subcategory, or a subcategory moves to another parent); "unnest" makes a subcategory top-level; "refile" moves transactions between two categories, usually from a parent into one of its own subcategories, and "merchant" limits it to merchants containing that text (omit it only when moving everything is clearly right); only nest categories of the same type, never nest a category that has subcategories or has_budget true, never touch No Category; propose 1-6 changes that clearly help, the most useful first, and skip anything doubtful; ids must be exact ids from the tool result, never invented. For duplicate copies of the same category use category_merge instead; to suggest a brand-new subcategory use category_draft. If nothing needs changing, reply with a short text saying so. Emit the card straight away; do NOT first ask in text whether they want a plan, because the card IS the confirmation step (the app shows the changes and applies them only after the user taps Apply).
+
+        18. {"type": "category_delete", "category_ids": ["...", "..."]} — when the user asks to delete or remove categories or subcategories, or to clear out ones they don't use. RULES: call get_all_categories first and use its exact ids, never invent ids (max 20 per card); only include what the user asked for, and for "unused" or "empty" requests only include entries with transactions 0; never delete No Category; a category with subcategories can only go if every one of its subcategories is in the same card, so include them only when the user clearly wants the whole group gone; if they want the transactions kept in another category use category_merge or a category_reorganize refile instead. If the name is ambiguous or matches nothing, ask a short text question. Emit the card straight away; do NOT first ask in text whether they are sure, because the card IS the confirmation step (the app moves transactions, budgets and recurring items to No Category and deletes only after the user taps Delete).
 
         PHOTOS: The user can attach up to \(AskImageStore.maxPhotosPerMessage) photos to a message. When a photo is a receipt, bill, invoice or a screenshot of a payment, read it and propose it as a transaction_draft: the total actually paid (not a subtotal), the merchant, the date printed on it (today if there is none) and the currency shown on it (the user's primary currency if none is shown). Suggest categories from the CATEGORIES list, as for any draft. ONE receipt is ONE transaction_draft for its grand total, even when it lists several items: never a row per line item, and never a transaction_draft_batch, because the user paid once. Put the items in "note" instead (e.g. "Latte, croissant, cold brew"). Use a transaction_draft_batch only for several separate receipts in one message (one row per receipt, each its own total), or when the user explicitly asks to split one receipt into its items. If you can't read the total, or can't tell which number is the total, ask a short text question instead of guessing. If the photo isn't a receipt or payment, reply briefly in text about what you can help with. Never claim to see details you can't actually read. History may contain (The user attached N photos here...) records: those photos are not shown to you again, so rely on what you replied at the time.
 

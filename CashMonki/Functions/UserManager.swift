@@ -1618,6 +1618,19 @@ class UserManager: ObservableObject {
 
         print("✏️ UserManager: Updated transaction - \(transaction.category) \(transaction.amount)")
     }
+
+    /// Bulk form of `updateTransaction`: one local save for the whole batch, then a delta
+    /// push per changed transaction (e.g. re-filing everything in a merged category).
+    func updateTransactions(_ transactions: [Txn]) {
+        guard !transactions.isEmpty else { return }
+        for transaction in transactions {
+            currentUser.updateTransaction(transaction)
+        }
+        saveCurrentUserLocally()
+        objectWillChange.send()
+        transactions.forEach(pushTransactionToCloud)
+        print("✏️ UserManager: Updated \(transactions.count) transactions")
+    }
     
     // MARK: - Account Management
     

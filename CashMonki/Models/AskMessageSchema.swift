@@ -25,6 +25,9 @@ enum AskStructuredMessage {
     case chart(AskChartMessage)
     case stat(AskStatMessage)
     case categoryDraft(AskCategoryDraft)
+    case categoryMerge(AskCategoryMerge)
+    case categoryReorganize(AskCategoryReorganize)
+    case categoryDelete(AskCategoryDelete)
     case budgetDraft(AskBudgetDraft)
     case budgetUpdate(AskBudgetUpdate)
     case budgetDelete(AskBudgetDelete)
@@ -46,6 +49,9 @@ enum AskStructuredMessage {
         case .chart: return "chart"
         case .stat: return "stat"
         case .categoryDraft: return "category_draft"
+        case .categoryMerge: return "category_merge"
+        case .categoryReorganize: return "category_reorganize"
+        case .categoryDelete: return "category_delete"
         case .budgetDraft: return "budget_draft"
         case .budgetUpdate: return "budget_update"
         case .budgetDelete: return "budget_delete"
@@ -184,6 +190,64 @@ struct AskCategoryDraft: Codable {
     let parent: String?
     /// "expense" (default) or "income".
     let category_type: String?
+}
+
+/// Proposed deletion of categories or subcategories. Ids come from get_categories.
+/// Applied ONLY after the user confirms.
+struct AskCategoryDelete: Codable {
+    let type: String
+    let category_ids: [String]
+}
+
+/// One set of duplicate categories: `merge_ids` fold into `keep_id`.
+struct AskCategoryMergeGroup: Codable {
+    let keep_id: String
+    let merge_ids: [String]
+}
+
+/// Proposed clean-up of duplicate categories. Ids come from get_duplicate_categories
+/// or get_categories. Applied ONLY after the user confirms. A single group may be sent
+/// flat (`keep_id` + `merge_ids`) instead of inside `groups`.
+struct AskCategoryMerge: Codable {
+    let type: String
+    let groups: [AskCategoryMergeGroup]?
+    let keep_id: String?
+    let merge_ids: [String]?
+
+    var allGroups: [AskCategoryMergeGroup] {
+        if let groups, !groups.isEmpty { return groups }
+        if let keep_id, let merge_ids { return [AskCategoryMergeGroup(keep_id: keep_id, merge_ids: merge_ids)] }
+        return []
+    }
+}
+
+/// One step of a reorganize card. `action` is "nest" (category_id goes under parent_id),
+/// "unnest" (category_id becomes top-level) or "refile" (from_id's transactions, optionally
+/// only those whose merchant contains `merchant`, move to to_id).
+struct AskCategoryChange: Codable {
+    let action: String
+    let category_id: String?
+    let parent_id: String?
+    let from_id: String?
+    let to_id: String?
+    let merchant: String?
+
+    var isValid: Bool {
+        func isID(_ value: String?) -> Bool { value.flatMap { UUID(uuidString: $0) } != nil }
+        switch action {
+        case "nest": return isID(category_id) && isID(parent_id) && category_id != parent_id
+        case "unnest": return isID(category_id)
+        case "refile": return isID(from_id) && isID(to_id) && from_id != to_id
+        default: return false
+        }
+    }
+}
+
+/// Proposed restructuring of the user's categories. Ids come from get_category_layout.
+/// Applied ONLY after the user confirms.
+struct AskCategoryReorganize: Codable {
+    let type: String
+    let changes: [AskCategoryChange]
 }
 
 // MARK: - Tool-call replay
@@ -533,6 +597,34 @@ enum AskMessageDecoder {
                   draft.name.count <= 40
             else { return malformed(trimmed) }
             return .categoryDraft(draft)
+
+        case "category_merge":
+            guard let merge = try? decoder.decode(AskCategoryMerge.self, from: data) else {
+                return malformed(trimmed)
+            }
+            let groups = merge.allGroups
+            guard (1...10).contains(groups.count),
+                  groups.allSatisfy({ group in
+                      UUID(uuidString: group.keep_id) != nil
+                          && (1...20).contains(group.merge_ids.count)
+                          && group.merge_ids.allSatisfy { UUID(uuidString: $0) != nil && $0 != group.keep_id }
+                  })
+            else { return malformed(trimmed) }
+            return .categoryMerge(merge)
+
+        case "category_delete":
+            guard let delete = try? decoder.decode(AskCategoryDelete.self, from: data),
+                  (1...20).contains(delete.category_ids.count),
+                  delete.category_ids.allSatisfy({ UUID(uuidString: $0) != nil })
+            else { return malformed(trimmed) }
+            return .categoryDelete(delete)
+
+        case "category_reorganize":
+            guard let reorganize = try? decoder.decode(AskCategoryReorganize.self, from: data),
+                  (1...10).contains(reorganize.changes.count),
+                  reorganize.changes.allSatisfy(\.isValid)
+            else { return malformed(trimmed) }
+            return .categoryReorganize(reorganize)
 
         case "stat":
             guard let stat = try? decoder.decode(AskStatMessage.self, from: data),

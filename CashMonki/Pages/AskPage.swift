@@ -35,6 +35,9 @@ struct AskDisplayMessage: Identifiable, Codable {
         case stat(AskStatMessage)
         case question(String, [String])
         case categoryDraft(AskCategoryDraft)
+        case categoryMerge(AskCategoryMerge)
+        case categoryReorganize(AskCategoryReorganize)
+        case categoryDelete(AskCategoryDelete)
         case draftBatch(AskTransactionDraftBatch)
         case budgetDraft(AskBudgetDraft)
         case budgetUpdate(AskBudgetUpdate)
@@ -59,6 +62,9 @@ struct AskDisplayMessage: Identifiable, Codable {
             case .stat: return "stat"
             case .question: return "question"
             case .categoryDraft: return "category_draft"
+            case .categoryMerge: return "category_merge"
+            case .categoryReorganize: return "category_reorganize"
+            case .categoryDelete: return "category_delete"
             case .draftBatch: return "transaction_draft_batch"
             case .budgetDraft: return "budget_draft"
             case .budgetUpdate: return "budget_update"
@@ -73,7 +79,7 @@ struct AskDisplayMessage: Identifiable, Codable {
         /// older pending card (see AskChatManager.appendPending).
         var isPending: Bool {
             switch self {
-            case .draft, .draftBatch, .update, .deleteRequest, .categoryDraft,
+            case .draft, .draftBatch, .update, .deleteRequest, .categoryDraft, .categoryMerge, .categoryReorganize, .categoryDelete,
                  .budgetDraft, .budgetUpdate, .budgetDelete,
                  .subscriptionDraft, .subscriptionUpdate, .subscriptionDelete:
                 return true
@@ -155,6 +161,20 @@ struct AskDisplayMessage: Identifiable, Codable {
             return text + "\(Self.describe(stat.query)).)"
         case .question(let text, _): return text
         case .categoryDraft(let draft): return "(App is showing a PENDING new-category card, not created yet: \"\(draft.name)\"\(draft.parent.map { " under \($0)" } ?? "").)"
+        case .categoryMerge(let merge):
+            let groups = merge.allGroups.map { "keep \($0.keep_id), merge \($0.merge_ids.joined(separator: ", "))" }
+            return "(App is showing a PENDING category merge card, nothing merged yet: \(groups.joined(separator: "; ")). Revise it by emitting a fresh full category_merge.)"
+        case .categoryDelete(let delete):
+            return "(App is showing a PENDING category delete card, nothing deleted yet: \(delete.category_ids.joined(separator: ", ")). Revise it by emitting a fresh full category_delete.)"
+        case .categoryReorganize(let reorganize):
+            let steps = reorganize.changes.map { change -> String in
+                switch change.action {
+                case "nest": return "nest \(change.category_id ?? "") under \(change.parent_id ?? "")"
+                case "unnest": return "make \(change.category_id ?? "") top-level"
+                default: return "refile \(change.merchant.map { "\($0) " } ?? "")from \(change.from_id ?? "") to \(change.to_id ?? "")"
+                }
+            }
+            return "(App is showing a PENDING reorganize card, nothing changed yet: \(steps.joined(separator: "; ")). Revise it by emitting a fresh full category_reorganize.)"
         case .budgetDraft(let draft):
             let period = draft.period ?? "monthly"
             return "(App is showing a PENDING budget card, not saved yet: \(draft.category_name ?? "category") \(draft.amount) \(draft.currency ?? "") per \(period).)"
@@ -929,6 +949,15 @@ final class AskChatManager: ObservableObject {
         case .categoryDraft(let draft):
             removeStreamingMessage()
             appendPending(.categoryDraft(draft))
+        case .categoryMerge(let merge):
+            removeStreamingMessage()
+            appendPending(.categoryMerge(merge))
+        case .categoryDelete(let delete):
+            removeStreamingMessage()
+            appendPending(.categoryDelete(delete))
+        case .categoryReorganize(let reorganize):
+            removeStreamingMessage()
+            appendPending(.categoryReorganize(reorganize))
         case .budgetDraft(let draft):
             removeStreamingMessage()
             appendPending(.budgetDraft(draft))
@@ -1162,6 +1191,90 @@ final class AskChatManager: ObservableObject {
         confirmedDrafts.insert(messageID)
         trackCardResolved(messageID, confirmed: false)
         messages.append(AskDisplayMessage(isUser: false, content: .text("Okay, no new category.")))
+        persist()
+    }
+
+    /// Deletes the chosen categories (Delete tap only).
+    func confirmCategoryDelete(messageID: UUID, delete: AskCategoryDelete) {
+        guard !confirmedDrafts.contains(messageID) else { return }
+        let ids = delete.category_ids.compactMap { UUID(uuidString: $0) }
+        guard let result = CategoriesManager.shared.deleteCategories(ids: ids) else {
+            draftErrors[messageID] = "Those categories can't be deleted. A category with subcategories needs those deleted first."
+            return
+        }
+        draftErrors[messageID] = nil
+        confirmedDrafts.insert(messageID)
+        trackCardResolved(messageID, confirmed: true)
+        let names = result.deletedNames.joined(separator: ", ")
+        var receipt = "✅ Deleted \(names)."
+        if result.movedTransactions > 0 {
+            let moved = result.movedTransactions == 1 ? "1 transaction" : "\(result.movedTransactions) transactions"
+            receipt += " Moved \(moved) to No Category."
+        }
+        if !result.skippedNames.isEmpty {
+            receipt += " Kept \(result.skippedNames.joined(separator: ", ")) because of its subcategories."
+        }
+        messages.append(AskDisplayMessage(isUser: false, content: .systemNote(receipt)))
+        persist()
+    }
+
+    /// Folds each duplicate group into its kept copy (Merge tap only).
+    func confirmCategoryMerge(messageID: UUID, merge: AskCategoryMerge) {
+        var results: [CategoriesManager.CategoryMergeResult] = []
+        for group in merge.allGroups {
+            guard let keepId = UUID(uuidString: group.keep_id) else { continue }
+            let mergeIds = group.merge_ids.compactMap { UUID(uuidString: $0) }
+            if let result = CategoriesManager.shared.mergeCategories(keepId: keepId, mergeIds: mergeIds) {
+                results.append(result)
+            }
+        }
+        guard !results.isEmpty else {
+            draftErrors[messageID] = "Those categories no longer exist."
+            return
+        }
+        draftErrors[messageID] = nil
+        confirmedDrafts.insert(messageID)
+        trackCardResolved(messageID, confirmed: true)
+        let moved = results.reduce(0) { $0 + $1.movedTransactions }
+        let movedText = moved == 1 ? "1 transaction" : "\(moved) transactions"
+        let receipt = results.count == 1
+            ? "✅ Merged \(results[0].removedCount + 1) \(results[0].keptName) categories into one and moved \(movedText)."
+            : "✅ Merged \(results.count) sets of duplicate categories and moved \(movedText)."
+        messages.append(AskDisplayMessage(isUser: false, content: .systemNote(receipt)))
+        persist()
+    }
+
+    /// Applies a confirmed reorganize card (Apply tap only).
+    func confirmCategoryReorganize(messageID: UUID, reorganize: AskCategoryReorganize) {
+        let changes: [CategoriesManager.CategoryReorganizeChange] = reorganize.changes.compactMap { change in
+            switch change.action {
+            case "nest":
+                guard let id = change.category_id.flatMap(UUID.init), let parent = change.parent_id.flatMap(UUID.init) else { return nil }
+                return .nest(categoryId: id, parentId: parent)
+            case "unnest":
+                return change.category_id.flatMap(UUID.init).map { .unnest(categoryId: $0) }
+            case "refile":
+                guard let from = change.from_id.flatMap(UUID.init), let to = change.to_id.flatMap(UUID.init) else { return nil }
+                return .refile(fromId: from, toId: to, merchant: change.merchant)
+            default:
+                return nil
+            }
+        }
+        let result = CategoriesManager.shared.reorganizeCategories(changes)
+        guard result.applied > 0 else {
+            draftErrors[messageID] = "None of those changes could be made anymore."
+            return
+        }
+        draftErrors[messageID] = nil
+        confirmedDrafts.insert(messageID)
+        trackCardResolved(messageID, confirmed: true)
+        var receipt = result.applied == 1 ? "✅ Made 1 category change" : "✅ Made \(result.applied) category changes"
+        if result.movedTransactions > 0 {
+            receipt += result.movedTransactions == 1 ? " and moved 1 transaction" : " and moved \(result.movedTransactions) transactions"
+        }
+        receipt += "."
+        if result.skipped > 0 { receipt += " Skipped \(result.skipped) that no longer fit." }
+        messages.append(AskDisplayMessage(isUser: false, content: .systemNote(receipt)))
         persist()
     }
 
@@ -2248,6 +2361,12 @@ private struct AskMessageView: View {
                 AskQuestionView(messageID: message.id, text: text, choices: choices)
             case .categoryDraft(let draft):
                 AskCategoryDraftCard(messageID: message.id, draft: draft)
+            case .categoryMerge(let merge):
+                AskCategoryMergeCard(messageID: message.id, merge: merge)
+            case .categoryDelete(let delete):
+                AskCategoryDeleteCard(messageID: message.id, delete: delete)
+            case .categoryReorganize(let reorganize):
+                AskCategoryReorganizeCard(messageID: message.id, reorganize: reorganize)
             case .draftBatch(let batch):
                 AskDraftBatchCard(messageID: message.id, batch: batch)
             case .budgetDraft(let draft):
@@ -3749,6 +3868,227 @@ private struct AskCategoryDraftCard: View {
             }
             .background(AppColors.surfacePrimary)
             .cornerRadius(16)
+        }
+    }
+}
+
+// MARK: - Category delete card
+
+private struct AskCategoryDeleteCard: View {
+    let messageID: UUID
+    let delete: AskCategoryDelete
+
+    @ObservedObject private var chat = AskChatManager.shared
+    @ObservedObject private var categories = CategoriesManager.shared
+
+    private var isConfirmed: Bool { chat.confirmedDrafts.contains(messageID) }
+
+    private struct Target {
+        let id: UUID
+        let name: String
+        let emoji: String
+        let transactions: Int
+        let childIds: Set<UUID>
+    }
+
+    /// Resolved against live data, so names and counts are the app's, never the model's.
+    private var targets: [Target] {
+        let transactions = UserManager.shared.currentUser.transactions
+        return delete.category_ids.compactMap { id in
+            guard let uuid = UUID(uuidString: id),
+                  let found = categories.findCategoryOrSubcategoryById(uuid) else { return nil }
+            let count = transactions.filter { $0.categoryId == uuid }.count
+            if let category = found.category, !category.isDeleted, category.name != "No Category" {
+                let nested = categories.categories.filter { !$0.isDeleted && $0.parentCategoryId == uuid }.map(\.id)
+                let childIds = Set(category.subcategories.map(\.id) + nested)
+                return Target(id: uuid, name: category.name, emoji: category.emoji, transactions: count, childIds: childIds)
+            }
+            if let sub = found.subcategory {
+                return Target(id: uuid, name: sub.name, emoji: sub.emoji, transactions: count, childIds: [])
+            }
+            return nil
+        }
+    }
+
+    var body: some View {
+        let targets = self.targets
+        let ids = Set(targets.map(\.id))
+        let kept = targets.filter { !$0.childIds.isSubset(of: ids) }
+        let deleted = targets.filter { $0.childIds.isSubset(of: ids) }
+        if !isConfirmed, !targets.isEmpty {
+            let moving = deleted.reduce(0) { $0 + $1.transactions }
+            let movingText = moving == 1 ? "1 transaction moves" : "\(moving) transactions move"
+            let detail = [
+                moving > 0 ? "\(movingText) to No Category." : nil,
+                kept.isEmpty ? nil : "\(kept.map(\.name).joined(separator: ", ")) stays, it has subcategories."
+            ].compactMap { $0 }.joined(separator: "\n")
+            AskConfirmCardShell(
+                label: "DELETE CATEGORY",
+                title: deleted.isEmpty
+                    ? kept.map { "\($0.emoji) \($0.name)" }.joined(separator: ", ")
+                    : deleted.map { "\($0.emoji) \($0.name)" }.joined(separator: ", "),
+                detail: detail.isEmpty ? nil : detail,
+                error: chat.draftErrors[messageID],
+                prompt: deleted.count > 1 ? "Delete these \(deleted.count)?" : "Delete this category?",
+                actionTitle: "Delete",
+                actionColor: AppColors.destructiveForeground,
+                action: { chat.confirmCategoryDelete(messageID: messageID, delete: delete) }
+            )
+        } else if !isConfirmed {
+            Text("Those categories couldn't be found anymore.")
+                .font(AppFonts.overusedGroteskMedium(size: 14))
+                .foregroundColor(AppColors.foregroundSecondary)
+        }
+    }
+}
+
+// MARK: - Category merge card
+
+private struct AskCategoryMergeCard: View {
+    let messageID: UUID
+    let merge: AskCategoryMerge
+
+    @ObservedObject private var chat = AskChatManager.shared
+    @ObservedObject private var categories = CategoriesManager.shared
+
+    private var isConfirmed: Bool { chat.confirmedDrafts.contains(messageID) }
+
+    private struct Copy {
+        let name: String
+        let emoji: String
+        let transactions: Int
+    }
+
+    private struct Group {
+        let keep: Copy
+        let others: [Copy]
+    }
+
+    /// Resolved against live data, so names and counts are the app's, never the model's.
+    /// Copies that no longer exist drop out; a group with nothing left to merge drops too.
+    private var groups: [Group] {
+        let transactions = UserManager.shared.currentUser.transactions
+        func copy(_ id: String) -> Copy? {
+            guard let uuid = UUID(uuidString: id),
+                  let found = categories.findCategoryOrSubcategoryById(uuid) else { return nil }
+            let count = transactions.filter { $0.categoryId == uuid }.count
+            if let category = found.category, !category.isDeleted {
+                return Copy(name: category.name, emoji: category.emoji, transactions: count)
+            }
+            if let sub = found.subcategory {
+                return Copy(name: sub.name, emoji: sub.emoji, transactions: count)
+            }
+            return nil
+        }
+        return merge.allGroups.compactMap { group in
+            guard let keep = copy(group.keep_id) else { return nil }
+            let others = group.merge_ids.compactMap(copy)
+            return others.isEmpty ? nil : Group(keep: keep, others: others)
+        }
+    }
+
+    private func count(_ copy: Copy) -> String {
+        copy.transactions == 1 ? "1 transaction" : "\(copy.transactions) transactions"
+    }
+
+    var body: some View {
+        let groups = self.groups
+        if !isConfirmed, let first = groups.first {
+            AskConfirmCardShell(
+                label: "MERGE CATEGORIES",
+                title: groups.count == 1
+                    ? "\(first.keep.emoji) \(first.keep.name)"
+                    : groups.map { "\($0.keep.emoji) \($0.keep.name)" }.joined(separator: ", "),
+                detail: groups.map { group in
+                    let merged = group.others.map { "\($0.name) (\(count($0)))" }.joined(separator: ", ")
+                    return "Keep \(group.keep.name) (\(count(group.keep))), fold in \(merged)"
+                }.joined(separator: "\n"),
+                error: chat.draftErrors[messageID],
+                prompt: groups.count == 1 ? "Merge into one?" : "Merge these \(groups.count) sets?",
+                actionTitle: "Merge",
+                actionColor: nil,
+                action: { chat.confirmCategoryMerge(messageID: messageID, merge: merge) }
+            )
+        } else if !isConfirmed {
+            Text("Those duplicate categories couldn't be found anymore.")
+                .font(AppFonts.overusedGroteskMedium(size: 14))
+                .foregroundColor(AppColors.foregroundSecondary)
+        }
+    }
+}
+
+// MARK: - Category reorganize card
+
+private struct AskCategoryReorganizeCard: View {
+    let messageID: UUID
+    let reorganize: AskCategoryReorganize
+
+    @ObservedObject private var chat = AskChatManager.shared
+    @ObservedObject private var categories = CategoriesManager.shared
+
+    private var isConfirmed: Bool { chat.confirmedDrafts.contains(messageID) }
+
+    private func label(_ id: String?) -> String? {
+        guard let uuid = id.flatMap(UUID.init),
+              let found = categories.findCategoryOrSubcategoryById(uuid) else { return nil }
+        if let category = found.category, !category.isDeleted { return "\(category.emoji) \(category.name)" }
+        if let sub = found.subcategory { return "\(sub.emoji) \(sub.name)" }
+        return nil
+    }
+
+    private func parentName(of id: String?) -> String? {
+        guard let uuid = id.flatMap(UUID.init),
+              let found = categories.findCategoryOrSubcategoryById(uuid) else { return nil }
+        if let parent = found.parent { return parent.name }
+        return found.category?.parentCategoryId.flatMap { categories.findCategory(by: $0)?.name }
+    }
+
+    /// One line per change, resolved against live data. Changes whose categories are gone drop out.
+    private var lines: [String] {
+        let transactions = UserManager.shared.currentUser.transactions
+        return reorganize.changes.compactMap { change in
+            switch change.action {
+            case "nest":
+                guard let item = label(change.category_id), let parent = label(change.parent_id) else { return nil }
+                if let from = parentName(of: change.category_id) { return "Move \(item) from \(from) to \(parent)" }
+                return "Put \(item) under \(parent)"
+            case "unnest":
+                guard let item = label(change.category_id) else { return nil }
+                return "Make \(item) its own category"
+            case "refile":
+                guard let fromID = change.from_id.flatMap(UUID.init),
+                      let from = label(change.from_id), let to = label(change.to_id) else { return nil }
+                let needle = change.merchant?.lowercased()
+                let count = transactions.filter { txn in
+                    txn.categoryId == fromID
+                        && (needle.map { (txn.merchantName ?? "").lowercased().contains($0) } ?? true)
+                }.count
+                guard count > 0 else { return nil }
+                let what = change.merchant.map { "\(count) \($0)" } ?? "\(count)"
+                return "Move \(what) \(count == 1 ? "transaction" : "transactions") from \(from) to \(to)"
+            default:
+                return nil
+            }
+        }
+    }
+
+    var body: some View {
+        let lines = self.lines
+        if !isConfirmed, !lines.isEmpty {
+            AskConfirmCardShell(
+                label: "ORGANIZE CATEGORIES",
+                title: lines.count == 1 ? "1 change" : "\(lines.count) changes",
+                detail: lines.joined(separator: "\n"),
+                error: chat.draftErrors[messageID],
+                prompt: "Apply these changes?",
+                actionTitle: "Apply",
+                actionColor: nil,
+                action: { chat.confirmCategoryReorganize(messageID: messageID, reorganize: reorganize) }
+            )
+        } else if !isConfirmed {
+            Text("Those categories changed since this was suggested. Ask again for a fresh plan.")
+                .font(AppFonts.overusedGroteskMedium(size: 14))
+                .foregroundColor(AppColors.foregroundSecondary)
         }
     }
 }
