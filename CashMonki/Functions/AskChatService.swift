@@ -95,6 +95,10 @@ final class AskChatService {
         onStatus: @escaping @Sendable (String) -> Void = { _ in }
     ) async throws -> Reply {
         var messages: [[String: Any]] = [["role": "system", "content": systemPrompt(categoriesJSON: categoriesJSON)]]
+        let userText = history.last { $0.isUser }?.text ?? ""
+        // A short reply to Ask's own offer ("Yes") counts too.
+        let offeredAllWallets = history.last { !$0.isUser }?.text.lowercased().contains("all wallets") ?? false
+        let allowAllWallets = mentionsWallets(userText) || (offeredAllWallets && userText.count <= 20)
 
         // Replay tool rounds only for the last few assistant turns (see maxReplayedTurns).
         let replayCutoff = history.enumerated()
@@ -144,7 +148,7 @@ final class AskChatService {
                 var roundResults: [AskToolResult] = []
                 for call in response.toolCalls {
                     turnCallIDs.append(call.id)
-                    let result = executeTool(name: call.name, argumentsJSON: call.arguments, callID: call.id, categoriesJSON: categoriesJSON)
+                    let result = executeTool(name: call.name, argumentsJSON: call.arguments, callID: call.id, categoriesJSON: categoriesJSON, allowAllWallets: allowAllWallets)
                     messages.append([
                         "role": "tool",
                         "tool_call_id": call.id,
@@ -180,8 +184,13 @@ final class AskChatService {
                 guard let rows = rowsForThisTurn(source: stat.source, turnCallIDs: turnCallIDs), !rows.isEmpty else {
                     return Reply(message: .text("I couldn't fetch the data for that stat. Try asking again."), toolRounds: toolRounds)
                 }
+                // get_cashflow rows hold exact figures, so a stat must be one of them.
+                let cashflow = rows.flatMap { row in ["income", "expenses", "net"].compactMap { row[$0].flatMap(Double.init) } }
+                if !cashflow.isEmpty, !cashflow.contains(where: { abs(abs($0) - abs(stat.value)) <= 1 }) {
+                    return Reply(message: .text("I couldn't verify that number against your data. Try asking again."), toolRounds: toolRounds)
+                }
                 let total = rows.compactMap { Double($0["amount"] ?? $0["value"] ?? "") }.reduce(0) { $0 + abs($1) }
-                if abs(stat.value) > total * 1.05 + 1 {
+                if cashflow.isEmpty, abs(stat.value) > total * 1.05 + 1 {
                     return Reply(message: .text("I couldn't verify that number against your data. Try asking again."), toolRounds: toolRounds)
                 }
                 // When the model is clearly reporting the row total, use the total the app
@@ -248,7 +257,7 @@ final class AskChatService {
     private static func statusText(forTools names: [String]) -> String {
         switch names.first {
         case "get_recent_transactions": return "Looking through your transactions…"
-        case "get_spending_by_category", "compare_spending": return "Adding up your spending…"
+        case "get_spending_by_category", "compare_spending", "get_cashflow": return "Adding up your spending…"
         case "get_categories", "get_all_categories", "get_category_layout", "get_duplicate_categories": return "Checking your categories…"
         case "get_budgets": return "Checking your budgets…"
         case "get_subscriptions": return "Checking your subscriptions…"
@@ -429,14 +438,27 @@ final class AskChatService {
                     "category": ["type": "string", "description": "Only transactions whose category contains this text"],
                     "merchant": ["type": "string", "description": "Only transactions whose merchant contains this text"],
                     "from": ["type": "string", "description": "Only on/after this date, yyyy-MM-dd"],
-                    "to": ["type": "string", "description": "Only on/before this date, yyyy-MM-dd"]
+                    "to": ["type": "string", "description": "Only on/before this date, yyyy-MM-dd"],
+                    "all_wallets": ["type": "boolean", "description": "Count every wallet. Default false = the wallet in view, matching the Transactions page"],
+                    "wallet": ["type": "string", "description": "Name of one wallet to use instead of the wallet in view, from get_wallets"]
                  ]),
             tool("get_spending_by_category",
                  "Fetch the user's spending totals grouped by category (real data, full history available). Use before showing a spending table or chart.",
                  [
                     "period": ["type": "string", "enum": ["week", "month", "quarter", "year", "all"], "description": "Calendar period to date (month = since the 1st of this month), default month. For rolling windows like 'last 30 days' use from/to instead"],
                     "from": ["type": "string", "description": "Custom range start, yyyy-MM-dd (overrides period)"],
-                    "to": ["type": "string", "description": "Custom range end, yyyy-MM-dd"]
+                    "to": ["type": "string", "description": "Custom range end, yyyy-MM-dd"],
+                    "all_wallets": ["type": "boolean", "description": "Count every wallet. Default false = the wallet in view, matching the Transactions page"],
+                    "wallet": ["type": "string", "description": "Name of one wallet to use instead of the wallet in view, from get_wallets"]
+                 ]),
+            tool("get_cashflow",
+                 "Income, expenses and net for a period, totalled by the app (real data, same figures as the Transactions page). Use for ANY question about income, net, take-home, surplus or a total. Never add rows yourself.",
+                 [
+                    "period": ["type": "string", "enum": ["week", "month", "quarter", "year", "all"], "description": "Calendar period to date, default month. For a past month use from/to"],
+                    "from": ["type": "string", "description": "Custom range start, yyyy-MM-dd (overrides period)"],
+                    "to": ["type": "string", "description": "Custom range end, yyyy-MM-dd"],
+                    "all_wallets": ["type": "boolean", "description": "Count every wallet. Default false = the wallet in view, matching the Transactions page"],
+                    "wallet": ["type": "string", "description": "Name of one wallet to use instead of the wallet in view, from get_wallets"]
                  ]),
             // No get_categories tool: the list is in the system prompt, and offering the tool
             // let the model spend a whole round trip fetching it anyway. executeTool still
@@ -454,6 +476,8 @@ final class AskChatService {
                  "Sum the user's spending for each named period (real data), optionally filtered to one category. Use for any comparison across time (this month vs last month, monthly trend). Returns one row per period; chart or stat the result.",
                  [
                     "category": ["type": "string", "description": "Only transactions whose category contains this text (optional)"],
+                    "all_wallets": ["type": "boolean", "description": "Count every wallet. Default false = the wallet in view, matching the Transactions page"],
+                    "wallet": ["type": "string", "description": "Name of one wallet to use instead of the wallet in view, from get_wallets"],
                     "periods": [
                         "type": "array",
                         "description": "2-12 periods to compare",
@@ -529,8 +553,35 @@ final class AskChatService {
         lastRows = []
     }
 
-    private func executeTool(name: String, argumentsJSON: String, callID: String, categoriesJSON: String) -> String {
+    /// Whether the user's own words reach past the wallet in view. The model can't decide this
+    /// itself: left to choose, it reached for all wallets and its totals stopped matching the
+    /// Transactions page.
+    private func mentionsWallets(_ text: String) -> Bool {
+        let lowered = text.lowercased()
+        return lowered.contains("wallet") || lowered.contains("all accounts") || lowered.contains("every account")
+            || UserManager.shared.currentUser.subAccounts.contains { lowered.contains($0.name.lowercased()) }
+    }
+
+    private func executeTool(name: String, argumentsJSON: String, callID: String, categoriesJSON: String, allowAllWallets: Bool) -> String {
         let args = (try? JSONSerialization.jsonObject(with: Data(argumentsJSON.utf8)) as? [String: Any]) ?? [:]
+        let namedWallet = (args["wallet"] as? String)?.trimmingCharacters(in: .whitespaces).lowercased()
+        let wantsOtherWallets = ((args["all_wallets"] as? Bool) ?? false) || !(namedWallet ?? "").isEmpty
+        var scope = WalletScope.inView
+        if wantsOtherWallets && allowAllWallets {
+            let wallets = UserManager.shared.currentUser.subAccounts
+            if let namedWallet, !namedWallet.isEmpty {
+                // An unknown name stays on the wallet in view rather than widening to all.
+                if let match = wallets.first(where: { $0.name.lowercased() == namedWallet })
+                    ?? wallets.first(where: { $0.name.lowercased().contains(namedWallet) }) {
+                    scope = .named(match)
+                }
+            } else {
+                scope = .all
+            }
+        }
+        let scopeNote = wantsOtherWallets && !allowAllWallets
+            ? "These rows cover only \(AccountManager.shared.currentSubAccount?.name ?? "the wallet in view"). all_wallets and wallet were ignored because the user didn't mention wallets.\n"
+            : ""
         print("🛠️ AskChat: tool \(name) \(args)")
 
         switch name {
@@ -541,16 +592,32 @@ final class AskChatService {
                 category: args["category"] as? String,
                 merchant: args["merchant"] as? String,
                 from: args["from"] as? String,
-                to: args["to"] as? String
+                to: args["to"] as? String,
+                scope: scope
             )
             cache(rows: rows, callID: callID, tool: name, argumentsJSON: argumentsJSON)
-            return encodeRows(rows)
+            return scopeNote + encodeRows(rows)
+
+        case "get_cashflow":
+            let rows = cashflowRows(
+                period: (args["period"] as? String) ?? "month",
+                from: args["from"] as? String,
+                to: args["to"] as? String,
+                scope: scope
+            )
+            cache(rows: rows, callID: callID, tool: name, argumentsJSON: argumentsJSON)
+            return scopeNote + encodeRows(rows)
 
         case "get_spending_by_category":
             let period = (args["period"] as? String) ?? "month"
-            let rows = spendingByCategoryRows(period: period, from: args["from"] as? String, to: args["to"] as? String)
+            let rows = spendingByCategoryRows(
+                period: period,
+                from: args["from"] as? String,
+                to: args["to"] as? String,
+                scope: scope
+            )
             cache(rows: rows, callID: callID, tool: name, argumentsJSON: argumentsJSON)
-            return encodeRows(rows)
+            return scopeNote + encodeRows(rows)
 
         case "get_categories":
             return categoriesJSON
@@ -564,9 +631,9 @@ final class AskChatService {
         case "compare_spending":
             let category = args["category"] as? String
             let periods = (args["periods"] as? [[String: Any]]) ?? []
-            let rows = comparisonRows(periods: periods, category: category)
+            let rows = comparisonRows(periods: periods, category: category, scope: scope)
             cache(rows: rows, callID: callID, tool: name, argumentsJSON: argumentsJSON)
-            return encodeRows(rows)
+            return scopeNote + encodeRows(rows)
 
         case "get_budgets":
             let rows = budgetRows()
@@ -609,7 +676,7 @@ final class AskChatService {
         return string
     }
 
-    private func recentTransactionRows(limit: Int, category: String? = nil, merchant: String? = nil, from: String? = nil, to: String? = nil) -> [[String: String]] {
+    private func recentTransactionRows(limit: Int, category: String? = nil, merchant: String? = nil, from: String? = nil, to: String? = nil, scope: WalletScope = .inView) -> [[String: String]] {
         let formatter = DateFormatter()
         formatter.dateFormat = "MMM d"
         let dayParser = DateFormatter()
@@ -618,7 +685,7 @@ final class AskChatService {
         // "to" is inclusive: push to the end of that day.
         let toDate = to.flatMap { dayParser.date(from: $0) }.map { $0.addingTimeInterval(86_399) }
 
-        return UserManager.shared.currentUser.transactions
+        return scopedTransactions(scope)
             .filter { txn in
                 if let category, !txn.category.localizedCaseInsensitiveContains(category) { return false }
                 if let merchant, !(txn.merchantName ?? "").localizedCaseInsensitiveContains(merchant) { return false }
@@ -634,12 +701,36 @@ final class AskChatService {
                     "date": formatter.string(from: txn.date),
                     "merchant": txn.merchantName ?? txn.category,
                     "category": txn.category,
-                    "amount": String(format: "%.2f", txn.amount)
+                    "amount": String(format: "%.2f", primaryAmount(txn))
                 ]
             }
     }
 
-    private func spendingByCategoryRows(period: String, from: String? = nil, to: String? = nil) -> [[String: String]] {
+    private enum WalletScope {
+        case inView
+        case all
+        case named(SubAccount)
+    }
+
+    /// The transactions the Transactions page counts: the wallet in view, unless the user
+    /// asked for every wallet. Totals from these match what the user sees on that page.
+    private func scopedTransactions(_ scope: WalletScope) -> [Txn] {
+        switch scope {
+        case .inView: return AccountManager.shared.filteredTransactions
+        case .all: return UserManager.shared.currentUser.transactions
+        case .named(let wallet): return UserManager.shared.currentUser.transactions(for: wallet.id)
+        }
+    }
+
+    /// A transaction's signed amount in the primary currency, converted like the Transactions page.
+    private func primaryAmount(_ txn: Txn) -> Double {
+        let primary = CurrencyPreferences.shared.primaryCurrency
+        return txn.primaryCurrency == primary
+            ? txn.amount
+            : CurrencyRateManager.shared.convertAmount(txn.amount, from: txn.primaryCurrency, to: primary)
+    }
+
+    private func dateRange(period: String, from: String?, to: String?) -> (from: Date, to: Date) {
         let calendar = Calendar.current
         let dayParser = DateFormatter()
         dayParser.dateFormat = "yyyy-MM-dd"
@@ -657,18 +748,40 @@ final class AskChatService {
         }
         let fromDate = from.flatMap { dayParser.date(from: $0) } ?? cutoff
         let toDate = to.flatMap { dayParser.date(from: $0) }.map { $0.addingTimeInterval(86_399) } ?? .distantFuture
+        return (fromDate, toDate)
+    }
 
-        let expenses = UserManager.shared.currentUser.transactions
-            .filter { $0.date >= fromDate && $0.date <= toDate && $0.amount < 0 }
-        var grouped = Dictionary(grouping: expenses, by: { $0.category })
-            .mapValues { txns in (amount: txns.reduce(0) { $0 + abs($1.amount) }, count: txns.count) }
-        // Fold in tracked subscriptions not already materialized as transactions.
-        for occ in subscriptionOccurrences(from: fromDate, to: toDate, category: nil) {
-            var entry = grouped[occ.category] ?? (amount: 0, count: 0)
-            entry.amount += abs(occ.amount)
-            entry.count += 1
-            grouped[occ.category] = entry
+    private func walletLabel(_ scope: WalletScope) -> String {
+        switch scope {
+        case .inView: return AccountManager.shared.currentSubAccount?.name ?? "Current wallet"
+        case .all: return "All wallets"
+        case .named(let wallet): return wallet.name
         }
+    }
+
+    /// Income, expenses and net, totalled here so the model never adds rows itself.
+    private func cashflowRows(period: String, from: String?, to: String?, scope: WalletScope) -> [[String: String]] {
+        let range = dateRange(period: period, from: from, to: to)
+        let amounts = scopedTransactions(scope)
+            .filter { $0.date >= range.from && $0.date <= range.to }
+            .map(primaryAmount)
+        let income = amounts.filter { $0 > 0 }.reduce(0, +)
+        let expenses = abs(amounts.filter { $0 < 0 }.reduce(0, +))
+        return [[
+            "wallet": walletLabel(scope),
+            "income": String(format: "%.2f", income),
+            "expenses": String(format: "%.2f", expenses),
+            "net": String(format: "%.2f", income - expenses),
+            "transactions": String(amounts.count)
+        ]]
+    }
+
+    private func spendingByCategoryRows(period: String, from: String? = nil, to: String? = nil, scope: WalletScope = .inView) -> [[String: String]] {
+        let range = dateRange(period: period, from: from, to: to)
+        let expenses = scopedTransactions(scope)
+            .filter { $0.date >= range.from && $0.date <= range.to && $0.amount < 0 }
+        let grouped = Dictionary(grouping: expenses, by: { $0.category })
+            .mapValues { txns in (amount: txns.reduce(0) { $0 + abs(primaryAmount($1)) }, count: txns.count) }
         return grouped
             .map { (category, agg) in (category, agg.amount, agg.count) }
             .sorted { $0.1 > $1.1 }
@@ -678,69 +791,10 @@ final class AskChatService {
             .map { ["category": $0.0, "amount": String(format: "%.2f", $0.1), "count": "\($0.2)"] }
     }
 
-    /// Virtual expense occurrences from tracked subscriptions that aren't already real transactions.
-    /// Subscriptions live in SubscriptionManager, not in currentUser.transactions — only auto-add
-    /// subs (once due) get materialized. This projects the rest (and any due-but-not-yet-generated
-    /// dates) so AI spending sums include recurring subscription costs. Days already covered by a
-    /// real subscription-linked txn are skipped (no double count). Occurrences after now are excluded
-    /// to match materialized-transaction behavior.
-    private func subscriptionOccurrences(from: Date, to: Date, category: String?) -> [(date: Date, category: String, amount: Double)] {
-        let now = Date()
-        let upperBound = min(to, now)
-        guard from <= upperBound else { return [] }
-
-        let calendar = Calendar.current
-        let realTxns = UserManager.shared.currentUser.transactions
-        let primaryCurrency = CurrencyPreferences.shared.primaryCurrency
-        var result: [(date: Date, category: String, amount: Double)] = []
-
-        for sub in SubscriptionManager.persistedSubscriptions() {
-            guard sub.isActive else { continue }
-            if let category, !sub.category.localizedCaseInsensitiveContains(category) { continue }
-            // Spending tools only sum expenses — skip income subscriptions.
-            if subscriptionIsIncome(sub) { continue }
-
-            // Days already materialized as real txns for this subscription.
-            let coveredDays = Set(realTxns
-                .filter { $0.subscriptionId == sub.id }
-                .map { calendar.startOfDay(for: $0.date) })
-
-            // Spending sums are in the primary currency; a 15 USD subscription used to add 15
-            // to a PHP total.
-            let amount = sub.currency == primaryCurrency
-                ? abs(sub.amount)
-                : abs(CurrencyRateManager.shared.convertAmount(sub.amount, from: sub.currency, to: primaryCurrency))
-
-            var occurrence = sub.createdAt
-            var steps = 0
-            while occurrence <= upperBound && steps < 2000 {
-                steps += 1
-                if occurrence >= from, !coveredDays.contains(calendar.startOfDay(for: occurrence)) {
-                    result.append((date: occurrence, category: sub.category, amount: -amount))
-                }
-                occurrence = sub.frequency.nextOccurrence(from: occurrence)
-            }
-        }
-        return result
-    }
-
-    /// Mirror of SubscriptionManager's income detection (that method is private there).
-    private func subscriptionIsIncome(_ sub: Subscription) -> Bool {
-        let cm = CategoriesManager.shared
-        if let catId = sub.categoryId, let r = cm.findCategoryOrSubcategoryById(catId) {
-            if let c = r.category { return c.type == .income }
-            if let s = r.subcategory { return s.type == .income }
-        }
-        let r = cm.findCategoryOrSubcategory(by: sub.category)
-        if let c = r.category { return c.type == .income }
-        if let s = r.subcategory { return s.type == .income }
-        return false
-    }
-
-    private func comparisonRows(periods: [[String: Any]], category: String?) -> [[String: String]] {
+    private func comparisonRows(periods: [[String: Any]], category: String?, scope: WalletScope = .inView) -> [[String: String]] {
         let parser = DateFormatter()
         parser.dateFormat = "yyyy-MM-dd"
-        let transactions = UserManager.shared.currentUser.transactions
+        let transactions = scopedTransactions(scope)
         return periods.prefix(12).compactMap { period in
             guard let label = period["label"] as? String,
                   let fromString = period["from"] as? String, let from = parser.date(from: fromString),
@@ -751,9 +805,8 @@ final class AskChatService {
                 if let category, !txn.category.localizedCaseInsensitiveContains(category) { return false }
                 return true
             }
-            let subs = subscriptionOccurrences(from: from, to: to, category: category)
-            let total = matching.reduce(0) { $0 + abs($1.amount) } + subs.reduce(0) { $0 + abs($1.amount) }
-            return ["label": label, "amount": String(format: "%.2f", total), "count": "\(matching.count + subs.count)"]
+            let total = matching.reduce(0) { $0 + abs(primaryAmount($1)) }
+            return ["label": label, "amount": String(format: "%.2f", total), "count": "\(matching.count)"]
         }
     }
 
@@ -796,7 +849,8 @@ final class AskChatService {
             return sorted[sorted.count / 2]
         }
 
-        let charges = UserManager.shared.currentUser.transactions.filter {
+        // The wallet in view only: a tracked item is created in that wallet.
+        let charges = scopedTransactions(.inView).filter {
             $0.amount < 0 && $0.subscriptionId == nil && !$0.isRecurring
                 && !($0.merchantName ?? "").trimmingCharacters(in: .whitespaces).isEmpty
         }
@@ -859,11 +913,16 @@ final class AskChatService {
     private func subscriptionRows() -> [[String: String]] {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd"
+        let wallets = Dictionary(
+            UserManager.shared.currentUser.subAccounts.map { ($0.id, $0.name) },
+            uniquingKeysWith: { first, _ in first }
+        )
         return SubscriptionManager.persistedSubscriptions()
             .sorted { $0.nextDueDate < $1.nextDueDate }
             .map { sub in
                 [
                     "id": sub.id.uuidString,
+                    "wallet": sub.walletId.flatMap { wallets[$0] } ?? "",
                     "name": sub.name,
                     "amount": String(format: "%.2f", sub.amount),
                     "currency": sub.currency.rawValue,
@@ -1319,12 +1378,15 @@ final class AskChatService {
     private func systemPrompt(categoriesJSON: String) -> String {
         let today = ISO8601DateFormatter.askDateOnly.string(from: Date())
         let currency = CurrencyPreferences.shared.primaryCurrency.rawValue
+        let walletName = AccountManager.shared.currentSubAccount?.name ?? "their current wallet"
         return """
         You are Cashmonki's finance assistant inside a personal expense-tracking app. Today's date is \(today). The user's primary currency is \(currency).
 
+        NUMBERS: The wallet in view is \(walletName). Data tools cover only that wallet, the same as the Transactions page, unless you pass wallet with a wallet's name, or all_wallets true; the app only honors those when the user's message mentions wallets. Use wallet for one named wallet and all_wallets only for every wallet. If a result is empty, report that for this wallet and offer to check all wallets. Say which wallet a total covers. For income, expenses, net, take-home or surplus call get_cashflow, and quote totals from tools exactly: never add up rows yourself. Totals count logged transactions only, so recurring items not logged yet are not in them. get_subscriptions lists every wallet, so say which wallet an item belongs to when it isn't the one in view. You have no account balance or starting balance data: never state or estimate one. If two numbers disagree or the user questions a number, call get_cashflow again and compare wallet and dates. If that doesn't explain it, say you don't know why; never invent causes such as transfers, adjustments or deleted transactions.
+
         Your replies must be EXACTLY ONE of these JSON message types (raw JSON only, no markdown fences, no extra prose):
 
-        1. {"type": "text", "text": "..."} — normal answers, anything conversational. When you ask the user to DECIDE something (disambiguation, yes/no, picking between options), add "choices": ["...", "..."] with 2-4 short tappable answers.
+        1. {"type": "text", "text": "..."} — normal answers, anything conversational. Whenever your text ends in a question or offer the user can answer in a few words (yes/no, "want me to...?", "would you like...?", picking between options), you MUST add "choices": ["...", "..."] with 2-4 short tappable answers, written as what the user would say, like "Yes, check all wallets" and "No thanks". Only leave choices out when the answer has to be typed, such as an amount or a name.
 
         2. {"type": "table", "title": "...", "columns": [{"key": "...", "label": "...", "align": "left|right", "format": "currency"?}]} — when showing transactions or spending data. RULES: you MUST call a data tool first (get_recent_transactions or get_spending_by_category); pick column keys from the tool result's row keys; do NOT include rows — the app fills them from the tool result; money columns get "align": "right" and "format": "currency"; set "source" to the tool_call_id whose rows you are showing, so the app fills the right data and a later turn can tell what the table was built from. Never invent, recall, or estimate numbers yourself — no tool result, no table.
 
