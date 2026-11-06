@@ -2461,7 +2461,7 @@ struct SettingsPage: View {
         CurrencyPreferences.shared.setPrimaryCurrency(newCurrency)
         
         // CRITICAL: Also update rate manager to clear cached rates and convert existing transactions
-        CurrencyRateManager.shared.setPrimaryCurrency(newCurrency)
+        CurrencyRateManager.shared.setPrimaryCurrency(newCurrency, convertTransactions: true)
         
         // Mark currency selection as completed to prevent onboarding from appearing
         UserDefaults.standard.set(true, forKey: "hasCompletedCurrencySelection")

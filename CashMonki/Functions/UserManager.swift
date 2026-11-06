@@ -76,6 +76,11 @@ class UserManager: ObservableObject {
     }
     
     private let firestore = FirestoreService.shared
+
+    /// True from the moment a fresh install builds a placeholder user for a signed-in account
+    /// until that account's cloud data has been read. saveUserData replaces the whole wallet list,
+    /// so an early write would overwrite the account's real wallets with the placeholder.
+    private var awaitingCloudRestore = false
     private var syncManager: TransactionSyncManager?
     private var hasLoadedFromFirebase = false
     private var hasCompletedInitialLoad = false
@@ -266,6 +271,7 @@ class UserManager: ObservableObject {
             loadFromFirebase { [weak self] success in
                 guard let self = self else { return }
                 DispatchQueue.main.async {
+                    if success { self.awaitingCloudRestore = false }
                     print(success ? "☁️ UserManager: Cloud restore complete — \(self.currentUser.transactions.count) transaction(s) after merge"
                                   : "⚠️ UserManager: Cloud restore failed — keeping local data untouched")
                     self.saveCurrentUserLocally()
@@ -477,6 +483,12 @@ class UserManager: ObservableObject {
             enableFirebaseSync: true // DEFAULT ON - cloud backup
         )
         
+        // Before the rename below, which uploads. Firebase's own session: AuthenticationManager isn't ready this early in a launch.
+        #if canImport(FirebaseAuth)
+        awaitingCloudRestore = FirebaseApp.app() != nil && Auth.auth().currentUser != nil
+        #endif
+        print("☁️ UserManager: fresh user, waiting for cloud read before uploading: \(awaitingCloudRestore)")
+
         // Update the default wallet name based on user's name
         updateDefaultWalletName(basedOnUserName: name)
         
@@ -488,6 +500,7 @@ class UserManager: ObservableObject {
             print("   \(index + 1). '\(account.name)' (ID: \(account.id.uuidString.prefix(8))) - Default: \(account.isDefault)")
         }
         
+
         // Save new user to local storage immediately
         saveCurrentUserLocally()
         
@@ -1906,9 +1919,17 @@ class UserManager: ObservableObject {
         guard FirebaseApp.app() != nil else { finishClaim(completion: completion); return }
         firestore.fetchUserData(userId: firebaseUID) { [weak self] userResult in
             guard let self = self else { completion(false); return }
+            // A failed read must never count as "the cloud has nothing": keep blocking the upload.
+            if case .success = userResult {
+                DispatchQueue.main.async { self.awaitingCloudRestore = false }
+            }
             if case .success(let cloudUser?) = userResult {
                 DispatchQueue.main.async {
-                    self.currentUser.accounts = self.mergeAccounts(local: self.currentUser.accounts, firebase: cloudUser.accounts)
+                    self.currentUser.accounts = self.mergeAccounts(
+                        local: self.currentUser.accounts,
+                        firebase: cloudUser.accounts,
+                        dropLocalPlaceholders: !cloudUser.accounts.isEmpty
+                    )
                     if self.currentUser.name.isEmpty { self.currentUser.name = cloudUser.name }
                     // Restore onboarding progress from the cloud too — a returning user on a
                     // FRESH INSTALL has no local box, so without this they'd be forced through
@@ -2041,9 +2062,18 @@ class UserManager: ObservableObject {
         let boxIDs = Set(box.transactions.map(\.id))
         print("♻️ UserManager: RESTORE from \(sourceUID.prefix(12)) — \(box.transactions.count) transactions become the truth")
 
+        // Conflicts go to the newest copy, so restored rows must be stamped as new. Keeping the
+        // file's old timestamps let the bad cloud copies win straight back on the next merge.
+        let restored: [Txn] = box.transactions.map { transaction in
+            var stamped = transaction
+            stamped.syncMetadata.markModified()
+            return stamped
+        }
+
         // Local first, so the user sees the restored state immediately even if the network is slow.
         clearTombstones(for: boxIDs)
-        currentUser.transactions = box.transactions
+        let walletsBeforeRestore = currentUser.accounts
+        currentUser.transactions = restored
         // Wallet tombstones are UNIONED, not replaced. A box written before wallet tombstones
         // existed decodes deletedAccounts as [], so assigning it would clear the graveyard and
         // bring every deleted wallet back. Last-write-wins still lets the file win where it
@@ -2054,9 +2084,21 @@ class UserManager: ObservableObject {
             cloudLive: [],
             cloudDeleted: currentUser.deletedAccounts
         )
-        currentUser.accounts = walletMerge.live
+        // A cloud save file can lack this phone's wallets or hold placeholders for them. Restored
+        // transactions still need those wallets, so real names on this phone are kept.
+        var wallets = walletMerge.live
+        let referencedWallets = Set(restored.compactMap(\.walletID))
+        for wallet in walletsBeforeRestore where wallet.name != "Synced Wallet" {
+            if let index = wallets.firstIndex(where: { $0.id == wallet.id }) {
+                if wallets[index].name == "Synced Wallet" { wallets[index] = wallet }
+            } else if referencedWallets.contains(wallet.id) {
+                wallets.append(wallet)
+            }
+        }
+        currentUser.accounts = wallets
         currentUser.deletedAccounts = walletMerge.deleted
-        currentUser.budgets = box.budgets
+        // A cloud save file can hold no budgets even though this phone has them.
+        if !box.budgets.isEmpty { currentUser.budgets = box.budgets }
         saveCurrentUserLocally()
         objectWillChange.send()
 
@@ -2183,6 +2225,8 @@ class UserManager: ObservableObject {
             guard let data = d.data(forKey: key),
                   let u = try? JSONDecoder().decode(UserData.self, from: data) else { continue }
             if u.transactions.isEmpty && u.accounts.isEmpty { continue }
+            let currencies = Dictionary(grouping: u.transactions, by: { $0.primaryCurrency.rawValue }).mapValues(\.count)
+            print("📦 Save file \(uid): \(u.transactions.count) transactions, currencies \(currencies), wallets \(u.accounts.map(\.name))")
 
             // A linked box's data lives in the account now, so REPORT the account's live figures
             // rather than the box's frozen ones. This used to be done by copying the account's
@@ -2411,7 +2455,8 @@ class UserManager: ObservableObject {
                             localLive: self.currentUser.accounts,
                             localDeleted: self.currentUser.deletedAccounts,
                             cloudLive: userData.accounts,
-                            cloudDeleted: userData.deletedAccounts
+                            cloudDeleted: userData.deletedAccounts,
+                            dropLocalPlaceholders: true
                         )
                         let mergedAccounts = walletMerge.live
                         
@@ -2591,6 +2636,11 @@ class UserManager: ObservableObject {
             completion(true)
             return
         }
+        guard !awaitingCloudRestore else {
+            print("☁️ UserManager: skipping user upload until cloud data has been read")
+            completion(true)
+            return
+        }
         DispatchQueue.main.async { self.isSyncingToCloud = true }
         firestore.saveUserData(currentUser, userId: syncUID()) { [weak self] result in
             guard let self = self else { return }
@@ -2616,6 +2666,11 @@ class UserManager: ObservableObject {
         guard currentUser.enableFirebaseSync else {
             print("🚫 UserManager: Firebase sync disabled for user - skipping sync")
             completion(true) // Return success since user chose not to sync
+            return
+        }
+        guard !awaitingCloudRestore else {
+            print("☁️ UserManager: skipping user upload until cloud data has been read")
+            completion(true)
             return
         }
 
@@ -3441,7 +3496,8 @@ class UserManager: ObservableObject {
             localLive: currentUser.accounts,
             localDeleted: currentUser.deletedAccounts,
             cloudLive: cloud.accounts,
-            cloudDeleted: cloud.deletedAccounts
+            cloudDeleted: cloud.deletedAccounts,
+            dropLocalPlaceholders: true
         )
         let mergedAccounts = walletMerge.live
         let mergedBudgets = mergeBudgets(currentUser.budgets, cloud.budgets)
