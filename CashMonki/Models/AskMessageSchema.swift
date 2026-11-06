@@ -27,6 +27,7 @@ enum AskStructuredMessage {
     case categoryDraft(AskCategoryDraft)
     case categoryMerge(AskCategoryMerge)
     case categoryReorganize(AskCategoryReorganize)
+    case categoryDelete(AskCategoryDelete)
     case budgetDraft(AskBudgetDraft)
     case budgetUpdate(AskBudgetUpdate)
     case budgetDelete(AskBudgetDelete)
@@ -50,6 +51,7 @@ enum AskStructuredMessage {
         case .categoryDraft: return "category_draft"
         case .categoryMerge: return "category_merge"
         case .categoryReorganize: return "category_reorganize"
+        case .categoryDelete: return "category_delete"
         case .budgetDraft: return "budget_draft"
         case .budgetUpdate: return "budget_update"
         case .budgetDelete: return "budget_delete"
@@ -188,6 +190,13 @@ struct AskCategoryDraft: Codable {
     let parent: String?
     /// "expense" (default) or "income".
     let category_type: String?
+}
+
+/// Proposed deletion of categories or subcategories. Ids come from get_categories.
+/// Applied ONLY after the user confirms.
+struct AskCategoryDelete: Codable {
+    let type: String
+    let category_ids: [String]
 }
 
 /// One set of duplicate categories: `merge_ids` fold into `keep_id`.
@@ -602,6 +611,13 @@ enum AskMessageDecoder {
                   })
             else { return malformed(trimmed) }
             return .categoryMerge(merge)
+
+        case "category_delete":
+            guard let delete = try? decoder.decode(AskCategoryDelete.self, from: data),
+                  (1...20).contains(delete.category_ids.count),
+                  delete.category_ids.allSatisfy({ UUID(uuidString: $0) != nil })
+            else { return malformed(trimmed) }
+            return .categoryDelete(delete)
 
         case "category_reorganize":
             guard let reorganize = try? decoder.decode(AskCategoryReorganize.self, from: data),
