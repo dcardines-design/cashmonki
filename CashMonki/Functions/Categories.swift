@@ -2356,6 +2356,54 @@ class CategoriesManager: ObservableObject {
         /// Move transactions to a category, optionally only one merchant's. With no `fromId`
         /// the merchant's transactions move from wherever they are filed.
         case refile(fromId: UUID?, toId: UUID, merchant: String?)
+        /// Add a category with a caller-chosen id, so later changes in the same batch can point
+        /// at it. Under `parentId` it inherits the parent's type.
+        case create(id: UUID, name: String, emoji: String, type: CategoryType, parentId: UUID?)
+    }
+
+    /// Why a category can't go under a parent, or nil if it can. The same rules
+    /// reorganizeCategories applies, so the Ask card never promises a move that gets skipped.
+    /// `parentId` nil means the parent is new in the same batch, with `parentType`.
+    func nestBlockReason(categoryId: UUID, parentId: UUID?, parentType: CategoryType?) -> String? {
+        let noCategoryIds: Set<UUID> = [
+            UUID(uuidString: "00000000-0000-0000-0000-000000000001")!,
+            UUID(uuidString: "00000000-0000-0000-0000-000000000002")!
+        ]
+        if noCategoryIds.contains(categoryId) { return "Can't be moved" }
+        guard let found = findCategoryOrSubcategoryById(categoryId) else { return "Not found" }
+        let ownType = found.category?.type ?? found.subcategory?.type
+        var targetType = parentType
+        if let parentId {
+            guard !noCategoryIds.contains(parentId),
+                  let parent = categories.first(where: { $0.id == parentId && !$0.isDeleted }),
+                  parent.parentCategoryId == nil
+            else { return "Parent is a subcategory" }
+            targetType = parent.type
+        }
+        if let ownType, let targetType, ownType != targetType { return "Income and expense don't mix" }
+        if UserManager.shared.currentUser.budgets.contains(where: { $0.categoryId == categoryId }) { return "Has a budget" }
+        if let category = found.category, !category.isDeleted {
+            let hasChildren = !category.subcategories.isEmpty
+                || categories.contains { !$0.isDeleted && $0.parentCategoryId == categoryId }
+            if hasChildren { return "Has subcategories" }
+        }
+        return nil
+    }
+
+    /// A live category or subcategory named `name` (ignoring case) at that level: top-level when
+    /// `parentId` is nil, otherwise under that parent. Lets a batch reuse what already exists
+    /// instead of making a duplicate.
+    func existingCategoryId(named name: String, parentId: UUID?) -> UUID? {
+        let wanted = name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !wanted.isEmpty else { return nil }
+        if let found = categories.first(where: {
+            !$0.isDeleted && $0.parentCategoryId == parentId && $0.name.lowercased() == wanted
+        }) {
+            return found.id
+        }
+        guard let parentId,
+              let parent = categories.first(where: { $0.id == parentId && !$0.isDeleted }) else { return nil }
+        return parent.subcategories.first { $0.name.lowercased() == wanted }?.id
     }
 
     /// Whether a refile takes this transaction. Shared with the Ask card, so the count the
@@ -2370,7 +2418,11 @@ class CategoriesManager: ObservableObject {
     }
 
     struct CategoryReorganizeResult {
+        let created: Int
+        /// Changes applied, re-files included.
         let applied: Int
+        /// Of those, the ones that moved a category (nest or unnest), not its transactions.
+        let restructured: Int
         let skipped: Int
         let movedTransactions: Int
     }
@@ -2387,6 +2439,8 @@ class CategoriesManager: ObservableObject {
             UUID(uuidString: "00000000-0000-0000-0000-000000000002")!
         ]
         let userManager = UserManager.shared
+        var created = 0
+        var restructured = 0
         var applied = 0
         var skipped = 0
         var categoriesChanged = false
@@ -2445,6 +2499,7 @@ class CategoriesManager: ObservableObject {
                 }
                 categoriesChanged = true
                 applied += 1
+                restructured += 1
 
             case .unnest(let id):
                 if let index = liveIndex(id), categories[index].parentCategoryId != nil {
@@ -2462,6 +2517,7 @@ class CategoriesManager: ObservableObject {
                 }
                 categoriesChanged = true
                 applied += 1
+                restructured += 1
 
             case .refile(let fromId, let toId, let merchant):
                 guard fromId != toId, !noCategoryIds.contains(toId),
@@ -2480,6 +2536,25 @@ class CategoriesManager: ObservableObject {
                     moved += 1
                 }
                 if moved > 0 { applied += 1 } else { skipped += 1 }
+
+            case .create(let id, let name, let emoji, let type, let parentId):
+                let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !trimmed.isEmpty, liveIndex(id) == nil, embeddingIndex(id) == nil else { skipped += 1; continue }
+                var finalType = type
+                if let parentId {
+                    // Two levels at most, and never under No Category.
+                    guard !noCategoryIds.contains(parentId),
+                          let parentIndex = liveIndex(parentId),
+                          categories[parentIndex].parentCategoryId == nil
+                    else { skipped += 1; continue }
+                    finalType = categories[parentIndex].type
+                }
+                categories.append(UnifiedCategoryData(
+                    id: id, name: trimmed, emoji: emoji, type: finalType,
+                    parentCategoryId: parentId, isBuiltIn: false
+                ))
+                categoriesChanged = true
+                created += 1
             }
         }
 
@@ -2488,9 +2563,9 @@ class CategoriesManager: ObservableObject {
             clearCategoryGroupCache()
         }
         userManager.updateTransactions(Array(refiled.values))
-        print("✅ reorganizeCategories: applied \(applied), skipped \(skipped), re-filed \(refiled.count) transactions")
+        print("✅ reorganizeCategories: created \(created), applied \(applied), skipped \(skipped), re-filed \(refiled.count) transactions")
         objectWillChange.send()
-        return CategoryReorganizeResult(applied: applied, skipped: skipped, movedTransactions: refiled.count)
+        return CategoryReorganizeResult(created: created, applied: applied, restructured: restructured, skipped: skipped, movedTransactions: refiled.count)
     }
 
     /// Delete a specific subcategory and convert affected transactions to "No Category"

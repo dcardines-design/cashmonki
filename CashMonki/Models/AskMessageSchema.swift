@@ -260,9 +260,11 @@ struct AskCategoryMerge: Codable {
     }
 }
 
-/// One step of a reorganize card. `action` is "nest" (category_id goes under parent_id),
-/// "unnest" (category_id becomes top-level) or "refile" (from_id's transactions, optionally
-/// only those whose merchant contains `merchant`, move to to_id).
+/// One step of a reorganize card. `action` is "create" (a new category named `name`, given a
+/// `ref` so later steps can point at it, top-level or under parent_id / parent_ref), "nest"
+/// (category_id goes under parent_id or parent_ref), "unnest" (category_id becomes top-level)
+/// or "refile" (from_id's transactions, optionally only those whose merchant contains
+/// `merchant`, move to to_id or to_ref).
 struct AskCategoryChange: Codable {
     let action: String
     let category_id: String?
@@ -270,20 +272,44 @@ struct AskCategoryChange: Codable {
     let from_id: String?
     let to_id: String?
     let merchant: String?
+    var ref: String? = nil
+    var name: String? = nil
+    var emoji: String? = nil
+    var category_type: String? = nil
+    var parent_ref: String? = nil
+    var to_ref: String? = nil
+
+    private static func isID(_ value: String?) -> Bool { value.flatMap { UUID(uuidString: $0) } != nil }
+    private static func isRef(_ value: String?) -> Bool { !(value ?? "").trimmingCharacters(in: .whitespaces).isEmpty }
+
+    /// A parent given either as an existing id or as a ref, never both.
+    private var hasOptionalParent: Bool {
+        if Self.isID(parent_id) { return !Self.isRef(parent_ref) }
+        return parent_id == nil
+    }
 
     var isValid: Bool {
-        func isID(_ value: String?) -> Bool { value.flatMap { UUID(uuidString: $0) } != nil }
         switch action {
-        case "nest": return isID(category_id) && isID(parent_id) && category_id != parent_id
-        case "unnest": return isID(category_id)
+        case "create":
+            return Self.isRef(ref) && Self.isRef(name) && hasOptionalParent
+        case "nest":
+            guard Self.isID(category_id) else { return false }
+            if Self.isRef(parent_ref) { return parent_id == nil }
+            return Self.isID(parent_id) && category_id != parent_id
+        case "unnest": return Self.isID(category_id)
         case "refile":
+            // The target is an existing id or a category created in the same card.
+            let toNew = Self.isRef(to_ref)
+            guard toNew ? to_id == nil : Self.isID(to_id) else { return false }
             // Without a source category it needs a merchant, or it would move everything.
-            guard isID(to_id) else { return false }
-            if from_id == nil { return !(merchant ?? "").trimmingCharacters(in: .whitespaces).isEmpty }
-            return isID(from_id) && from_id != to_id
+            if from_id == nil { return Self.isRef(merchant) }
+            return Self.isID(from_id) && from_id != to_id
         default: return false
         }
     }
+
+    /// Whether the transactions this change moves land in a category the card creates.
+    var targetRef: String? { action == "refile" ? to_ref : nil }
 }
 
 /// Proposed restructuring of the user's categories. Ids come from get_category_layout.
@@ -291,6 +317,40 @@ struct AskCategoryChange: Codable {
 struct AskCategoryReorganize: Codable {
     let type: String
     let changes: [AskCategoryChange]
+
+    static let maxChanges = 40
+
+    var creates: [AskCategoryChange] { changes.filter { $0.action == "create" } }
+
+    /// New top-level categories that only exist to hold categories moved into them, when every
+    /// one of those moves is blocked (`isBlocked`). Creating them would leave an empty category.
+    func emptyContainerRefs(isBlocked: (AskCategoryChange) -> Bool) -> Set<String> {
+        var refs: Set<String> = []
+        for create in creates where create.parent_id == nil && create.parent_ref == nil {
+            guard let ref = create.ref else { continue }
+            let nests = changes.filter { $0.action == "nest" && $0.parent_ref == ref }
+            let otherUses = changes.contains { $0.to_ref == ref || ($0.action == "create" && $0.parent_ref == ref) }
+            if !nests.isEmpty, !otherUses, nests.allSatisfy(isBlocked) { refs.insert(ref) }
+        }
+        return refs
+    }
+
+    /// Every ref is defined once by a create, every ref used points at one, and a new
+    /// category's parent is never itself a subcategory (categories go two levels deep).
+    var refsAreConsistent: Bool {
+        var defined: [String: AskCategoryChange] = [:]
+        for create in creates {
+            guard let ref = create.ref, defined[ref] == nil else { return false }
+            defined[ref] = create
+        }
+        for change in changes {
+            for used in [change.parent_ref, change.to_ref].compactMap({ $0 }) {
+                guard let target = defined[used], used != change.ref else { return false }
+                if change.parent_ref == used, target.parent_id != nil || target.parent_ref != nil { return false }
+            }
+        }
+        return true
+    }
 }
 
 // MARK: - Tool-call replay
@@ -687,8 +747,9 @@ enum AskMessageDecoder {
 
         case "category_reorganize":
             guard let reorganize = try? decoder.decode(AskCategoryReorganize.self, from: data),
-                  (1...10).contains(reorganize.changes.count),
-                  reorganize.changes.allSatisfy(\.isValid)
+                  (1...AskCategoryReorganize.maxChanges).contains(reorganize.changes.count),
+                  reorganize.changes.allSatisfy(\.isValid),
+                  reorganize.refsAreConsistent
             else { return malformed(trimmed) }
             return .categoryReorganize(reorganize)
 
