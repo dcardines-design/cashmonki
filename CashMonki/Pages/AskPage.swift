@@ -35,6 +35,13 @@ struct AskDisplayMessage: Identifiable, Codable {
         case stat(AskStatMessage)
         case question(String, [String])
         case categoryDraft(AskCategoryDraft)
+        case categoryMerge(AskCategoryMerge)
+        case categoryReorganize(AskCategoryReorganize)
+        case categoryDelete(AskCategoryDelete)
+        case subscriptionBatch(AskSubscriptionBatch)
+        case csvExport(AskCsvExport)
+        case walletCreate(AskWalletCreate)
+        case walletSwitch(AskWalletSwitch)
         case draftBatch(AskTransactionDraftBatch)
         case budgetDraft(AskBudgetDraft)
         case budgetUpdate(AskBudgetUpdate)
@@ -59,6 +66,13 @@ struct AskDisplayMessage: Identifiable, Codable {
             case .stat: return "stat"
             case .question: return "question"
             case .categoryDraft: return "category_draft"
+            case .categoryMerge: return "category_merge"
+            case .categoryReorganize: return "category_reorganize"
+            case .categoryDelete: return "category_delete"
+            case .subscriptionBatch: return "subscription_batch"
+            case .csvExport: return "csv_export"
+            case .walletCreate: return "wallet_create"
+            case .walletSwitch: return "wallet_switch"
             case .draftBatch: return "transaction_draft_batch"
             case .budgetDraft: return "budget_draft"
             case .budgetUpdate: return "budget_update"
@@ -73,7 +87,8 @@ struct AskDisplayMessage: Identifiable, Codable {
         /// older pending card (see AskChatManager.appendPending).
         var isPending: Bool {
             switch self {
-            case .draft, .draftBatch, .update, .deleteRequest, .categoryDraft,
+            case .draft, .draftBatch, .update, .deleteRequest, .categoryDraft, .categoryMerge, .categoryReorganize, .categoryDelete,
+                 .subscriptionBatch, .csvExport, .walletCreate, .walletSwitch,
                  .budgetDraft, .budgetUpdate, .budgetDelete,
                  .subscriptionDraft, .subscriptionUpdate, .subscriptionDelete:
                 return true
@@ -155,6 +170,30 @@ struct AskDisplayMessage: Identifiable, Codable {
             return text + "\(Self.describe(stat.query)).)"
         case .question(let text, _): return text
         case .categoryDraft(let draft): return "(App is showing a PENDING new-category card, not created yet: \"\(draft.name)\"\(draft.parent.map { " under \($0)" } ?? "").)"
+        case .categoryMerge(let merge):
+            let groups = merge.allGroups.map { "keep \($0.keep_id), merge \($0.merge_ids.joined(separator: ", "))" }
+            return "(App is showing a PENDING category merge card, nothing merged yet: \(groups.joined(separator: "; ")). Revise it by emitting a fresh full category_merge.)"
+        case .subscriptionBatch(let batch):
+            let items = batch.subscriptions.map { "\($0.name) \($0.amount) \($0.frequency ?? "monthly")" }
+            return "(App is showing a PENDING recurring items card, not saved yet: \(items.joined(separator: "; ")). Revise it by emitting a fresh full subscription_batch.)"
+        case .csvExport(let export):
+            return "(App is showing a PENDING CSV export card, nothing exported yet: \(export.title ?? "all transactions").)"
+        case .walletCreate(let wallet):
+            return "(App is showing a PENDING new wallet card, not created yet: \(wallet.name).)"
+        case .walletSwitch(let wallet):
+            return "(App is showing a PENDING wallet switch card, not switched yet: \(wallet.wallet_id).)"
+        case .categoryDelete(let delete):
+            return "(App is showing a PENDING category delete card, nothing deleted yet: \(delete.category_ids.joined(separator: ", ")). Revise it by emitting a fresh full category_delete.)"
+        case .categoryReorganize(let reorganize):
+            let steps = reorganize.changes.map { change -> String in
+                switch change.action {
+                case "nest": return "nest \(change.category_id ?? "") under \(change.parent_id ?? change.parent_ref ?? "")"
+                case "unnest": return "make \(change.category_id ?? "") top-level"
+                case "create": return "create \(change.name ?? "") as ref \(change.ref ?? "")\((change.parent_id ?? change.parent_ref).map { " under \($0)" } ?? "")"
+                default: return "refile \(change.merchant.map { "\($0) " } ?? "")from \(change.from_id ?? "") to \(change.to_id ?? change.to_ref ?? "")"
+                }
+            }
+            return "(App is showing a PENDING reorganize card, nothing changed yet: \(steps.joined(separator: "; ")). Revise it by emitting a fresh full category_reorganize.)"
         case .budgetDraft(let draft):
             let period = draft.period ?? "monthly"
             return "(App is showing a PENDING budget card, not saved yet: \(draft.category_name ?? "category") \(draft.amount) \(draft.currency ?? "") per \(period).)"
@@ -538,6 +577,8 @@ final class AskChatManager: ObservableObject {
 
     /// Presents the paywall when a free user hits the daily message limit.
     @Published var showLimitPaywall = false
+    /// Photo open in the full-size viewer.
+    @Published var viewedPhoto: AskViewedPhoto?
     /// Why the paywall is opening (limit hit vs a gated feature).
     @Published var paywallMode: PaywallMode = .default
 
@@ -929,6 +970,27 @@ final class AskChatManager: ObservableObject {
         case .categoryDraft(let draft):
             removeStreamingMessage()
             appendPending(.categoryDraft(draft))
+        case .categoryMerge(let merge):
+            removeStreamingMessage()
+            appendPending(.categoryMerge(merge))
+        case .subscriptionBatch(let batch):
+            removeStreamingMessage()
+            appendPending(.subscriptionBatch(batch))
+        case .csvExport(let export):
+            removeStreamingMessage()
+            appendPending(.csvExport(export))
+        case .walletCreate(let wallet):
+            removeStreamingMessage()
+            appendPending(.walletCreate(wallet))
+        case .walletSwitch(let wallet):
+            removeStreamingMessage()
+            appendPending(.walletSwitch(wallet))
+        case .categoryDelete(let delete):
+            removeStreamingMessage()
+            appendPending(.categoryDelete(delete))
+        case .categoryReorganize(let reorganize):
+            removeStreamingMessage()
+            appendPending(.categoryReorganize(reorganize))
         case .budgetDraft(let draft):
             removeStreamingMessage()
             appendPending(.budgetDraft(draft))
@@ -1162,6 +1224,255 @@ final class AskChatManager: ObservableObject {
         confirmedDrafts.insert(messageID)
         trackCardResolved(messageID, confirmed: false)
         messages.append(AskDisplayMessage(isUser: false, content: .text("Okay, no new category.")))
+        persist()
+    }
+
+    /// Tracks each found charge (Track tap only), up to the plan's limit.
+    func confirmSubscriptionBatch(messageID: UUID, batch: AskSubscriptionBatch) {
+        guard !confirmedDrafts.contains(messageID) else { return }
+        guard SubscriptionManager.shared.canAddMoreSubscriptions else {
+            paywallMode = .default
+            showLimitPaywall = true
+            return
+        }
+        var added: [String] = []
+        var limited = false
+        for draft in batch.subscriptions {
+            guard SubscriptionManager.shared.canAddMoreSubscriptions else {
+                limited = true
+                break
+            }
+            let subscription = AskChatService.shared.createSubscription(
+                name: draft.name,
+                amount: draft.amount,
+                currency: draft.resolvedCurrency,
+                categoryId: draft.category_id.flatMap { UUID(uuidString: $0) },
+                frequency: draft.resolvedFrequency,
+                startDate: draft.resolvedStartDate,
+                // These charges are already logged, so auto-adding would count them twice.
+                autoAdd: draft.auto_add ?? false,
+                note: draft.note
+            )
+            added.append(subscription.name)
+        }
+        draftErrors[messageID] = nil
+        confirmedDrafts.insert(messageID)
+        trackCardResolved(messageID, confirmed: true)
+        var receipt = "✅ Tracking \(added.joined(separator: ", "))."
+        if limited { receipt += " Your plan's limit stopped the rest." }
+        messages.append(AskDisplayMessage(isUser: false, content: .systemNote(receipt)))
+        persist()
+        if limited {
+            paywallMode = .default
+            showLimitPaywall = true
+        }
+    }
+
+    /// Writes the CSV and opens the share sheet (Export tap only).
+    func confirmCsvExport(messageID: UUID, export: AskCsvExport) {
+        let transactions = export.matchingTransactions()
+        guard !transactions.isEmpty else {
+            draftErrors[messageID] = "No transactions match that."
+            return
+        }
+        guard let url = AskCsvWriter.write(transactions, title: export.title) else {
+            draftErrors[messageID] = "The file couldn't be created. Try again."
+            return
+        }
+        draftErrors[messageID] = nil
+        AskCsvWriter.share(url)
+        confirmedDrafts.insert(messageID)
+        trackCardResolved(messageID, confirmed: true)
+        let count = transactions.count == 1 ? "1 transaction" : "\(transactions.count) transactions"
+        messages.append(AskDisplayMessage(isUser: false, content: .systemNote("✅ Exported \(count).")))
+        persist()
+    }
+
+    /// Creates the wallet (Create tap only), behind the same limit as the wallet picker.
+    func confirmWalletCreate(messageID: UUID, wallet: AskWalletCreate) {
+        guard !confirmedDrafts.contains(messageID) else { return }
+        let user = UserManager.shared.currentUser
+        if let limit = RevenueCatManager.shared.planTier.walletLimit, user.subAccounts.count >= limit {
+            paywallMode = .default
+            showLimitPaywall = true
+            return
+        }
+        let name = wallet.name.trimmingCharacters(in: .whitespaces)
+        guard !user.subAccounts.contains(where: { $0.name.caseInsensitiveCompare(name) == .orderedSame }) else {
+            draftErrors[messageID] = "You already have a wallet called \(name)."
+            return
+        }
+        let currency = wallet.currency.flatMap { code in
+            Currency.allCases.first { $0.rawValue.uppercased() == code.uppercased() }
+        } ?? CurrencyPreferences.shared.primaryCurrency
+        AccountManager.shared.createSubAccount(name: name, type: .personal, currency: currency)
+        draftErrors[messageID] = nil
+        confirmedDrafts.insert(messageID)
+        trackCardResolved(messageID, confirmed: true)
+        messages.append(AskDisplayMessage(isUser: false, content: .systemNote("✅ Created your \(name) wallet.")))
+        persist()
+    }
+
+    /// Switches the selected wallet (Switch tap only).
+    func confirmWalletSwitch(messageID: UUID, wallet: AskWalletSwitch) {
+        guard !confirmedDrafts.contains(messageID) else { return }
+        guard let id = UUID(uuidString: wallet.wallet_id),
+              let target = UserManager.shared.currentUser.subAccounts.first(where: { $0.id == id }) else {
+            draftErrors[messageID] = "That wallet no longer exists."
+            return
+        }
+        AccountManager.shared.selectAccount(target)
+        draftErrors[messageID] = nil
+        confirmedDrafts.insert(messageID)
+        trackCardResolved(messageID, confirmed: true)
+        messages.append(AskDisplayMessage(isUser: false, content: .systemNote("✅ Switched to \(target.name).")))
+        persist()
+    }
+
+    /// Deletes the chosen categories (Delete tap only).
+    func confirmCategoryDelete(messageID: UUID, delete: AskCategoryDelete) {
+        guard !confirmedDrafts.contains(messageID) else { return }
+        let ids = delete.category_ids.compactMap { UUID(uuidString: $0) }
+        guard let result = CategoriesManager.shared.deleteCategories(ids: ids) else {
+            draftErrors[messageID] = "Those categories can't be deleted. A category with subcategories needs those deleted first."
+            return
+        }
+        draftErrors[messageID] = nil
+        confirmedDrafts.insert(messageID)
+        trackCardResolved(messageID, confirmed: true)
+        let names = result.deletedNames.joined(separator: ", ")
+        var receipt = "✅ Deleted \(names)."
+        if result.movedTransactions > 0 {
+            let moved = result.movedTransactions == 1 ? "1 transaction" : "\(result.movedTransactions) transactions"
+            receipt += " Moved \(moved) to No Category."
+        }
+        if !result.skippedNames.isEmpty {
+            receipt += " Kept \(result.skippedNames.joined(separator: ", ")) because of its subcategories."
+        }
+        messages.append(AskDisplayMessage(isUser: false, content: .systemNote(receipt)))
+        persist()
+    }
+
+    /// Folds each duplicate group into its kept copy (Merge tap only).
+    func confirmCategoryMerge(messageID: UUID, merge: AskCategoryMerge) {
+        var results: [CategoriesManager.CategoryMergeResult] = []
+        for group in merge.allGroups {
+            guard let keepId = UUID(uuidString: group.keep_id) else { continue }
+            let mergeIds = group.merge_ids.compactMap { UUID(uuidString: $0) }
+            if let result = CategoriesManager.shared.mergeCategories(keepId: keepId, mergeIds: mergeIds) {
+                results.append(result)
+            }
+        }
+        guard !results.isEmpty else {
+            draftErrors[messageID] = "Those categories no longer exist."
+            return
+        }
+        draftErrors[messageID] = nil
+        confirmedDrafts.insert(messageID)
+        trackCardResolved(messageID, confirmed: true)
+        let moved = results.reduce(0) { $0 + $1.movedTransactions }
+        let movedText = moved == 1 ? "1 transaction" : "\(moved) transactions"
+        let receipt = results.count == 1
+            ? "✅ Merged \(results[0].removedCount + 1) \(results[0].keptName) categories into one and moved \(movedText)."
+            : "✅ Merged \(results.count) sets of duplicate categories and moved \(movedText)."
+        messages.append(AskDisplayMessage(isUser: false, content: .systemNote(receipt)))
+        persist()
+    }
+
+    /// Applies a confirmed reorganize card (Apply tap only). New categories are made first,
+    /// with ids chosen here so the card's later steps can point at them, then categories move,
+    /// then transactions move. A new category whose name already exists at that level reuses
+    /// the existing one. Creating categories is a paid feature, so free users get the paywall.
+    func confirmCategoryReorganize(messageID: UUID, reorganize: AskCategoryReorganize) {
+        guard !confirmedDrafts.contains(messageID) else { return }
+        let manager = CategoriesManager.shared
+        if !reorganize.creates.isEmpty && !RevenueCatManager.shared.planTier.allowsCustomCategories {
+            paywallMode = .default
+            showLimitPaywall = true
+            return
+        }
+
+        // A new parent whose every incoming move is blocked would be created empty: skip it.
+        let skippedRefs = reorganize.emptyContainerRefs { change in
+            guard let id = change.category_id.flatMap(UUID.init), let ref = change.parent_ref,
+                  let create = reorganize.creates.first(where: { $0.ref == ref }) else { return false }
+            let type: CategoryType = create.category_type?.lowercased() == "income" ? .income : .expense
+            return manager.nestBlockReason(categoryId: id, parentId: nil, parentType: type) != nil
+        }
+
+        // Top-level creates first, so a create under a ref finds its parent's id.
+        var refIDs: [String: UUID] = [:]
+        var creates: [CategoriesManager.CategoryReorganizeChange] = []
+        let orderedCreates = reorganize.creates.sorted { ($0.parent_ref == nil ? 0 : 1) < ($1.parent_ref == nil ? 0 : 1) }
+        for create in orderedCreates {
+            guard let ref = create.ref, let name = create.name, !skippedRefs.contains(ref) else { continue }
+            let parentID = create.parent_ref.flatMap { refIDs[$0] } ?? create.parent_id.flatMap(UUID.init)
+            if create.parent_ref != nil && parentID == nil { continue }
+            if let existing = manager.existingCategoryId(named: name, parentId: parentID) {
+                refIDs[ref] = existing
+                continue
+            }
+            let id = UUID()
+            refIDs[ref] = id
+            let type: CategoryType = create.category_type?.lowercased() == "income" ? .income : .expense
+            creates.append(.create(id: id, name: name, emoji: create.emoji ?? "📁", type: type, parentId: parentID))
+        }
+
+        var moves: [CategoriesManager.CategoryReorganizeChange] = []
+        var refiles: [CategoriesManager.CategoryReorganizeChange] = []
+        for change in reorganize.changes {
+            switch change.action {
+            case "nest":
+                guard let id = change.category_id.flatMap(UUID.init),
+                      let parent = change.parent_ref.flatMap({ refIDs[$0] }) ?? change.parent_id.flatMap(UUID.init)
+                else { continue }
+                moves.append(.nest(categoryId: id, parentId: parent))
+            case "unnest":
+                if let id = change.category_id.flatMap(UUID.init) { moves.append(.unnest(categoryId: id)) }
+            case "refile":
+                guard let to = change.to_ref.flatMap({ refIDs[$0] }) ?? change.to_id.flatMap(UUID.init) else { continue }
+                refiles.append(.refile(fromId: change.from_id.flatMap(UUID.init), toId: to, merchant: change.merchant))
+            default:
+                continue
+            }
+        }
+
+        let result = manager.reorganizeCategories(creates + moves + refiles)
+        let reused = reorganize.creates.count - creates.count - skippedRefs.count
+        guard result.created + result.applied > 0 || reused > 0 else {
+            draftErrors[messageID] = "None of those changes could be made anymore."
+            return
+        }
+        draftErrors[messageID] = nil
+        confirmedDrafts.insert(messageID)
+        trackCardResolved(messageID, confirmed: true)
+
+        var parts: [String] = []
+        if result.created > 0 { parts.append(result.created == 1 ? "added 1 category" : "added \(result.created) categories") }
+        if result.restructured > 0 {
+            parts.append(result.restructured == 1 ? "moved 1 category" : "moved \(result.restructured) categories")
+        }
+        if result.movedTransactions > 0 {
+            parts.append(result.movedTransactions == 1 ? "moved 1 transaction" : "moved \(result.movedTransactions) transactions")
+        }
+        let sentence: String
+        switch parts.count {
+        case 0: sentence = "done"
+        case 1: sentence = parts[0]
+        default: sentence = parts.dropLast().joined(separator: ", ") + " and " + parts[parts.count - 1]
+        }
+        var receipt = "✅ " + sentence.prefix(1).uppercased() + sentence.dropFirst() + "."
+        if reused > 0 { receipt += reused == 1 ? " 1 category already existed, so it was reused." : " \(reused) categories already existed, so they were reused." }
+        if result.skipped > 0 { receipt += result.skipped == 1 ? " Skipped 1 change that couldn't be made." : " Skipped \(result.skipped) changes that couldn't be made." }
+        messages.append(AskDisplayMessage(isUser: false, content: .systemNote(receipt)))
+        persist()
+    }
+
+    /// Closes a reorganize card where nothing could be applied.
+    func dismissCategoryReorganize(messageID: UUID) {
+        confirmedDrafts.insert(messageID)
+        trackCardResolved(messageID, confirmed: false)
+        messages.append(AskDisplayMessage(isUser: false, content: .text("Okay, nothing changed.")))
         persist()
     }
 
@@ -1593,6 +1904,7 @@ struct AskPage: View {
     @State private var composeText: String = ""
     @State private var showScrollToBottom = false
     @FocusState private var composerFocused: Bool
+    @StateObject private var voice = AskVoiceInput()
 
     /// Photos waiting in the composer, saved to AskImageStore as soon as they're picked.
     private struct ComposerPhoto: Identifiable {
@@ -1791,6 +2103,21 @@ struct AskPage: View {
         .fullScreenCover(isPresented: $chat.showLimitPaywall) {
             TieredPaywallSheet(isPresented: $chat.showLimitPaywall, mode: chat.paywallMode)
         }
+        .sheet(item: $chat.viewedPhoto) { photo in
+            AskPhotoViewer(photoID: photo.id) { chat.viewedPhoto = nil }
+        }
+        .alert("Voice input", isPresented: Binding(
+            get: { voice.errorMessage != nil },
+            set: { if !$0 { voice.errorMessage = nil } }
+        )) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(voice.errorMessage ?? "")
+        }
+        .onChange(of: voice.transcript) { _, text in
+            if voice.isListening, !text.isEmpty { composeText = text }
+        }
+        .onDisappear { voice.stop() }
         .sheet(item: $chat.detailTransaction) { transaction in
             ReceiptDetailSheet(
                 transaction: transaction,
@@ -1921,7 +2248,7 @@ struct AskPage: View {
     // MARK: Composer — white card on grey (Figma 1639-7821)
 
     private var composerBar: some View {
-        // Attached photo thumbnails, then one line: plus + input + send. Mic hidden until it lands.
+        // Attached photo thumbnails, then one line: plus + input + send, or mic when empty.
         VStack(alignment: .leading, spacing: 8) {
             if !attachedPhotos.isEmpty || processingPhotoCount > 0 {
                 composerPhotoStrip
@@ -1976,15 +2303,39 @@ struct AskPage: View {
                     .padding(.vertical, 10)
 
                 // Bare icon, no button chrome — keeps the input lean.
-                Button {
-                    sendComposer()
-                } label: {
-                    AppIcon(assetName: "send-01", fallbackSystemName: "paperplane.fill", size: 22)
-                        .foregroundColor(AppColors.accentBackground)
-                        .opacity(canSend ? 1 : 0.5)
-                        .padding(.vertical, 8)
+                if voice.isListening {
+                    Button {
+                        voice.stop()
+                    } label: {
+                        Image(systemName: "stop.circle.fill")
+                            .font(.system(size: 22))
+                            .foregroundColor(AppColors.destructiveForeground)
+                            .padding(.vertical, 8)
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                    .accessibilityLabel("Stop listening")
+                } else if composeText.isEmpty && attachedPhotos.isEmpty {
+                    Button {
+                        composerFocused = false
+                        voice.toggle()
+                    } label: {
+                        AppIcon(assetName: "microphone-01", fallbackSystemName: "mic.fill", size: 22)
+                            .foregroundColor(AppColors.accentBackground)
+                            .padding(.vertical, 8)
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                    .accessibilityLabel("Talk to Ask")
+                } else {
+                    Button {
+                        sendComposer()
+                    } label: {
+                        AppIcon(assetName: "send-01", fallbackSystemName: "paperplane.fill", size: 22)
+                            .foregroundColor(AppColors.accentBackground)
+                            .opacity(canSend ? 1 : 0.5)
+                            .padding(.vertical, 8)
+                    }
+                    .buttonStyle(PlainButtonStyle())
                 }
-                .buttonStyle(PlainButtonStyle())
             }
         }
         .padding(.horizontal, 20)
@@ -2248,6 +2599,20 @@ private struct AskMessageView: View {
                 AskQuestionView(messageID: message.id, text: text, choices: choices)
             case .categoryDraft(let draft):
                 AskCategoryDraftCard(messageID: message.id, draft: draft)
+            case .categoryMerge(let merge):
+                AskCategoryMergeCard(messageID: message.id, merge: merge)
+            case .subscriptionBatch(let batch):
+                AskSubscriptionBatchCard(messageID: message.id, batch: batch)
+            case .csvExport(let export):
+                AskCsvExportCard(messageID: message.id, export: export)
+            case .walletCreate(let wallet):
+                AskWalletCreateCard(messageID: message.id, wallet: wallet)
+            case .walletSwitch(let wallet):
+                AskWalletSwitchCard(messageID: message.id, wallet: wallet)
+            case .categoryDelete(let delete):
+                AskCategoryDeleteCard(messageID: message.id, delete: delete)
+            case .categoryReorganize(let reorganize):
+                AskCategoryReorganizeCard(messageID: message.id, reorganize: reorganize)
             case .draftBatch(let batch):
                 AskDraftBatchCard(messageID: message.id, batch: batch)
             case .budgetDraft(let draft):
@@ -2299,6 +2664,12 @@ private struct AskStoredPhotoView: View {
                 .inset(by: 0.5)
                 .stroke(AppColors.line1stLine, lineWidth: 1)
         )
+        .contentShape(RoundedRectangle(cornerRadius: 12))
+        .onTapGesture {
+            // A chat synced from another device has no file here to open.
+            if image != nil { AskChatManager.shared.viewedPhoto = AskViewedPhoto(id: photoID) }
+        }
+        .accessibilityLabel("Open photo")
         .task(id: photoID) {
             let id = photoID
             image = await Task.detached(priority: .utility) { () -> UIImage? in
@@ -3125,6 +3496,11 @@ private struct AskConfirmCardShell: View {
     let actionTitle: String
     let actionColor: Color?
     let action: () -> Void
+    /// Optional text button under the detail, e.g. "Show all 24" on a long list.
+    var moreTitle: String? = nil
+    var onMore: (() -> Void)? = nil
+    /// Optional cards stacked under the header box, e.g. one per category on the organize card.
+    var cards: AnyView? = nil
 
     var body: some View {
         VStack(spacing: 0) {
@@ -3143,6 +3519,16 @@ private struct AskConfirmCardShell: View {
                         .font(AppFonts.overusedGroteskMedium(size: 14))
                         .foregroundColor(AppColors.foregroundSecondary)
                 }
+
+                if cards == nil, let moreTitle, let onMore {
+                    AppButton(
+                        title: moreTitle,
+                        action: onMore,
+                        hierarchy: .textPrimary,
+                        size: .tripleExtraSmall
+                    )
+                    .fixedSize()
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 20)
@@ -3150,6 +3536,24 @@ private struct AskConfirmCardShell: View {
             .background(AppColors.backgroundWhite)
             .cornerRadius(12)
             .padding(8)
+
+            if let cards {
+                cards
+                    .padding(.horizontal, 8)
+                    .padding(.bottom, 8)
+                if let moreTitle, let onMore {
+                    AppButton(
+                        title: moreTitle,
+                        action: onMore,
+                        hierarchy: .textPrimary,
+                        size: .tripleExtraSmall
+                    )
+                    .fixedSize()
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 4)
+                }
+            }
 
             if let error {
                 Text(error)
@@ -3749,6 +4153,824 @@ private struct AskCategoryDraftCard: View {
             }
             .background(AppColors.surfacePrimary)
             .cornerRadius(16)
+        }
+    }
+}
+
+// MARK: - Found recurring card
+
+private struct AskSubscriptionBatchCard: View {
+    let messageID: UUID
+    let batch: AskSubscriptionBatch
+
+    @ObservedObject private var chat = AskChatManager.shared
+
+    private var isConfirmed: Bool { chat.confirmedDrafts.contains(messageID) }
+
+    var body: some View {
+        if !isConfirmed {
+            AskConfirmCardShell(
+                label: "FOUND RECURRING",
+                title: batch.subscriptions.count == 1 ? "🔁 1 repeat charge" : "🔁 \(batch.subscriptions.count) repeat charges",
+                detail: batch.subscriptions.map {
+                    "\($0.name), \($0.resolvedCurrency.symbol)\(AskFormat.currency($0.amount)) \($0.resolvedFrequency.displayName.lowercased())"
+                }.joined(separator: "\n"),
+                error: chat.draftErrors[messageID],
+                prompt: batch.subscriptions.count == 1 ? "Track this?" : "Track these?",
+                actionTitle: "Track",
+                actionColor: nil,
+                action: { chat.confirmSubscriptionBatch(messageID: messageID, batch: batch) }
+            )
+        }
+    }
+}
+
+// MARK: - CSV export
+
+extension AskCsvExport {
+    private func day(_ value: String?) -> Date? {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        return value.flatMap(formatter.date(from:))
+    }
+
+    /// Real transactions in range, oldest first. Recurring templates aren't transactions.
+    func matchingTransactions() -> [Txn] {
+        let start = day(from)
+        // "to" is inclusive: push to the end of that day.
+        let end = day(to)?.addingTimeInterval(86_399)
+        return UserManager.shared.currentUser.transactions
+            .filter { txn in
+                if txn.isRecurring { return false }
+                if let start, txn.date < start { return false }
+                if let end, txn.date > end { return false }
+                if let category, !txn.category.localizedCaseInsensitiveContains(category) { return false }
+                if let merchant, !(txn.merchantName ?? "").localizedCaseInsensitiveContains(merchant) { return false }
+                return true
+            }
+            .sorted { $0.date < $1.date }
+    }
+}
+
+enum AskCsvWriter {
+    /// Quotes a field, and neutralizes text a spreadsheet would run as a formula.
+    private static func field(_ value: String) -> String {
+        var text = value
+        if let first = text.first, "=+-@\t\r".contains(first) { text = "\'" + text }
+        return "\"" + text.replacingOccurrences(of: "\"", with: "\"\"") + "\""
+    }
+
+    static func write(_ transactions: [Txn], title: String?) -> URL? {
+        let dayFormatter = DateFormatter()
+        dayFormatter.dateFormat = "yyyy-MM-dd"
+        let wallets = Dictionary(
+            UserManager.shared.currentUser.subAccounts.map { ($0.id, $0.name) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        var lines = ["Date,Merchant,Category,Amount,Currency,Original Amount,Original Currency,Wallet,Note"]
+        for txn in transactions {
+            lines.append([
+                dayFormatter.string(from: txn.date),
+                field(txn.merchantName ?? ""),
+                field(txn.category),
+                String(format: "%.2f", txn.amount),
+                txn.primaryCurrency.rawValue,
+                txn.originalAmount.map { String(format: "%.2f", $0) } ?? "",
+                txn.originalCurrency?.rawValue ?? "",
+                field(txn.accountId.flatMap { wallets[$0] } ?? ""),
+                field(txn.note ?? "")
+            ].joined(separator: ","))
+        }
+        let name = (title ?? "Transactions")
+            .components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .filter { !$0.isEmpty }
+            .joined(separator: "-")
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("Cashmonki-\(name).csv")
+        do {
+            try lines.joined(separator: "\n").write(to: url, atomically: true, encoding: .utf8)
+            return url
+        } catch {
+            print("❌ AskCsvWriter: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    @MainActor
+    static func share(_ url: URL) {
+        let scene = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .first { $0.activationState == .foregroundActive }
+        guard var top = scene?.keyWindow?.rootViewController else { return }
+        while let presented = top.presentedViewController { top = presented }
+        let sheet = UIActivityViewController(activityItems: [url], applicationActivities: nil)
+        // iPad shows this as a popover, which needs an anchor.
+        sheet.popoverPresentationController?.sourceView = top.view
+        sheet.popoverPresentationController?.sourceRect = CGRect(x: top.view.bounds.midX, y: top.view.bounds.midY, width: 0, height: 0)
+        top.present(sheet, animated: true)
+    }
+}
+
+private struct AskCsvExportCard: View {
+    let messageID: UUID
+    let export: AskCsvExport
+
+    @ObservedObject private var chat = AskChatManager.shared
+
+    private var isConfirmed: Bool { chat.confirmedDrafts.contains(messageID) }
+
+    var body: some View {
+        if !isConfirmed {
+            let count = export.matchingTransactions().count
+            AskConfirmCardShell(
+                label: "EXPORT CSV",
+                title: "📄 \(export.title ?? "All transactions")",
+                detail: count == 1 ? "1 transaction" : "\(count) transactions",
+                error: chat.draftErrors[messageID],
+                prompt: "Export this?",
+                actionTitle: "Export",
+                actionColor: nil,
+                action: { chat.confirmCsvExport(messageID: messageID, export: export) }
+            )
+        }
+    }
+}
+
+// MARK: - Wallet cards
+
+private struct AskWalletCreateCard: View {
+    let messageID: UUID
+    let wallet: AskWalletCreate
+
+    @ObservedObject private var chat = AskChatManager.shared
+
+    private var isConfirmed: Bool { chat.confirmedDrafts.contains(messageID) }
+
+    var body: some View {
+        if !isConfirmed {
+            AskConfirmCardShell(
+                label: "NEW WALLET",
+                title: "💳 \(wallet.name)",
+                detail: wallet.currency,
+                error: chat.draftErrors[messageID],
+                prompt: "Create this wallet?",
+                actionTitle: "Create",
+                actionColor: nil,
+                action: { chat.confirmWalletCreate(messageID: messageID, wallet: wallet) }
+            )
+        }
+    }
+}
+
+private struct AskWalletSwitchCard: View {
+    let messageID: UUID
+    let wallet: AskWalletSwitch
+
+    @ObservedObject private var chat = AskChatManager.shared
+
+    private var isConfirmed: Bool { chat.confirmedDrafts.contains(messageID) }
+
+    /// Resolved against live data, so the name is the app's, never the model's.
+    private var name: String? {
+        UserManager.shared.currentUser.subAccounts.first { $0.id.uuidString == wallet.wallet_id.uppercased() }?.name
+    }
+
+    var body: some View {
+        if !isConfirmed, let name {
+            AskConfirmCardShell(
+                label: "SWITCH WALLET",
+                title: "💳 \(name)",
+                detail: nil,
+                error: chat.draftErrors[messageID],
+                prompt: "Switch to this wallet?",
+                actionTitle: "Switch",
+                actionColor: nil,
+                action: { chat.confirmWalletSwitch(messageID: messageID, wallet: wallet) }
+            )
+        } else if !isConfirmed {
+            Text("That wallet couldn't be found anymore.")
+                .font(AppFonts.overusedGroteskMedium(size: 14))
+                .foregroundColor(AppColors.foregroundSecondary)
+        }
+    }
+}
+
+// MARK: - Photo viewer
+
+struct AskViewedPhoto: Identifiable {
+    let id: String
+}
+
+/// Full-size view of a photo from the chat. Pinch to zoom, double tap to reset.
+private struct AskPhotoViewer: View {
+    let photoID: String
+    let onDismiss: () -> Void
+
+    @State private var image: UIImage?
+    @State private var scale: CGFloat = 1
+    @State private var settledScale: CGFloat = 1
+    @State private var offset: CGSize = .zero
+    @State private var settledOffset: CGSize = .zero
+
+    var body: some View {
+        VStack(spacing: 0) {
+            SheetHeader.basic(title: "Photo", onBackTap: onDismiss)
+            GeometryReader { proxy in
+                if let image {
+                    Image(uiImage: image)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: proxy.size.width, height: proxy.size.height)
+                        .scaleEffect(scale)
+                        .offset(offset)
+                        .gesture(
+                            MagnifyGesture()
+                                .onChanged { scale = min(max(settledScale * $0.magnification, 1), 5) }
+                                .onEnded { _ in settledScale = scale }
+                                .simultaneously(with: DragGesture()
+                                    .onChanged { value in
+                                        guard scale > 1 else { return }
+                                        offset = CGSize(
+                                            width: settledOffset.width + value.translation.width,
+                                            height: settledOffset.height + value.translation.height
+                                        )
+                                    }
+                                    .onEnded { _ in settledOffset = offset })
+                        )
+                        .onTapGesture(count: 2) {
+                            withAnimation(.easeOut(duration: 0.2)) {
+                                scale = 1
+                                settledScale = 1
+                                offset = .zero
+                                settledOffset = .zero
+                            }
+                        }
+                }
+            }
+            .clipped()
+        }
+        .background(AppColors.backgroundWhite)
+        .task(id: photoID) {
+            let id = photoID
+            image = await Task.detached(priority: .userInitiated) { AskImageStore.image(for: id) }.value
+        }
+    }
+}
+
+// MARK: - Category delete card
+
+private struct AskCategoryDeleteCard: View {
+    let messageID: UUID
+    let delete: AskCategoryDelete
+
+    @ObservedObject private var chat = AskChatManager.shared
+    @ObservedObject private var categories = CategoriesManager.shared
+
+    private var isConfirmed: Bool { chat.confirmedDrafts.contains(messageID) }
+
+    private struct Target {
+        let id: UUID
+        let name: String
+        let emoji: String
+        let transactions: Int
+        let childIds: Set<UUID>
+    }
+
+    /// Resolved against live data, so names and counts are the app's, never the model's.
+    private var targets: [Target] {
+        let transactions = UserManager.shared.currentUser.transactions
+        return delete.category_ids.compactMap { id in
+            guard let uuid = UUID(uuidString: id),
+                  let found = categories.findCategoryOrSubcategoryById(uuid) else { return nil }
+            let count = transactions.filter { $0.categoryId == uuid }.count
+            if let category = found.category, !category.isDeleted, category.name != "No Category" {
+                let nested = categories.categories.filter { !$0.isDeleted && $0.parentCategoryId == uuid }.map(\.id)
+                let childIds = Set(category.subcategories.map(\.id) + nested)
+                return Target(id: uuid, name: category.name, emoji: category.emoji, transactions: count, childIds: childIds)
+            }
+            if let sub = found.subcategory {
+                return Target(id: uuid, name: sub.name, emoji: sub.emoji, transactions: count, childIds: [])
+            }
+            return nil
+        }
+    }
+
+    var body: some View {
+        let targets = self.targets
+        let ids = Set(targets.map(\.id))
+        let kept = targets.filter { !$0.childIds.isSubset(of: ids) }
+        let deleted = targets.filter { $0.childIds.isSubset(of: ids) }
+        if !isConfirmed, !targets.isEmpty {
+            let moving = deleted.reduce(0) { $0 + $1.transactions }
+            let movingText = moving == 1 ? "1 transaction moves" : "\(moving) transactions move"
+            let detail = [
+                moving > 0 ? "\(movingText) to No Category." : nil,
+                kept.isEmpty ? nil : "\(kept.map(\.name).joined(separator: ", ")) stays, it has subcategories."
+            ].compactMap { $0 }.joined(separator: "\n")
+            AskConfirmCardShell(
+                label: "DELETE CATEGORY",
+                title: deleted.isEmpty
+                    ? kept.map { "\($0.emoji) \($0.name)" }.joined(separator: ", ")
+                    : deleted.map { "\($0.emoji) \($0.name)" }.joined(separator: ", "),
+                detail: detail.isEmpty ? nil : detail,
+                error: chat.draftErrors[messageID],
+                prompt: deleted.count > 1 ? "Delete these \(deleted.count)?" : "Delete this category?",
+                actionTitle: "Delete",
+                actionColor: AppColors.destructiveForeground,
+                action: { chat.confirmCategoryDelete(messageID: messageID, delete: delete) }
+            )
+        } else if !isConfirmed {
+            Text("Those categories couldn't be found anymore.")
+                .font(AppFonts.overusedGroteskMedium(size: 14))
+                .foregroundColor(AppColors.foregroundSecondary)
+        }
+    }
+}
+
+// MARK: - Category merge card
+
+private struct AskCategoryMergeCard: View {
+    let messageID: UUID
+    let merge: AskCategoryMerge
+
+    @ObservedObject private var chat = AskChatManager.shared
+    @ObservedObject private var categories = CategoriesManager.shared
+
+    private var isConfirmed: Bool { chat.confirmedDrafts.contains(messageID) }
+
+    private struct Copy {
+        let name: String
+        let emoji: String
+        let transactions: Int
+    }
+
+    private struct Group {
+        let keep: Copy
+        let others: [Copy]
+    }
+
+    /// Resolved against live data, so names and counts are the app's, never the model's.
+    /// Copies that no longer exist drop out; a group with nothing left to merge drops too.
+    private var groups: [Group] {
+        let transactions = UserManager.shared.currentUser.transactions
+        func copy(_ id: String) -> Copy? {
+            guard let uuid = UUID(uuidString: id),
+                  let found = categories.findCategoryOrSubcategoryById(uuid) else { return nil }
+            let count = transactions.filter { $0.categoryId == uuid }.count
+            if let category = found.category, !category.isDeleted {
+                return Copy(name: category.name, emoji: category.emoji, transactions: count)
+            }
+            if let sub = found.subcategory {
+                return Copy(name: sub.name, emoji: sub.emoji, transactions: count)
+            }
+            return nil
+        }
+        return merge.allGroups.compactMap { group in
+            guard let keep = copy(group.keep_id) else { return nil }
+            let others = group.merge_ids.compactMap(copy)
+            return others.isEmpty ? nil : Group(keep: keep, others: others)
+        }
+    }
+
+    private func count(_ copy: Copy) -> String {
+        copy.transactions == 1 ? "1 transaction" : "\(copy.transactions) transactions"
+    }
+
+    var body: some View {
+        let groups = self.groups
+        if !isConfirmed, let first = groups.first {
+            AskConfirmCardShell(
+                label: "MERGE CATEGORIES",
+                title: groups.count == 1
+                    ? "\(first.keep.emoji) \(first.keep.name)"
+                    : groups.map { "\($0.keep.emoji) \($0.keep.name)" }.joined(separator: ", "),
+                detail: groups.map { group in
+                    let merged = group.others.map { "\($0.name) (\(count($0)))" }.joined(separator: ", ")
+                    return "Keep \(group.keep.name) (\(count(group.keep))), fold in \(merged)"
+                }.joined(separator: "\n"),
+                error: chat.draftErrors[messageID],
+                prompt: groups.count == 1 ? "Merge into one?" : "Merge these \(groups.count) sets?",
+                actionTitle: "Merge",
+                actionColor: nil,
+                action: { chat.confirmCategoryMerge(messageID: messageID, merge: merge) }
+            )
+        } else if !isConfirmed {
+            Text("Those duplicate categories couldn't be found anymore.")
+                .font(AppFonts.overusedGroteskMedium(size: 14))
+                .foregroundColor(AppColors.foregroundSecondary)
+        }
+    }
+}
+
+// MARK: - Category reorganize card
+
+private struct AskCategoryReorganizeCard: View {
+    let messageID: UUID
+    let reorganize: AskCategoryReorganize
+
+    @ObservedObject private var chat = AskChatManager.shared
+    @ObservedObject private var categories = CategoriesManager.shared
+    @State private var showAll = false
+
+    private var isConfirmed: Bool { chat.confirmedDrafts.contains(messageID) }
+
+    private func label(_ id: String?) -> String? {
+        guard let uuid = id.flatMap(UUID.init),
+              let found = categories.findCategoryOrSubcategoryById(uuid) else { return nil }
+        if let category = found.category, !category.isDeleted { return "\(category.emoji) \(category.name)" }
+        if let sub = found.subcategory { return "\(sub.emoji) \(sub.name)" }
+        return nil
+    }
+
+    private func parentName(of id: String?) -> String? {
+        guard let uuid = id.flatMap(UUID.init),
+              let found = categories.findCategoryOrSubcategoryById(uuid) else { return nil }
+        if let parent = found.parent { return parent.name }
+        return found.category?.parentCategoryId.flatMap { categories.findCategory(by: $0)?.name }
+    }
+
+    private func type(of id: String?) -> CategoryType? {
+        guard let uuid = id.flatMap(UUID.init),
+              let found = categories.findCategoryOrSubcategoryById(uuid) else { return nil }
+        return found.category?.type ?? found.subcategory?.type
+    }
+
+    /// Categories this card creates, by ref.
+    private var created: [String: AskCategoryChange] {
+        Dictionary(reorganize.creates.compactMap { change in change.ref.map { ($0, change) } },
+                   uniquingKeysWith: { first, _ in first })
+    }
+
+    /// The existing category a create will reuse on Apply, if its name is already taken at
+    /// that level. Under a parent the card makes new, nothing can exist yet.
+    private func existingID(ref: String) -> UUID? {
+        guard let create = created[ref], let name = create.name else { return nil }
+        if let parentRef = create.parent_ref {
+            guard let parentID = existingID(ref: parentRef) else { return nil }
+            return categories.existingCategoryId(named: name, parentId: parentID)
+        }
+        return categories.existingCategoryId(named: name, parentId: create.parent_id.flatMap(UUID.init))
+    }
+
+    private func refLabel(_ ref: String?) -> String? {
+        guard let ref, let create = created[ref], let name = create.name else { return nil }
+        return "\(create.emoji ?? "📁") \(name)"
+    }
+
+    /// A new category's type: its parent's when it has one, else what the card says.
+    private func refType(_ ref: String?) -> CategoryType? {
+        guard let ref, let create = created[ref] else { return nil }
+        if let parentRef = create.parent_ref { return refType(parentRef) }
+        if let parentID = create.parent_id { return type(of: parentID) }
+        return create.category_type?.lowercased() == "income" ? .income : .expense
+    }
+
+    /// One line per change, resolved against live data, plus the transactions that would move.
+    /// Changes whose categories are gone drop out.
+    private var plan: (lines: [String], moved: Int) {
+        let transactions = UserManager.shared.currentUser.transactions
+        var movedIDs = Set<UUID>()
+        let lines: [String] = reorganize.changes.compactMap { change in
+            switch change.action {
+            case "create":
+                guard let item = refLabel(change.ref), !emptyContainers.contains(change.ref ?? "") else { return nil }
+                if let parentRef = change.parent_ref {
+                    guard let parent = refLabel(parentRef) else { return nil }
+                    return "Add \(item) under \(parent)"
+                }
+                if change.parent_id != nil {
+                    guard let parent = label(change.parent_id) else { return nil }
+                    return "Add \(item) under \(parent)"
+                }
+                return "Add \(item)"
+            case "nest":
+                guard blockReason(change) == nil,
+                      let item = label(change.category_id),
+                      let parent = refLabel(change.parent_ref) ?? label(change.parent_id) else { return nil }
+                if let from = parentName(of: change.category_id) { return "Move \(item) from \(from) to \(parent)" }
+                return "Put \(item) under \(parent)"
+            case "unnest":
+                guard let item = label(change.category_id) else { return nil }
+                return "Make \(item) its own category"
+            case "refile":
+                // A category the card creates holds nothing yet, so any id that matches no
+                // transaction stands in for it while counting.
+                let toID = change.to_id.flatMap(UUID.init) ?? UUID()
+                guard let to = refLabel(change.to_ref) ?? label(change.to_id),
+                      let toType = change.to_ref != nil ? refType(change.to_ref) : type(of: change.to_id)
+                else { return nil }
+                let fromID = change.from_id.flatMap(UUID.init)
+                let from = label(change.from_id)
+                if fromID != nil && from == nil { return nil }
+                let matching = transactions.filter {
+                    CategoriesManager.refileMatches($0, fromId: fromID, toId: toID, toType: toType, merchant: change.merchant)
+                }
+                guard !matching.isEmpty else { return nil }
+                movedIDs.formUnion(matching.map(\.id))
+                let count = matching.count
+                let what = change.merchant.map { "\(count) \($0)" } ?? "\(count)"
+                let noun = count == 1 ? "transaction" : "transactions"
+                return from.map { "Move \(what) \(noun) from \($0) to \(to)" } ?? "Move \(what) \(noun) to \(to)"
+            default:
+                return nil
+            }
+        }
+        return (lines, movedIDs.count)
+    }
+
+    private func title(changes: Int, moved: Int) -> String {
+        var title = changes == 1 ? "1 change" : "\(changes) changes"
+        if moved > 0 { title += moved == 1 ? " · 1 transaction" : " · \(moved) transactions" }
+        return title
+    }
+
+    // MARK: Grouped layout: one card per top-level category, its subcategories inside.
+
+    /// Transactions moving into a category, as the card shows them.
+    struct Move: Hashable {
+        let merchant: String?
+        let count: Int
+        let from: String?
+    }
+
+    struct Item {
+        let key: String
+        let emoji: String
+        let name: String
+        var tag: String?
+        var moves: [Move] = []
+    }
+
+    struct Group {
+        let key: String
+        let emoji: String
+        let name: String
+        var tag: String?
+        var moves: [Move] = []
+        var items: [Item] = []
+    }
+
+    /// "CORNER COFFEE" reads as "Corner Coffee"; anything with lowercase stays as typed.
+    private static func displayMerchant(_ merchant: String) -> String {
+        merchant == merchant.uppercased() && merchant.lowercased() != merchant ? merchant.capitalized : merchant
+    }
+
+    private func info(_ id: String?) -> (emoji: String, name: String, parentID: UUID?)? {
+        guard let uuid = id.flatMap(UUID.init),
+              let found = categories.findCategoryOrSubcategoryById(uuid) else { return nil }
+        if let category = found.category, !category.isDeleted {
+            return (category.emoji, category.name, category.parentCategoryId)
+        }
+        if let sub = found.subcategory { return (sub.emoji, sub.name, found.parent?.id) }
+        return nil
+    }
+
+    private var groups: [Group] {
+        let transactions = UserManager.shared.currentUser.transactions
+        var groups: [Group] = []
+
+        func groupIndex(_ key: String, emoji: String, name: String) -> Int {
+            if let index = groups.firstIndex(where: { $0.key == key }) { return index }
+            groups.append(Group(key: key, emoji: emoji, name: name))
+            return groups.count - 1
+        }
+        /// The card for a parent given as an existing id or a ref.
+        func parentIndex(id: String?, ref: String?) -> Int? {
+            if let ref, let create = created[ref], let name = create.name {
+                return groupIndex("ref:\(ref)", emoji: create.emoji ?? "📁", name: name)
+            }
+            if let id, let parent = info(id) { return groupIndex("id:\(id.uppercased())", emoji: parent.emoji, name: parent.name) }
+            return nil
+        }
+        func locate(_ key: String) -> (Int, Int?)? {
+            for (g, group) in groups.enumerated() {
+                if group.key == key { return (g, nil) }
+                if let i = group.items.firstIndex(where: { $0.key == key }) { return (g, i) }
+            }
+            return nil
+        }
+
+        for change in reorganize.changes {
+            switch change.action {
+            case "create":
+                guard let ref = change.ref, let create = created[ref], let name = create.name else { continue }
+                let emoji = create.emoji ?? "📁"
+                // A name that already exists at that level is reused on Apply, not duplicated.
+                let tag = emptyContainers.contains(ref) ? "Can't add: nothing can move in"
+                    : existingID(ref: ref) == nil ? "New" : "Already exists"
+                if change.parent_ref != nil || change.parent_id != nil {
+                    guard let g = parentIndex(id: change.parent_id, ref: change.parent_ref) else { continue }
+                    groups[g].items.append(Item(key: "ref:\(ref)", emoji: emoji, name: name, tag: tag))
+                } else {
+                    let g = groupIndex("ref:\(ref)", emoji: emoji, name: name)
+                    groups[g].tag = tag
+                }
+            case "nest":
+                guard let id = change.category_id, let item = info(id),
+                      let g = parentIndex(id: change.parent_id, ref: change.parent_ref) else { continue }
+                let from = parentName(of: id)
+                let tag = blockReason(change).map { "Can't move: \($0.lowercased())" }
+                    ?? from.map { "Moved from \($0)" } ?? "Moved here"
+                groups[g].items.append(Item(key: "id:\(id.uppercased())", emoji: item.emoji, name: item.name, tag: tag))
+            case "unnest":
+                guard let id = change.category_id, let item = info(id) else { continue }
+                let g = groupIndex("id:\(id.uppercased())", emoji: item.emoji, name: item.name)
+                groups[g].tag = "Own category now"
+            case "refile":
+                let toID = change.to_id.flatMap(UUID.init) ?? UUID()
+                guard let toType = change.to_ref != nil ? refType(change.to_ref) : type(of: change.to_id) else { continue }
+                let fromID = change.from_id.flatMap(UUID.init)
+                if fromID != nil && info(change.from_id) == nil { continue }
+                let count = transactions.filter {
+                    CategoriesManager.refileMatches($0, fromId: fromID, toId: toID, toType: toType, merchant: change.merchant)
+                }.count
+                guard count > 0 else { continue }
+                let move = Move(merchant: change.merchant.map(Self.displayMerchant), count: count, from: info(change.from_id)?.name)
+                let key = change.to_ref.map { "ref:\($0)" } ?? "id:\((change.to_id ?? "").uppercased())"
+
+                if locate(key) == nil, change.to_ref == nil, let target = info(change.to_id) {
+                    // An existing category not otherwise on the card: show it in its parent's card.
+                    if let parentID = target.parentID {
+                        guard let g = parentIndex(id: parentID.uuidString, ref: nil) else { continue }
+                        groups[g].items.append(Item(key: key, emoji: target.emoji, name: target.name))
+                    } else {
+                        _ = groupIndex(key, emoji: target.emoji, name: target.name)
+                    }
+                }
+                guard let (g, i) = locate(key) else { continue }
+                if let i { groups[g].items[i].moves.append(move) } else { groups[g].moves.append(move) }
+            default:
+                continue
+            }
+        }
+        return groups
+    }
+
+    private var emptyContainers: Set<String> {
+        reorganize.emptyContainerRefs { blockReason($0) != nil }
+    }
+
+    /// Why a nest on this card would be skipped on Apply, if it would.
+    private func blockReason(_ change: AskCategoryChange) -> String? {
+        guard change.action == "nest", let id = change.category_id.flatMap(UUID.init) else { return nil }
+        if let ref = change.parent_ref {
+            return categories.nestBlockReason(categoryId: id, parentId: existingID(ref: ref), parentType: refType(ref))
+        }
+        return categories.nestBlockReason(categoryId: id, parentId: change.parent_id.flatMap(UUID.init), parentType: nil)
+    }
+
+    private static func moveText(_ move: Move) -> String {
+        let noun = move.count == 1 ? "transaction" : "transactions"
+        let what = move.merchant.map { "\($0) · \(move.count)" } ?? "\(move.count) \(noun)"
+        return move.from.map { "\(what) from \($0)" } ?? what
+    }
+
+    private func emojiTile(_ emoji: String, size: CGFloat) -> some View {
+        Text(emoji)
+            .font(.system(size: size * 0.5))
+            .frame(width: size, height: size)
+            .background(AppColors.surfacePrimary)
+            .cornerRadius(size * 0.3)
+    }
+
+    private func tagView(_ tag: String) -> some View {
+        Text(tag)
+            .font(AppFonts.overusedGroteskMedium(size: 12))
+            .foregroundColor(tag == "New" ? AppColors.successForeground
+                             : tag.hasPrefix("Can't") ? AppColors.destructiveForeground : AppColors.foregroundSecondary)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(tag == "New" ? AppColors.successBackground
+                        : tag.hasPrefix("Can't") ? AppColors.destructiveSurface : AppColors.surfacePrimary)
+            .cornerRadius(6)
+    }
+
+    private func movesList(_ moves: [Move], indent: CGFloat) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ForEach(moves, id: \.self) { move in
+                HStack(spacing: 6) {
+                    Image(systemName: "arrow.turn.down.right")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundColor(AppColors.foregroundTertiary)
+                    Text(Self.moveText(move))
+                        .font(AppFonts.overusedGroteskMedium(size: 13))
+                        .foregroundColor(AppColors.foregroundSecondary)
+                }
+            }
+        }
+        .padding(.leading, indent)
+    }
+
+    /// Tree line from the parent's emoji tile down to a subcategory row: a vertical line
+    /// under the parent tile's centre, curving right into the row's tile. The last row's line
+    /// stops at its curve; earlier rows' lines run on to the next row.
+    private struct TreeConnector: View {
+        let isLast: Bool
+        /// Height from the row's top to its tile's centre.
+        let elbowY: CGFloat
+
+        var body: some View {
+            GeometryReader { proxy in
+                Path { path in
+                    let x: CGFloat = 20, radius: CGFloat = 8, end: CGFloat = 36
+                    path.move(to: CGPoint(x: x, y: 0))
+                    path.addLine(to: CGPoint(x: x, y: elbowY - radius))
+                    path.addQuadCurve(to: CGPoint(x: x + radius, y: elbowY), control: CGPoint(x: x, y: elbowY))
+                    path.addLine(to: CGPoint(x: end, y: elbowY))
+                    if !isLast {
+                        path.move(to: CGPoint(x: x, y: elbowY - radius))
+                        path.addLine(to: CGPoint(x: x, y: proxy.size.height))
+                    }
+                }
+                .stroke(AppColors.linePrimary, style: StrokeStyle(lineWidth: 1.5, lineCap: .round))
+            }
+            .frame(width: 40)
+        }
+    }
+
+    private func groupCard(_ group: Group) -> some View {
+        let rowGap: CGFloat = 14, subTile: CGFloat = 30
+        return VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 12) {
+                emojiTile(group.emoji, size: 40)
+                Text(group.name)
+                    .font(AppFonts.overusedGroteskSemiBold(size: 16))
+                    .foregroundColor(AppColors.foregroundPrimary)
+                Spacer(minLength: 8)
+                if let tag = group.tag { tagView(tag) }
+            }
+
+            ForEach(Array(group.items.enumerated()), id: \.element.key) { index, item in
+                HStack(alignment: .top, spacing: 0) {
+                    TreeConnector(isLast: index == group.items.count - 1, elbowY: rowGap + subTile / 2)
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack(spacing: 10) {
+                            emojiTile(item.emoji, size: subTile)
+                            Text(item.name)
+                                .font(AppFonts.overusedGroteskMedium(size: 15))
+                                .foregroundColor(AppColors.foregroundPrimary)
+                            Spacer(minLength: 8)
+                            if let tag = item.tag { tagView(tag) }
+                        }
+                        if !item.moves.isEmpty { movesList(item.moves, indent: 40) }
+                    }
+                    .padding(.top, rowGap)
+                }
+            }
+
+            if !group.moves.isEmpty {
+                movesList(group.moves, indent: 52)
+                    .padding(.top, rowGap)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(16)
+        .background(AppColors.backgroundWhite)
+        .cornerRadius(12)
+    }
+
+    /// Cards shown before "Show all", so Apply stays within reach on a big plan.
+    private static let collapsedGroups = 3
+
+    var body: some View {
+        let plan = self.plan
+        let groups = self.groups
+        let collapsed = !showAll && groups.count > Self.collapsedGroups
+        let visible = collapsed ? Array(groups.prefix(Self.collapsedGroups)) : groups
+        if !isConfirmed, plan.lines.isEmpty, !groups.isEmpty {
+            // Every change is blocked: show why, with nothing to apply.
+            AskConfirmCardShell(
+                label: "ORGANIZE CATEGORIES",
+                title: "These can't be moved",
+                detail: "Categories go two levels deep, so a category with subcategories or a budget can't go under another one.",
+                error: nil,
+                prompt: "Nothing to apply.",
+                actionTitle: "Dismiss",
+                actionColor: AppColors.foregroundSecondary,
+                action: { chat.dismissCategoryReorganize(messageID: messageID) },
+                cards: AnyView(VStack(spacing: 8) {
+                    ForEach(groups, id: \.key) { groupCard($0) }
+                })
+            )
+        } else if !isConfirmed, !plan.lines.isEmpty, !groups.isEmpty {
+            AskConfirmCardShell(
+                label: "ORGANIZE CATEGORIES",
+                title: title(changes: plan.lines.count, moved: plan.moved),
+                detail: nil,
+                error: chat.draftErrors[messageID],
+                prompt: "Apply these changes?",
+                actionTitle: "Apply",
+                actionColor: nil,
+                action: { chat.confirmCategoryReorganize(messageID: messageID, reorganize: reorganize) },
+                moreTitle: collapsed ? "Show all \(groups.count) categories" : nil,
+                onMore: collapsed ? { showAll = true } : nil,
+                cards: AnyView(VStack(spacing: 8) {
+                    ForEach(visible, id: \.key) { groupCard($0) }
+                })
+            )
+        } else if !isConfirmed {
+            Text("Those categories changed since this was suggested. Ask again for a fresh plan.")
+                .font(AppFonts.overusedGroteskMedium(size: 14))
+                .foregroundColor(AppColors.foregroundSecondary)
         }
     }
 }
